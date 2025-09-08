@@ -1,0 +1,6 @@
+*.def
+*~
+*.sif
+bin/
+*-launch-*.sh
+INSTALL/
