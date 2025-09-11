@@ -5,10 +5,14 @@
 Bootstrap: docker
 From: ncarcisl/hpcdev-x86_64:<PLACEHOLDER_IMG_TAG>-latest
 %post
-    echo "source /container/config_env.sh" >> ${SINGULARITY_ENVIRONMENT}
-    echo "export PS1=\"<PLACEHOLDER_IMG_TAG>> \"" >> ${SINGULARITY_ENVIRONMENT}
-    echo "export NCAR_BUILD_ENV=\"<PLACEHOLDER_IMG_TAG>\"" >> ${SINGULARITY_ENVIRONMENT}
-    echo "export LS_COLORS=\"no=00:fi=00:di=01;31:ln=01;34:pi=40;33:so=01;35:bd=40;33;01:cd=40;33;01:or=01;05;37;41:mi=01;05;37;41:ex=01;35:*.cmd=01;32:*.exe=01;32:*.com=01;32:*.btm=01;32:*.bat=01;32:*.tar=01;31:*.tgz=01;31:*.arj=01;31:*.taz=01;31:*.lzh=01;31:*.zip=01;31:*.z=01;31:*.Z=01;31:*.gz=01;31:*.jpg=01;35:*.gif=01;35:*.bmp=01;35:*.xbm=01;35:*.xpm=01;35:\"" >> ${SINGULARITY_ENVIRONMENT}
+    cat <<'EOF' >> /container/config_env.sh
+export NVCC_PREPEND_FLAGS=${NVCC_PREPEND_FLAGS//all-major/native}
+export NCAR_BUILD_ENV="<PLACEHOLDER_IMG_TAG>"
+export LS_COLORS="no=00:fi=00:di=01;31:ln=01;34:pi=40;33:so=01;35:bd=40;33;01:cd=40;33;01:or=01;05;37;41:mi=01;05;37;41:ex=01;35:*.cmd=01;32:*.exe=01;32:*.com=01;32:*.btm=01;32:*.bat=01;32:*.tar=01;31:*.tgz=01;31:*.arj=01;31:*.taz=01;31:*.lzh=01;31:*.zip=01;31:*.z=01;31:*.Z=01;31:*.gz=01;31:*.jpg=01;35:*.gif=01;35:*.bmp=01;35:*.xbm=01;35:*.xpm=01;35:"
+alias ls="ls --color"
+EOF
+    echo "source /container/config_env.sh" >>${SINGULARITY_ENVIRONMENT}
+    echo 'export PS1="<PLACEHOLDER_IMG_TAG>> "' >>${SINGULARITY_ENVIRONMENT}
 
 %runscript
     cat <<EOF

@@ -1,0 +1,144 @@
+#!/bin/bash
+#PBS -N OSU_derecho
+#PBS -A SCSG0001
+#PBS -j oe
+#PBS -q main
+#PBS -l walltime=00:05:00
+#PBS -l select=2:ncpus=64:mpiprocs=4:ompthreads=4:ngpus=4
+
+>/dev/null 2>&1 \
+           module --force purge && \
+           module load ncarenv/24.12 && \
+           module reset && \
+           module load apptainer gcc cuda
+module list
+
+### Interrogate Environment
+env | egrep "PBS|MPI|THREADS" | sort
+nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
+nodes_list=${nodes_list//.hpc.ucar.edu/}
+echo "NODES=\""${nodes_list}"\""
+
+set -x
+export container="almalinux9-gcc-mpich3-cuda"
+export container_img="${container_img:-$(pwd)/libexec/${container}.sif}"
+
+[ -f "${container_img}" ] && echo "container_img=${container_img}" || { echo "cannot locate requested image: ${container_img}"; exit 1; }
+
+apptainer_exec_mpi="$(pwd)/apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh"
+
+cat <<'EOF' > ${apptainer_exec_mpi}
+#!/bin/bash
+
+[ -f "${container_img}" ] || { echo "cannot locate requested image: ${container_img}"; exit 1; }
+
+$(which apptainer) \
+    --quiet \
+    exec \
+    --nv \
+    --bind /glade \
+    --bind /local_scratch \
+    --bind /run --bind /var/run \
+    --bind /opt/cray \
+    --bind /usr/lib64:/host/lib64 \
+    --env LD_LIBRARY_PATH=${CRAY_MPICH_DIR}/lib-abi-mpich:/opt/cray/pe/lib64:${LD_LIBRARY_PATH}:/host/lib64 \
+    --env LD_PRELOAD=/opt/cray/pe/mpich/${CRAY_MPICH_VERSION}/gtl/lib/libmpi_gtl_cuda.so.0 \
+    --env MPICH_SMP_SINGLE_COPY_MODE=NONE \
+    ${container_img} \
+    "${@}"
+EOF
+chmod +x ${apptainer_exec_mpi}
+
+# build
+export FASTEDDY_VERSION=v3.0.0
+export INSTALL_ROOT="$(pwd)/INSTALL/${container}"
+FE_EXE=${INSTALL_ROOT}/fasteddy/${FASTEDDY_VERSION}/bin/FastEddy
+if [[ ! -x ${FE_EXE} ]]; then
+    ./bin/${container} "FASTEDDY_VERSION=${FASTEDDY_VERSION} INSTALL_ROOT=${INSTALL_ROOT} /container/extras/build_fasteddy.sh"
+fi
+
+${apptainer_exec_mpi} ldd ${FE_EXE}
+
+cd /glade/derecho/scratch/benkirk/FE_run/
+rm -rf output && mkdir -p output
+
+mpiexec --no-transfer \
+    set_gpu_rank \
+    ${apptainer_exec_mpi} \
+    ${FE_EXE} \
+    Example02_CBL.in
+
+#             ${container_exe}
+
+# echo "-------------------------------------------------------------------------"
+# echo "ldd, container native:"
+# echo "-------------------------------------------------------------------------"
+# apptainer \
+#     --quiet \
+#     exec \
+#     --nv \
+#     ${container_img} \
+#     ldd "${osu_root}/libexec/osu-micro-benchmarks/mpi/collective/osu_alltoall"
+
+# echo
+# echo "-------------------------------------------------------------------------"
+# echo "ldd, host-binds:"
+# echo "-------------------------------------------------------------------------"
+# ./${apptainer_exec_mpi} \
+#     ldd "${osu_root}/libexec/osu-micro-benchmarks/mpi/collective/osu_alltoall"
+
+# for collective in osu_allreduce osu_alltoall; do
+
+#     container_exe="${osu_root}/libexec/osu-micro-benchmarks/mpi/collective/${collective}"
+#     echo "-------------------------------------------------------------------------"
+#     echo "Running ${container_exe}"
+#     echo "-------------------------------------------------------------------------"
+
+#     mpiexec \
+#         ./${apptainer_exec_mpi} \
+#         ${container_exe} --message-size 4:8192 --iterations 110 --warmup 10
+
+#     nvidia-smi >/dev/null 2>&1 && \
+#         echo "Using GPU managed memory:" && \
+#         mpiexec \
+#             set_gpu_rank \
+#             ./${apptainer_exec_mpi} \
+#             ${container_exe} --message-size 4:8192 --iterations 110 --warmup 10 -d managed
+
+# done
+
+# for pt2pt in osu_latency osu_bibw; do
+
+#     container_exe="${osu_root}/libexec/osu-micro-benchmarks/mpi/pt2pt/${pt2pt}"
+#     echo "-------------------------------------------------------------------------"
+#     echo "Running ${container_exe} inter-node"
+#     echo "-------------------------------------------------------------------------"
+#     mpiexec -n 2 -ppn 1 \
+#             ./${apptainer_exec_mpi} \
+#             ${container_exe}
+
+#     nvidia-smi >/dev/null 2>&1 && \
+#         echo "Using GPU device allocated memory:" && \
+#         mpiexec -n 2 -ppn 1 \
+#                 set_gpu_rank \
+#                 ./${apptainer_exec_mpi} \
+#                 ${container_exe} D D
+
+#     echo "-------------------------------------------------------------------------"
+#     echo "Running ${container_exe} intra-node"
+#     echo "-------------------------------------------------------------------------"
+#     mpiexec -n 2 -ppn 2 \
+#             ./${apptainer_exec_mpi} \
+#             ${container_exe}
+
+#     nvidia-smi >/dev/null 2>&1 && \
+#         echo "Using GPU device allocated memory:" && \
+#         mpiexec -n 2 -ppn 2 \
+#                 set_gpu_rank \
+#                 ./${apptainer_exec_mpi} \
+#                 ${container_exe} D D
+
+# done
+
+
+# echo && echo && echo "Done at $(date)"

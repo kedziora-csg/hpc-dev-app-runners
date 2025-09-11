@@ -1,0 +1,127 @@
+#!/bin/bash
+#PBS -N OSU_casper
+#PBS -A SCSG0001
+#PBS -j oe
+#PBS -q casper
+#PBS -l walltime=00:05:00
+#PBS -l select=2:ncpus=64:mpiprocs=4:ompthreads=4:ngpus=4
+
+>/dev/null 2>&1 \
+           module --force purge && \
+           module load ncarenv/24.12 && \
+           module reset && \
+           module load apptainer gcc cuda
+module list
+
+### Interrogate Environment
+env | egrep "PBS|MPI|THREADS" | sort
+nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
+nodes_list=${nodes_list//.hpc.ucar.edu/}
+echo "NODES=\""${nodes_list}"\""
+
+export container_img="${container_img:-$(pwd)/libexec/almalinux9-gcc14-openmpi-cuda.sif}"
+
+[ -f "${container_img}" ] || { echo "cannot locate requested image: ${container_img}"; exit 1; }
+
+apptainer_exec_mpi="apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh"
+
+cat <<'EOF' > ${apptainer_exec_mpi} && chmod +x ${apptainer_exec_mpi}
+#!/bin/bash
+
+[ -f "${container_img}" ] || { echo "cannot locate requested image: ${container_img}"; exit 1; }
+
+# Set UCX_POSIX_USE_PROC_LINK=n: This environment variable can be set before running your
+# Apptainer container to disable the use of /proc links by the UCX POSIX transport.
+# This is a common workaround to resolve permission denied issues by switching to
+# an alternative communication mode that does not require ptrace capabilities.
+export UCX_POSIX_USE_PROC_LINK=n
+
+$(which apptainer) \
+    --quiet \
+    exec \
+    --nv \
+    --bind /glade \
+    --bind /local_scratch \
+    --bind /proc \
+    --bind /usr/lib64:/host/lib64 \
+    --bind /usr/lpp/mmfs \
+    --bind ${NCAR_ROOT_OPENMPI} \
+    --env LD_LIBRARY_PATH=${NCAR_ROOT_OPENMPI}/lib:/usr/lib64:/host/lib64:/usr/lpp/mmfs/lib \
+   ${container_img} \
+   "${@}"
+EOF
+
+osu_root="/container/osu-micro-benchmarks/7.5"
+
+echo "-------------------------------------------------------------------------"
+echo "ldd, container native:"
+echo "-------------------------------------------------------------------------"
+apptainer \
+    --quiet \
+    exec \
+    --nv \
+    ${container_img} \
+    ldd "${osu_root}/libexec/osu-micro-benchmarks/mpi/collective/osu_alltoall"
+
+echo
+echo "-------------------------------------------------------------------------"
+echo "ldd, host-binds:"
+echo "-------------------------------------------------------------------------"
+./${apptainer_exec_mpi} \
+    ldd "${osu_root}/libexec/osu-micro-benchmarks/mpi/collective/osu_alltoall"
+
+for collective in osu_allreduce osu_alltoall; do
+
+    container_exe="${osu_root}/libexec/osu-micro-benchmarks/mpi/collective/${collective}"
+    echo "-------------------------------------------------------------------------"
+    echo "Running ${container_exe}"
+    echo "-------------------------------------------------------------------------"
+
+    mpiexec \
+        ./${apptainer_exec_mpi} \
+        ${container_exe} --message-size 4:8192 --iterations 110 --warmup 10
+
+    nvidia-smi >/dev/null 2>&1 && \
+        echo "Using GPU managed memory:" && \
+        mpiexec \
+            set_gpu_rank \
+            ./${apptainer_exec_mpi} \
+            ${container_exe} --message-size 4:8192 --iterations 110 --warmup 10 -d managed
+
+done
+
+for pt2pt in osu_latency osu_bibw; do
+
+    container_exe="${osu_root}/libexec/osu-micro-benchmarks/mpi/pt2pt/${pt2pt}"
+    echo "-------------------------------------------------------------------------"
+    echo "Running ${container_exe} inter-node"
+    echo "-------------------------------------------------------------------------"
+    mpiexec -n 2 --map-by ppr:1:node \
+            ./${apptainer_exec_mpi} \
+            ${container_exe}
+
+    nvidia-smi >/dev/null 2>&1 && \
+        echo "Using GPU device allocated memory:" && \
+        mpiexec -n 2 --map-by ppr:1:node \
+                set_gpu_rank \
+                ./${apptainer_exec_mpi} \
+                ${container_exe} D D
+
+    echo "-------------------------------------------------------------------------"
+    echo "Running ${container_exe} intra-node"
+    echo "-------------------------------------------------------------------------"
+    mpiexec -n 2 --map-by ppr:2:node \
+            ./${apptainer_exec_mpi} \
+            ${container_exe}
+
+    nvidia-smi >/dev/null 2>&1 && \
+        echo "Using GPU device allocated memory:" && \
+        mpiexec -n 2 --map-by ppr:2:node \
+                set_gpu_rank \
+                ./${apptainer_exec_mpi} \
+                ${container_exe} D D
+
+done
+
+
+echo && echo && echo "Done at $(date)"
