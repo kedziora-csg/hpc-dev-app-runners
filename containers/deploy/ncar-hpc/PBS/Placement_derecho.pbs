@@ -1,0 +1,147 @@
+#!/bin/bash
+#PBS -N placement_derecho
+#PBS -A SCSG0001
+#PBS -j oe
+#PBS -q main
+#PBS -l walltime=00:15:00
+#PBS -l select=2:ncpus=128:mpiprocs=8:ompthreads=16
+
+#-------------------------------------------------------------------------------
+# Run /container/bin/report_placement inside an Apptainer container on Derecho,
+# using host Cray MPICH via the MPICH ABI shim.
+#
+# Requests whole nodes (ncpus=128) deliberately: with only a couple of cores per
+# node every rank lands on the same chiplet, socket and NUMA node, and the
+# socket / numa / l3 columns cannot tell you anything.
+#
+# Sweeps three bindings so the difference is visible side by side:
+#   A. pinned, 1 thread per rank
+#   B. pinned by depth, 16 threads per rank   <- the realistic hybrid case
+#   C. UNBOUND, for contrast                  <- nallowed jumps to 128
+#
+# Compare with the same binary built natively (see NCAR_HowTo.md); the output
+# format is identical, so `diff` is the comparison.
+#-------------------------------------------------------------------------------
+
+>/dev/null 2>&1 \
+           module --force purge && \
+           module load ncarenv/25.10 && \
+           module reset && \
+           module load gcc/14.3.0 && \
+           module load apptainer
+module list
+
+### Interrogate Environment
+env | egrep "PBS|MPI|THREADS|CRAY_MPICH" | sort
+nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
+nodes_list=${nodes_list//.hpc.ucar.edu/}
+echo "NODES=\""${nodes_list}"\""
+
+export container_img="${container_img:-$(pwd)/libexec/leap-gcc-mpich.sif}"
+
+[ -f "${container_img}" ] && echo "container_img=${container_img}" \
+    || { echo "cannot locate requested image: ${container_img}"; exit 1; }
+
+# Cray MPICH exposes two library directories.  lib/ is the native Cray build;
+# lib-abi-mpich/ is the ABI-compatible shim exporting libmpi.so.12 with stock
+# MPICH's symbol layout.  ONLY the latter can displace the container's own
+# MPICH.  Point at lib/ and every rank silently singleton-initialises into its
+# own MPI_COMM_WORLD of size 1 -- the job "runs", it is just N serial programs.
+CRAY_MPI="${CRAY_MPICH_DIR:-${CRAY_MPICH_PREFIX}}"
+[ -d "${CRAY_MPI}/lib-abi-mpich" ] && echo "ABI shim: ${CRAY_MPI}/lib-abi-mpich" \
+    || { echo "no lib-abi-mpich under '${CRAY_MPI}' -- is cray-mpich loaded?"; exit 1; }
+
+# Prefer the module-provided roots over hardcoded version numbers, which change
+# under us at the next system update.
+PALS_LIB="$(ls -d /opt/cray/pals/*/lib 2>/dev/null | tail -1)"
+FABRIC_LIB="${NCAR_ROOT_LIBFABRIC:+${NCAR_ROOT_LIBFABRIC}/lib64}"
+FABRIC_LIB="${FABRIC_LIB:-$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | tail -1)}"
+
+apptainer_exec_mpi="apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh"
+
+cat <<EOF > ${apptainer_exec_mpi} && chmod +x ${apptainer_exec_mpi}
+#!/bin/bash
+\$(which apptainer) \\
+    --quiet \\
+    exec \\
+    --bind /glade \\
+    --bind /local_scratch \\
+    --bind /run --bind /var/run \\
+    --bind /opt/cray \\
+    --bind /etc/cray \\
+    --bind /usr/lib64:/host_lib64 \\
+    --env LD_LIBRARY_PATH=${CRAY_MPI}/lib-abi-mpich:/opt/cray/pe/lib64:${PALS_LIB}:${FABRIC_LIB}:/usr/lib64:/host_lib64 \\
+    --env MPICH_SMP_SINGLE_COPY_MODE=NONE \\
+    --env MPICH_VERSION_DISPLAY=1 \\
+    ${container_img} \\
+    "\${@}"
+EOF
+
+echo && echo "--- generated launcher ---" && cat ${apptainer_exec_mpi}
+
+exe="/container/bin/report_placement"
+
+#-------------------------------------------------------------------------------
+# Before running anything: prove the shim actually took.  libmpi.so.12 must
+# resolve under /opt/cray, NOT under /container.  If it does not, stop here --
+# the run below would produce N singletons and look almost plausible.
+#-------------------------------------------------------------------------------
+echo
+echo "======================================================================="
+echo "ldd, container native (no host binds):"
+echo "======================================================================="
+apptainer --quiet exec ${container_img} ldd ${exe} | grep -i mpi
+
+echo
+echo "======================================================================="
+echo "ldd, through the launcher (expect /opt/cray):"
+echo "======================================================================="
+./${apptainer_exec_mpi} ldd ${exe} | grep -i mpi
+
+export OMP_PROC_BIND=spread
+export OMP_PLACES=cores
+
+#-------------------------------------------------------------------------------
+# A. one thread per rank, pinned
+#-------------------------------------------------------------------------------
+echo
+echo "======================================================================="
+echo "A. 8 ranks/node x 1 thread, --cpu-bind depth   (expect nallowed 1)"
+echo "======================================================================="
+OMP_NUM_THREADS=1 \
+    mpiexec -n 16 -ppn 8 --cpu-bind depth -d 1 \
+        ./${apptainer_exec_mpi} ${exe}
+
+#-------------------------------------------------------------------------------
+# B. the realistic hybrid case.  Milan puts 8 cores on each L3, so a rank with
+#    16 threads necessarily spans 2 chiplets; watch the l3 column change within
+#    a single rank, and watch socket flip partway through the rank list.
+#-------------------------------------------------------------------------------
+echo
+echo "======================================================================="
+echo "B. 8 ranks/node x 16 threads, --cpu-bind depth  (expect nallowed 16)"
+echo "======================================================================="
+OMP_NUM_THREADS=16 \
+    mpiexec -n 16 -ppn 8 --cpu-bind depth -d 16 \
+        ./${apptainer_exec_mpi} ${exe}
+
+#-------------------------------------------------------------------------------
+# C. the anti-pattern, for contrast: no --cpu-bind.  Every thread reports
+#    nallowed 128 -- free to migrate anywhere on the node -- even though the
+#    cpu column will still look perfectly reasonable.  This is the case the
+#    affinity mask exists to expose.
+#-------------------------------------------------------------------------------
+echo
+echo "======================================================================="
+echo "C. 8 ranks/node x 16 threads, NO --cpu-bind    (expect nallowed 128)"
+echo "======================================================================="
+OMP_NUM_THREADS=16 \
+    mpiexec -n 16 -ppn 8 \
+        ./${apptainer_exec_mpi} ${exe}
+
+#-------------------------------------------------------------------------------
+# Collect the machine-readable rows from all three sweeps for spreadsheet work:
+#   grep '^csv: ' placement_derecho.o<jobid> | cut -d' ' -f2- > placement.csv
+#-------------------------------------------------------------------------------
+
+echo && echo && echo "Done at $(date)"
