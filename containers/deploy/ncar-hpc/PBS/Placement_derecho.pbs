@@ -41,7 +41,8 @@ echo && echo "--- PBS, MPI, and Threads environment ---"
 env | egrep "PBS|MPI|THREADS|CRAY_MPICH" | sort
 nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
 nodes_list=${nodes_list//.hpc.ucar.edu/}
-echo "\nNODES=\""${nodes_list}"\""
+echo 
+echo "NODES=\""${nodes_list}"\""
 
 export container_img="${container_img:-$(pwd)/libexec/leap-gcc-mpich.sif}"
 
