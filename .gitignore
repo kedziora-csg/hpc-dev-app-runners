@@ -2,3 +2,8 @@
 megalinter-reports/
 .vscode
 *.pdf
+
+# PBS job output: <jobname>.o<jobid> and <jobname>.e<jobid>.
+# Digit-anchored so ordinary *.o / *.e names are unaffected.
+*.o[0-9]*
+*.e[0-9]*

@@ -14,10 +14,15 @@
 # node every rank lands on the same chiplet, socket and NUMA node, and the
 # socket / numa / l3 columns cannot tell you anything.
 #
-# Sweeps three bindings so the difference is visible side by side:
-#   A. pinned, 1 thread per rank
-#   B. pinned by depth, 16 threads per rank   <- the realistic hybrid case
-#   C. UNBOUND, for contrast                  <- nallowed jumps to 128
+# Sweeps four bindings so the difference is visible side by side:
+#   A. depth 1, 1 thread per rank    -- packs all 8 ranks onto cores 0-7
+#   B. depth 16, 16 threads per rank <- the realistic hybrid case
+#   C. no --cpu-bind at all          -- the trap: NOT unbound, see below
+#   D. --cpu-bind none + OMP_PROC_BIND=false -- a genuinely unbound baseline
+#
+# C and D are different on purpose.  "Omit the flag" and "ask for none" produce
+# opposite outcomes here, which is the single most surprising thing this script
+# demonstrates.
 #
 # Compare with the same binary built natively (see NCAR_HowTo.md); the output
 # format is identical, so `diff` is the comparison.
@@ -32,10 +37,11 @@
 module list
 
 ### Interrogate Environment
+echo && echo "--- PBS, MPI, and Threads environment ---"
 env | egrep "PBS|MPI|THREADS|CRAY_MPICH" | sort
 nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
 nodes_list=${nodes_list//.hpc.ucar.edu/}
-echo "NODES=\""${nodes_list}"\""
+echo "\nNODES=\""${nodes_list}"\""
 
 export container_img="${container_img:-$(pwd)/libexec/leap-gcc-mpich.sif}"
 
@@ -113,35 +119,84 @@ OMP_NUM_THREADS=1 \
         ./${apptainer_exec_mpi} ${exe}
 
 #-------------------------------------------------------------------------------
-# B. the realistic hybrid case.  Milan puts 8 cores on each L3, so a rank with
-#    16 threads necessarily spans 2 chiplets; watch the l3 column change within
-#    a single rank, and watch socket flip partway through the rank list.
+# B. The realistic hybrid case, and the one to read closely.  MEASURED:
+#
+#    Each rank gets a 16-core block (rank 0 -> 0-15, rank 1 -> 16-31, ...), but
+#    every *thread* reports nallowed 1: PALS hands the rank a 16-core mask, then
+#    OMP_PROC_BIND=spread + OMP_PLACES=cores pins each thread to one core within
+#    it.  Two layers of binding, both doing their job.
+#
+#    Milan puts 8 cores on each L3, so a 16-thread rank straddles 2 chiplets --
+#    watch l3 change mid-rank (threads 0-7 -> l3 0, threads 8-15 -> l3 8).
+#    Across the node: ranks 0-3 on socket 0, 4-7 on socket 1, and 8 distinct
+#    NUMA domains, i.e. these nodes are configured NPS4.
 #-------------------------------------------------------------------------------
 echo
 echo "======================================================================="
-echo "B. 8 ranks/node x 16 threads, --cpu-bind depth  (expect nallowed 16)"
+echo "B. 8 ranks/node x 16 threads, --cpu-bind depth  (16-core rank, 1/thread)"
 echo "======================================================================="
 OMP_NUM_THREADS=16 \
     mpiexec -n 16 -ppn 8 --cpu-bind depth -d 16 \
         ./${apptainer_exec_mpi} ${exe}
 
 #-------------------------------------------------------------------------------
-# C. the anti-pattern, for contrast: no --cpu-bind.  Every thread reports
-#    nallowed 128 -- free to migrate anywhere on the node -- even though the
-#    cpu column will still look perfectly reasonable.  This is the case the
-#    affinity mask exists to expose.
+# C. The trap.  MEASURED on Derecho (job 7014925, 2 x EPYC 7763):
+#
+#    Omitting --cpu-bind does NOT leave threads free.  PALS still binds each
+#    rank to a SINGLE core (rank 0 -> cpu 0, rank 1 -> cpu 1, ...), all 16
+#    OpenMP threads inherit that one-core mask, and OMP_PLACES=cores then finds
+#    exactly one place available -- so every thread lands on it:
+#
+#      MPI rank 0/16 thread  0/16 ... cpu 0 ... nallowed 1 affinity 0
+#      MPI rank 0/16 thread 15/16 ... cpu 0 ... nallowed 1 affinity 0
+#
+#    That is 16 threads time-slicing one core, per rank, while 120 cores idle.
+#    Invisible from the cpu column alone -- rank 0 thread 0 on cpu 0 looks
+#    perfectly normal.  Only nallowed 1 *combined with* every thread reporting
+#    the SAME cpu reveals it.
+#
+#    On Derecho, --cpu-bind is not optional for hybrid jobs: omitting it is
+#    worse than being unbound.  Compare with D.
 #-------------------------------------------------------------------------------
 echo
 echo "======================================================================="
-echo "C. 8 ranks/node x 16 threads, NO --cpu-bind    (expect nallowed 128)"
+echo "C. 8 ranks/node x 16 threads, NO --cpu-bind   (nallowed 1, all on one cpu)"
 echo "======================================================================="
 OMP_NUM_THREADS=16 \
     mpiexec -n 16 -ppn 8 \
         ./${apptainer_exec_mpi} ${exe}
 
 #-------------------------------------------------------------------------------
-# Collect the machine-readable rows from all three sweeps for spreadsheet work:
+# D. A genuinely unbound baseline.  This needs BOTH knobs, which is itself the
+#    lesson -- there are two independent layers of binding:
+#
+#      --cpu-bind none      removes the mask the LAUNCHER (PALS) applies
+#      OMP_PROC_BIND=false  stops the OPENMP RUNTIME re-binding within it
+#
+#    Drop only the first and OMP_PROC_BIND=spread will happily re-pin each
+#    thread to its own core out of all 128 -- nallowed goes back to 1, with the
+#    ranks now overlapping each other across the whole node.  Drop only the
+#    second and the rank stays confined to its PALS mask.
+#
+#    Expectation (to verify, not assume): nallowed 128 and place '-' on every
+#    row, threads free to migrate anywhere on the node.
+#-------------------------------------------------------------------------------
+echo
+echo "======================================================================="
+echo "D. 8 ranks/node x 16 threads, --cpu-bind none + OMP_PROC_BIND=false"
+echo "                                              (expect nallowed 128)"
+echo "======================================================================="
+OMP_NUM_THREADS=16 OMP_PROC_BIND=false \
+    mpiexec -n 16 -ppn 8 --cpu-bind none \
+        ./${apptainer_exec_mpi} ${exe}
+
+#-------------------------------------------------------------------------------
+# Collect the machine-readable rows from all four sweeps for spreadsheet work:
 #   grep '^csv: ' placement_derecho.o<jobid> | cut -d' ' -f2- > placement.csv
+#
+# Useful once loaded:  sort by nallowed to find unpinned threads; count distinct
+# l3 per rank to find chiplet-straddling ranks; pivot cpu by host to find cores
+# with more than one thread on them.
 #-------------------------------------------------------------------------------
 
 echo && echo && echo "Done at $(date)"
