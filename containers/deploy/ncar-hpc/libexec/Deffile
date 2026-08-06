@@ -3,7 +3,7 @@
 # see for example "PLACEHOLDER_IMG_NAME" in Makefile
 
 Bootstrap: docker
-From: ncarcisl/hpcdev-x86_64:<PLACEHOLDER_IMG_TAG>-latest
+From: ghcr.io/kedziora-csg/hpcdev-x86_64:<PLACEHOLDER_IMG_TAG>-latest
 %post
     cat <<'EOF' >> /container/config_env.sh
 export NVCC_PREPEND_FLAGS=${NVCC_PREPEND_FLAGS//all-major/native}

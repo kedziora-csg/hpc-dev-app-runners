@@ -1,0 +1,255 @@
+#!/bin/bash
+#PBS -N placement_opt
+#PBS -A PBS_ACCOUNT_UNSET
+# ^ deliberately not a real allocation: pass your own with
+#       qsub -A <PROJECT> ...
+#   (or use ../submit_placement_matrix.sh --account <PROJECT>).
+#   qsub rejects the placeholder rather than silently charging someone else.
+#PBS -j oe
+#PBS -q main
+#PBS -l walltime=00:30:00
+#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1
+
+#-------------------------------------------------------------------------------
+# Rank/thread decomposition sweep for Derecho, as a template for real workloads.
+#
+# Runs the same job three ways, holding everything else fixed:
+#
+#   name     ranks/node  threads  aligns each rank to
+#   -------  ----------  -------  ------------------------------------------
+#   pureMPI     128         1     one core           (the honest baseline)
+#   ccd          16         8     one CCD / L3       (32 MB shared, no fabric
+#                                                     crossing inside a rank)
+#   numa          8        16     one NUMA domain    (but straddles 2 CCDs)
+#
+# All three satisfy ranks x threads == 128.  That constraint is not cosmetic:
+# --cpu-bind depth packs consecutively from core 0, so a smaller product does
+# not merely idle cores, it crowds every rank onto the low chiplets.
+#
+# Derecho CPU nodes (measured, jobs 7024910/7024919):
+#   2 x EPYC 7763 Milan -- 128 physical cores, SMT ON => 256 logical CPUs
+#   8 NUMA domains (NPS4, 16 cores each) | 16 CCDs (8 cores each, 32 MB L3)
+# Keeping ranks x threads == 128 stays on physical cores 0-127; the SMT siblings
+# at 128-255 are deliberately left alone (they share FPU/vector units, which
+# usually costs more than it gains for FP-bound codes).
+#
+# USAGE
+#   Placement only (verify the layouts, no workload):
+#       qsub Placement_derecho_opt.pbs
+#
+#   Benchmark a real application:
+#       qsub -v APP=/glade/work/$USER/bin/wrf.exe Placement_derecho_opt.pbs
+#       qsub -v APP=/container/osu-micro-benchmarks/7.5/libexec/\
+#osu-micro-benchmarks/mpi/collective/osu_alltoall,APP_ARGS="-m 4:8192" ...
+#
+#   Run bare metal instead of through the container:
+#       qsub -v RUN_MODE=native,APP=./my_exe Placement_derecho_opt.pbs
+#
+# Each configuration prints a placement report first, then a PASS/FAIL summary of
+# whether the binding is what was asked for, then the timed workload.  Placement
+# is therefore never a confounder in the timings.
+#-------------------------------------------------------------------------------
+
+>/dev/null 2>&1 \
+           module --force purge && \
+           module load ncarenv/25.10 && \
+           module reset && \
+           module load gcc/14.3.0 && \
+           module load apptainer
+module list
+
+#-------------------------------------------------------------------------------
+# Knobs
+#-------------------------------------------------------------------------------
+APP="${APP:-}"                       # '', or hpcg, or a path to your executable
+APP_ARGS="${APP_ARGS:-}"
+RUN_MODE="${RUN_MODE:-container}"    # container | native
+NNODES="$(sort -u $PBS_NODEFILE | wc -l)"
+
+# Where libexec/ and the .sif images live.  Jobs on Derecho start in the
+# submission directory, so $(pwd) is right for a hand-qsub from ncar-hpc/;
+# submit_placement_matrix.sh passes this explicitly because it needs each job to
+# write into its own results directory.
+NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-$(pwd)}"
+RESULTS_DIR="${RESULTS_DIR:-$(pwd)}"
+
+echo
+echo "APP           = ${APP:-<none: placement verification only>}"
+echo "APP_ARGS      = ${APP_ARGS}"
+echo "RUN_MODE      = ${RUN_MODE}"
+echo "NCAR_HPC_ROOT = ${NCAR_HPC_ROOT}"
+echo "NNODES        = ${NNODES}"
+nodes_list=$(sort -u $PBS_NODEFILE); echo "NODES    = ${nodes_list//.hpc.ucar.edu/}"
+
+#-------------------------------------------------------------------------------
+# Launcher.  In container mode every rank execs apptainer with host Cray MPICH
+# swapped in via the MPICH ABI shim; in native mode the launcher is a no-op.
+#
+# lib-abi-mpich, NOT lib: only the ABI directory exports a libmpi.so.12 that can
+# displace the container's own.  Get this wrong and every rank silently
+# singleton-initialises -- N serial programs that look like a running job.
+#-------------------------------------------------------------------------------
+if [ "${RUN_MODE}" = "container" ]; then
+    # leap because openSUSE Leap 15 is built from the same SLE 15 SP6 sources as
+    # Derecho's host OS; oneapi because intel/2025.2.1 is the site default
+    # compiler, so a native `CC` reference build uses the same toolchain and the
+    # compiler stops being a confound in the timings.
+    export container_img="${container_img:-${NCAR_HPC_ROOT}/libexec/leap-oneapi-mpich.sif}"
+
+    # Everything MPI-family-specific lives in the shared helper: the Cray MPICH
+    # ABI shim for mpich/mpich3, the host-OpenMPI bind for openmpi.  Family is
+    # sniffed from the image name unless container_mpi is set explicitly.
+    . "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
+
+    launcher="./apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh"
+    make_apptainer_launcher "${launcher}" "${container_img}" "${container_mpi:-}" \
+        || exit 1
+
+    REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
+
+    echo && echo "--- generated launcher ---" && cat ${launcher}
+    echo && echo "--- shim check: the MPI below must come from the HOST ---"
+    ${launcher} ldd ${REPORT_EXE} | grep -i "libmpi" \
+        || { echo "cannot ldd ${REPORT_EXE}"; exit 1; }
+else
+    launcher=""
+    REPORT_EXE="${REPORT_EXE:-${NCAR_HPC_ROOT}/report_placement_native}"
+    if [ ! -x "${REPORT_EXE}" ]; then
+        echo "building ${REPORT_EXE} with the Cray wrappers ..."
+        CC -fopenmp -o "${REPORT_EXE}" "${NCAR_HPC_ROOT}/../../../scripts/report_placement.cxx" \
+            || { echo "native build failed"; exit 1; }
+    fi
+fi
+
+#-------------------------------------------------------------------------------
+# The placement validator lives in libexec so the control script and the other
+# PBS scripts share one copy.  Provides check_placement (prints) and
+# check_placement_rc (silent, returns 0/1).
+#-------------------------------------------------------------------------------
+. "${NCAR_HPC_ROOT}/libexec/check_placement.sh" \
+    || { echo "cannot locate ${NCAR_HPC_ROOT}/libexec/check_placement.sh"; exit 1; }
+
+# All output lands in its own directory, so parallel jobs (one per image, see
+# submit_placement_matrix.sh) cannot collide over report files, timings.txt, or
+# the generated launcher.
+mkdir -p "${RESULTS_DIR}" && cd "${RESULTS_DIR}" \
+    || { echo "cannot use RESULTS_DIR=${RESULTS_DIR}"; exit 1; }
+echo && echo "results directory: ${RESULTS_DIR}"
+
+#-------------------------------------------------------------------------------
+# The sweep.  name : ranks-per-node : threads : expected L3 groups per rank
+#-------------------------------------------------------------------------------
+CONFIGS=(
+    "pureMPI:128:1:1"
+    "ccd:16:8:1"
+    "numa:8:16:2"
+)
+
+export OMP_PLACES=cores
+export OMP_PROC_BIND=close     # == spread when threads == cores in the mask
+
+#-------------------------------------------------------------------------------
+# APP=hpcg is a shorthand: build HPCG inside the image if it is not already
+# there, then benchmark it.  Anything else in APP is taken as a path to run
+# as-is.
+#
+# HPCG reads ./hpcg.dat from the CURRENT DIRECTORY, so each configuration gets
+# its own directory below and writes its own hpcg.dat.  nx/ny/nz are the LOCAL
+# problem per rank and must be multiples of 8; 104^3 puts the working set well
+# past Milan's 32 MB L3, which is what makes this a memory-bandwidth measurement
+# rather than a cache benchmark.
+#-------------------------------------------------------------------------------
+HPCG_NX="${HPCG_NX:-104}"
+HPCG_SECONDS="${HPCG_SECONDS:-60}"
+
+if [ "${APP}" = "hpcg" ]; then
+    APP="/container/bin/xhpcg"
+    if ! ${launcher} test -x ${APP} 2>/dev/null; then
+        echo
+        echo "--- xhpcg not in the image; building it now ---"
+        ${launcher} bash -lc "HPCG_RUN=0 /container/extras/build_hpcg.sh" \
+            || { echo "HPCG build failed"; exit 1; }
+    fi
+    echo "HPCG: ${HPCG_NX}^3 per rank, ${HPCG_SECONDS}s"
+    echo "NOTE: runs under 1800s are NOT valid HPCG submissions -- comparison only."
+fi
+
+for cfg in "${CONFIGS[@]}"; do
+    IFS=: read -r name ppn nthreads want_l3 <<< "${cfg}"
+    nranks=$(( NNODES * ppn ))
+
+    echo
+    echo "======================================================================="
+    echo "${name}: ${ppn} ranks/node x ${nthreads} threads   (${nranks} ranks total)"
+    echo "  mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind depth -d ${nthreads}"
+    echo "======================================================================="
+
+    export OMP_NUM_THREADS=${nthreads}
+    out="placement_${name}.out"
+
+    mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind depth -d ${nthreads} \
+        ${launcher} ${REPORT_EXE} > "${out}" 2>&1
+
+    grep -E '^#' "${out}" | head -5
+    echo "  --- first rank ---"
+    grep '^MPI rank 0/' "${out}" | head -4
+    echo "  --- placement check ---"
+    check_placement "${out}" "${want_l3}"
+
+    if [ -n "${APP}" ]; then
+        echo "  --- timed run: ${APP} ${APP_ARGS} ---"
+
+        # Each configuration runs in its own directory: HPCG both reads hpcg.dat
+        # and writes HPCG-Benchmark_*.txt relative to the cwd, so sharing one
+        # directory across configurations would have them overwrite each other.
+        rundir="run_${name}"
+        mkdir -p "${rundir}" && cd "${rundir}"
+        case "${APP}" in
+            */xhpcg)
+                printf 'HPCG benchmark input file\n%s %ss -- comparison only, not a valid submission\n%s %s %s\n%s\n' \
+                    "${name}" "${HPCG_SECONDS}" \
+                    "${HPCG_NX}" "${HPCG_NX}" "${HPCG_NX}" "${HPCG_SECONDS}" > hpcg.dat
+                ;;
+        esac
+
+        t0=${SECONDS}
+        mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind depth -d ${nthreads} \
+            ${launcher} ${APP} ${APP_ARGS}
+        rc=$?
+        wall=$(( SECONDS - t0 ))
+
+        # Surface HPCG's own verdict; a run that fails validation must not be
+        # compared on wall time.
+        score="-"
+        if [ -f HPCG-Benchmark*.txt ] 2>/dev/null || ls HPCG-Benchmark*.txt >/dev/null 2>&1; then
+            grep -hE "Final Summary::HPCG result is" HPCG-Benchmark*.txt 2>/dev/null | sed 's/^/    /'
+            score="$(grep -hoE 'GFLOP/s rating of=[0-9.]+' HPCG-Benchmark*.txt 2>/dev/null \
+                     | tail -1 | cut -d= -f2)"
+            [ -n "${score}" ] || score="-"
+        fi
+        cd ..
+
+        echo "  ${name}: wall=${wall}s  exit=${rc}  gflops=${score}"
+        echo "${name} ${wall} ${rc} ${score}" >> timings.txt
+    fi
+done
+
+#-------------------------------------------------------------------------------
+if [ -n "${APP}" ] && [ -f timings.txt ]; then
+    echo
+    echo "======================================================================="
+    echo "SUMMARY  (${APP})"
+    echo "======================================================================="
+    printf "  %-10s %8s %6s %10s\n" config wall_s exit gflops
+    while read -r n t r g; do
+        printf "  %-10s %8s %6s %10s\n" "$n" "$t" "$r" "${g:--}"
+    done < timings.txt
+    echo
+    echo "  Lowest wall time (or highest GFLOP/s) wins, but only compare rows"
+    echo "  whose placement check passed -- a mis-bound run is measuring the"
+    echo "  binding, not the code."
+fi
+
+# Machine-readable rows from every configuration, for spreadsheet work:
+#   cat placement_*.out | grep '^csv: ' | cut -d' ' -f2- > placement.csv
+echo && echo "Done at $(date)"

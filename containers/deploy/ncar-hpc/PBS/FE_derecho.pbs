@@ -1,6 +1,10 @@
 #!/bin/bash
 #PBS -N OSU_derecho
-#PBS -A SCSG0001
+#PBS -A PBS_ACCOUNT_UNSET
+# ^ deliberately not a real allocation: pass your own with
+#       qsub -A <PROJECT> ...
+#   (or use ../submit_placement_matrix.sh --account <PROJECT>).
+#   qsub rejects the placeholder rather than silently charging someone else.
 #PBS -j oe
 #PBS -q main
 #PBS -l walltime=00:05:00
@@ -59,7 +63,10 @@ fi
 
 ${apptainer_exec_mpi} ldd ${FE_EXE}
 
-cd /glade/derecho/scratch/benkirk/FE_run/
+# Run directory: defaults to your own scratch rather than a hardcoded user.
+FE_RUN_DIR="${FE_RUN_DIR:-/glade/derecho/scratch/${USER}/FE_run}"
+mkdir -p "${FE_RUN_DIR}" && cd "${FE_RUN_DIR}" \
+    || { echo "cannot use FE_RUN_DIR=${FE_RUN_DIR}"; exit 1; }
 rm -rf output && mkdir -p output
 
 mpiexec --no-transfer \

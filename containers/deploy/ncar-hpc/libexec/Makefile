@@ -11,6 +11,24 @@ cuda_images := $(subst .sif,-cuda.sif,$(cpu_images))
 all_images :=  $(cuda_images) $(cpu_images)
 all: $(all_images)
 
+# The blessed Derecho deployment set: leap x {oneapi, gcc14, nvhpc} x {mpich,
+# openmpi}.  leap because openSUSE Leap 15 is built from the same SLE 15 SP6
+# sources as Derecho's host OS; those three compilers because they are the ones
+# NCAR provides modules for (gcc14 matches gcc/14.3.0 exactly); mpich because
+# only MPICH can be displaced by Cray MPICH's ABI shim, openmpi to test the
+# alternative.  Used by ../submit_placement_matrix.sh.
+derecho_images := leap-oneapi-mpich.sif \
+                  leap-gcc14-mpich.sif \
+                  leap-nvhpc-mpich.sif \
+                  leap-oneapi-openmpi.sif \
+                  leap-gcc14-openmpi.sif \
+                  leap-nvhpc-openmpi.sif
+
+derecho: $(derecho_images)
+
+echo-derecho:
+	@echo "$(derecho_images)"
+
 echo:
 	@echo "$(all_images)"
 

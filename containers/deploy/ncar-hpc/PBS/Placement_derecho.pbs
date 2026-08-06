@@ -1,6 +1,10 @@
 #!/bin/bash
 #PBS -N placement_derecho
-#PBS -A SCSG0001
+#PBS -A PBS_ACCOUNT_UNSET
+# ^ deliberately not a real allocation: pass your own with
+#       qsub -A <PROJECT> ...
+#   (or use ../submit_placement_matrix.sh --account <PROJECT>).
+#   qsub rejects the placeholder rather than silently charging someone else.
 #PBS -j oe
 #PBS -q main
 #PBS -l walltime=00:15:00
@@ -43,161 +47,114 @@ nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
 nodes_list=${nodes_list//.hpc.ucar.edu/}
 echo 
 echo "NODES=\""${nodes_list}"\""
+NNODES="$(sort -u $PBS_NODEFILE | wc -l)"
 
-export container_img="${container_img:-$(pwd)/libexec/leap-gcc-mpich.sif}"
+#-------------------------------------------------------------------------------
+# Integration test over the blessed Derecho image set.  For each image: build the
+# launcher, prove the ABI shim actually displaced the container's MPI, and run
+# two sweeps -- the correct binding, and the classic trap.  Emits a PASS/FAIL
+# matrix at the end.
+#
+# Default set comes from libexec/Makefile so there is one definition of "the six".
+# Override with:  qsub -v container_img=/path/to/one.sif ...
+#-------------------------------------------------------------------------------
+NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-$(pwd)}"
 
-[ -f "${container_img}" ] && echo "container_img=${container_img}" \
-    || { echo "cannot locate requested image: ${container_img}"; exit 1; }
+. "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
+. "${NCAR_HPC_ROOT}/libexec/check_placement.sh"
 
-# Cray MPICH exposes two library directories.  lib/ is the native Cray build;
-# lib-abi-mpich/ is the ABI-compatible shim exporting libmpi.so.12 with stock
-# MPICH's symbol layout.  ONLY the latter can displace the container's own
-# MPICH.  Point at lib/ and every rank silently singleton-initialises into its
-# own MPI_COMM_WORLD of size 1 -- the job "runs", it is just N serial programs.
-CRAY_MPI="${CRAY_MPICH_DIR:-${CRAY_MPICH_PREFIX}}"
-[ -d "${CRAY_MPI}/lib-abi-mpich" ] && echo "ABI shim: ${CRAY_MPI}/lib-abi-mpich" \
-    || { echo "no lib-abi-mpich under '${CRAY_MPI}' -- is cray-mpich loaded?"; exit 1; }
-
-# Prefer the module-provided roots over hardcoded version numbers, which change
-# under us at the next system update.
-PALS_LIB="$(ls -d /opt/cray/pals/*/lib 2>/dev/null | tail -1)"
-FABRIC_LIB="${NCAR_ROOT_LIBFABRIC:+${NCAR_ROOT_LIBFABRIC}/lib64}"
-FABRIC_LIB="${FABRIC_LIB:-$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | tail -1)}"
-
-apptainer_exec_mpi="apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh"
-
-cat <<EOF > ${apptainer_exec_mpi} && chmod +x ${apptainer_exec_mpi}
-#!/bin/bash
-\$(which apptainer) \\
-    --quiet \\
-    exec \\
-    --bind /glade \\
-    --bind /local_scratch \\
-    --bind /run --bind /var/run \\
-    --bind /opt/cray \\
-    --bind /etc/cray \\
-    --bind /usr/lib64:/host_lib64 \\
-    --env LD_LIBRARY_PATH=${CRAY_MPI}/lib-abi-mpich:/opt/cray/pe/lib64:${PALS_LIB}:${FABRIC_LIB}:/usr/lib64:/host_lib64 \\
-    --env MPICH_SMP_SINGLE_COPY_MODE=NONE \\
-    --env MPICH_VERSION_DISPLAY=1 \\
-    ${container_img} \\
-    "\${@}"
-EOF
-
-echo && echo "--- generated launcher ---" && cat ${apptainer_exec_mpi}
+if [ -n "${container_img:-}" ]; then
+    IMAGES="${container_img}"
+else
+    IMAGES=""
+    for i in $(cd "${NCAR_HPC_ROOT}/libexec" && make --no-print-directory echo-derecho); do
+        IMAGES="${IMAGES} ${NCAR_HPC_ROOT}/libexec/${i}"
+    done
+fi
 
 exe="/container/bin/report_placement"
-
-#-------------------------------------------------------------------------------
-# Before running anything: prove the shim actually took.  libmpi.so.12 must
-# resolve under /opt/cray, NOT under /container.  If it does not, stop here --
-# the run below would produce N singletons and look almost plausible.
-#-------------------------------------------------------------------------------
-echo
-echo "======================================================================="
-echo "ldd, container native (no host binds):"
-echo "======================================================================="
-apptainer --quiet exec ${container_img} ldd ${exe} | grep -i mpi
-
-echo
-echo "======================================================================="
-echo "ldd, through the launcher (expect /opt/cray):"
-echo "======================================================================="
-./${apptainer_exec_mpi} ldd ${exe} | grep -i mpi
+results=""
 
 export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
-#-------------------------------------------------------------------------------
-# A. one thread per rank, pinned
+for img in ${IMAGES}; do
+    tag="$(basename ${img} .sif)"
+
+    echo
+    echo "#######################################################################"
+    echo "# ${tag}"
+    echo "#######################################################################"
+
+    if [ ! -f "${img}" ]; then
+        echo "  MISSING image -- build it with: cd libexec && make derecho"
+        results="${results}\n${tag} SKIP SKIP no-image"
+        continue
+    fi
+
+    launcher="./apptainer-launch-${NCAR_HOST}-${tag}.sh"
+    if ! make_apptainer_launcher "${launcher}" "${img}" "${container_mpi:-}"; then
+        results="${results}\n${tag} FAIL FAIL launcher"
+        continue
+    fi
+
+    #---------------------------------------------------------------------------
+    # Does the host MPI actually displace the container's?  If libmpi still
+    # resolves under /container the run below would produce N singletons and
+    # look almost plausible, so stop here rather than mislead.
+    #---------------------------------------------------------------------------
+    echo "  --- ldd: container native ---"
+    apptainer --quiet exec ${img} ldd ${exe} 2>/dev/null | grep -i "libmpi" | sed 's/^/    /'
+    echo "  --- ldd: through the launcher (must be a HOST path) ---"
+    host_mpi="$(${launcher} ldd ${exe} 2>/dev/null | grep -i 'libmpi\.so')"
+    echo "${host_mpi}" | sed 's/^/    /'
+    case "${host_mpi}" in
+        *"/container/"*|"")
+            echo "    *** shim did NOT take -- skipping runs for ${tag} ***"
+            results="${results}\n${tag} FAIL FAIL no-shim"
+            continue
+            ;;
+    esac
+
+    #---------------------------------------------------------------------------
+    # A: 8 ranks/node x 16 threads, depth-bound.  Each rank gets 16 cores and
+    #    therefore straddles two of Milan's 8-core L3 groups -> want 2.
+    #---------------------------------------------------------------------------
+    echo "  --- A: 8 ranks/node x 16 threads, --cpu-bind depth -d 16 ---"
+    OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) -ppn 8 --cpu-bind depth -d 16 \
+        ${launcher} ${exe} > "placement_${tag}_bound.out" 2>&1
+    grep -m1 "^# mpi" "placement_${tag}_bound.out" | sed 's/^/    /'
+    check_placement "placement_${tag}_bound.out" 2
+    check_placement_rc "placement_${tag}_bound.out" 2 && a=PASS || a=FAIL
+
+    #---------------------------------------------------------------------------
+    # B: the trap -- no --cpu-bind at all.  PALS still pins each rank to ONE
+    #    core, so all 16 threads pile onto it.  This SHOULD fail the check; a
+    #    PASS here would mean the trap stopped reproducing.
+    #---------------------------------------------------------------------------
+    echo "  --- B: same, but NO --cpu-bind (expect the trap) ---"
+    OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) -ppn 8 \
+        ${launcher} ${exe} > "placement_${tag}_trap.out" 2>&1
+    check_placement "placement_${tag}_trap.out" 1
+    check_placement_rc "placement_${tag}_trap.out" 1 && b=UNEXPECTED-PASS || b=trap-reproduced
+
+    results="${results}\n${tag} ${a} ${b} ok"
+done
+
 #-------------------------------------------------------------------------------
 echo
 echo "======================================================================="
-echo "A. 8 ranks/node x 1 thread, --cpu-bind depth   (expect nallowed 1)"
+echo "INTEGRATION MATRIX"
 echo "======================================================================="
-OMP_NUM_THREADS=1 \
-    mpiexec -n 16 -ppn 8 --cpu-bind depth -d 1 \
-        ./${apptainer_exec_mpi} ${exe}
-
-#-------------------------------------------------------------------------------
-# B. The realistic hybrid case, and the one to read closely.  MEASURED:
-#
-#    Each rank gets a 16-core block (rank 0 -> 0-15, rank 1 -> 16-31, ...), but
-#    every *thread* reports nallowed 1: PALS hands the rank a 16-core mask, then
-#    OMP_PROC_BIND=spread + OMP_PLACES=cores pins each thread to one core within
-#    it.  Two layers of binding, both doing their job.
-#
-#    Milan puts 8 cores on each L3, so a 16-thread rank straddles 2 chiplets --
-#    watch l3 change mid-rank (threads 0-7 -> l3 0, threads 8-15 -> l3 8).
-#    Across the node: ranks 0-3 on socket 0, 4-7 on socket 1, and 8 distinct
-#    NUMA domains, i.e. these nodes are configured NPS4.
-#-------------------------------------------------------------------------------
+printf "  %-28s %-6s %-18s %s\n" IMAGE BOUND UNBOUND NOTE
+printf "  %-28s %-6s %-18s %s\n" ---------------------------- ------ ------------------ ----
+echo -e "${results}" | while read -r t a b n; do
+    [ -n "${t}" ] || continue
+    printf "  %-28s %-6s %-18s %s\n" "${t}" "${a}" "${b}" "${n}"
+done
 echo
-echo "======================================================================="
-echo "B. 8 ranks/node x 16 threads, --cpu-bind depth  (16-core rank, 1/thread)"
-echo "======================================================================="
-OMP_NUM_THREADS=16 \
-    mpiexec -n 16 -ppn 8 --cpu-bind depth -d 16 \
-        ./${apptainer_exec_mpi} ${exe}
+echo "  BOUND=PASS means the ABI shim worked and placement was as requested."
+echo "  UNBOUND=trap-reproduced is the EXPECTED result -- omitting --cpu-bind"
+echo "  pins each rank to a single core, and the checker catches it."
 
-#-------------------------------------------------------------------------------
-# C. The trap.  MEASURED on Derecho (job 7014925, 2 x EPYC 7763):
-#
-#    Omitting --cpu-bind does NOT leave threads free.  PALS still binds each
-#    rank to a SINGLE core (rank 0 -> cpu 0, rank 1 -> cpu 1, ...), all 16
-#    OpenMP threads inherit that one-core mask, and OMP_PLACES=cores then finds
-#    exactly one place available -- so every thread lands on it:
-#
-#      MPI rank 0/16 thread  0/16 ... cpu 0 ... nallowed 1 affinity 0
-#      MPI rank 0/16 thread 15/16 ... cpu 0 ... nallowed 1 affinity 0
-#
-#    That is 16 threads time-slicing one core, per rank, while 120 cores idle.
-#    Invisible from the cpu column alone -- rank 0 thread 0 on cpu 0 looks
-#    perfectly normal.  Only nallowed 1 *combined with* every thread reporting
-#    the SAME cpu reveals it.
-#
-#    On Derecho, --cpu-bind is not optional for hybrid jobs: omitting it is
-#    worse than being unbound.  Compare with D.
-#-------------------------------------------------------------------------------
-echo
-echo "======================================================================="
-echo "C. 8 ranks/node x 16 threads, NO --cpu-bind   (nallowed 1, all on one cpu)"
-echo "======================================================================="
-OMP_NUM_THREADS=16 \
-    mpiexec -n 16 -ppn 8 \
-        ./${apptainer_exec_mpi} ${exe}
-
-#-------------------------------------------------------------------------------
-# D. A genuinely unbound baseline.  This needs BOTH knobs, which is itself the
-#    lesson -- there are two independent layers of binding:
-#
-#      --cpu-bind none      removes the mask the LAUNCHER (PALS) applies
-#      OMP_PROC_BIND=false  stops the OPENMP RUNTIME re-binding within it
-#
-#    Drop only the first and OMP_PROC_BIND=spread will happily re-pin each
-#    thread to its own core out of all 128 -- nallowed goes back to 1, with the
-#    ranks now overlapping each other across the whole node.  Drop only the
-#    second and the rank stays confined to its PALS mask.
-#
-#    Expectation (to verify, not assume): nallowed 128 and place '-' on every
-#    row, threads free to migrate anywhere on the node.
-#-------------------------------------------------------------------------------
-echo
-echo "======================================================================="
-echo "D. 8 ranks/node x 16 threads, --cpu-bind none + OMP_PROC_BIND=false"
-echo "                                              (expect nallowed 128)"
-echo "======================================================================="
-OMP_NUM_THREADS=16 OMP_PROC_BIND=false \
-    mpiexec -n 16 -ppn 8 --cpu-bind none \
-        ./${apptainer_exec_mpi} ${exe}
-
-#-------------------------------------------------------------------------------
-# Collect the machine-readable rows from all four sweeps for spreadsheet work:
-#   grep '^csv: ' placement_derecho.o<jobid> | cut -d' ' -f2- > placement.csv
-#
-# Useful once loaded:  sort by nallowed to find unpinned threads; count distinct
-# l3 per rank to find chiplet-straddling ranks; pivot cpu by host to find cores
-# with more than one thread on them.
-#-------------------------------------------------------------------------------
-
-echo && echo && echo "Done at $(date)"
+echo && echo "Done at $(date)"
