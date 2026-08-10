@@ -72,6 +72,8 @@ make_apptainer_launcher () {
     --bind /opt/cray --bind /etc/cray \
     --bind /usr/lib64:/host_lib64'
 
+    echo "gk: in make_apptainer_launcher"
+
     case "${family}" in
         mpich|mpich3)
             #-------------------------------------------------------------------
@@ -110,6 +112,9 @@ make_apptainer_launcher () {
             # check the '# mpi' header line of report_placement to see which
             # library actually loaded.
             #-------------------------------------------------------------------
+            echo "gk: in openmpi case, issuing `module load openmpi`"
+            module load openmpi
+            
             local ompi_root="${NCAR_ROOT_OPENMPI:-}"
             [ -n "${ompi_root}" ] || {
                 echo "make_apptainer_launcher: NCAR_ROOT_OPENMPI is unset."
@@ -135,6 +140,10 @@ make_apptainer_launcher () {
             return 1
             ;;
     esac
+
+    echo "gk: making launcher for ${img} (family=${family}) in dir $(pwd)"
+    echo "gk: outfile=${outfile}"
+    echo 
 
     cat <<EOF > "${outfile}" && chmod +x "${outfile}"
 #!/bin/bash
