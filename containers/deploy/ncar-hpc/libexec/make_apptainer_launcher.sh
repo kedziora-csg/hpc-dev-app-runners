@@ -35,6 +35,19 @@ _launcher_common_paths () {
     PALS_LIB="$(ls -d /opt/cray/pals/*/lib 2>/dev/null | tail -1)"
     FABRIC_LIB="${NCAR_ROOT_LIBFABRIC:+${NCAR_ROOT_LIBFABRIC}/lib64}"
     FABRIC_LIB="${FABRIC_LIB:-$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | tail -1)}"
+    # GPFS (IBM Spectrum Scale).  The host resolves libgpfs.so through its own
+    # /etc/ld.so.conf; the container has its own, so the directory has to be
+    # named explicitly -- see the GPFS note in the openmpi arm below.
+    GPFS_ROOT="/usr/lpp/mmfs"
+    GPFS_LIB="${GPFS_ROOT}/lib"
+}
+
+# Emit "--bind <dir>" only when <dir> exists on the host.  Apptainer treats a
+# missing bind SOURCE as a fatal error, so an unconditional bind of a
+# site-specific path (GPFS, Cray) turns "this filesystem isn't here" into
+# "the job won't start" on any host that lacks it.
+_bind_if_present () {
+    [ -d "$1" ] && echo "--bind $1"
 }
 
 # Join arguments with ':', dropping any that are empty or name a nonexistent
@@ -166,6 +179,9 @@ make_apptainer_launcher () {
     --bind /run --bind /var/run \
     --bind /opt/cray --bind /etc/cray \
     --bind /usr/lib64:/host_lib64'
+    # GPFS: needed by any host MPI whose ROMIO carries the GPFS ADIO backend
+    # (Derecho/Casper OpenMPI does).  Harmless for the others.
+    binds="${binds} $(_bind_if_present "${GPFS_ROOT}")"
 
     case "${family}" in
         mpich|mpich3)
@@ -185,7 +201,8 @@ make_apptainer_launcher () {
                 return 1
             }
             ld_path="$(_join_libpath "${cray_mpi}/lib-abi-mpich" /opt/cray/pe/lib64 \
-                                     "${PALS_LIB}" "${FABRIC_LIB}" /usr/lib64):/host_lib64"
+                                     "${PALS_LIB}" "${FABRIC_LIB}" "${GPFS_LIB}" \
+                                     /usr/lib64):/host_lib64"
             # XPMEM/CMA single-copy needs ptrace visibility the container
             # namespace does not have.
             env_lines='    --env MPICH_SMP_SINGLE_COPY_MODE=NONE \
@@ -204,8 +221,16 @@ make_apptainer_launcher () {
             # adapted to Derecho's paths.  Treat it as a starting hypothesis, and
             # check the '# mpi' header line of report_placement to see which
             # library actually loaded.
+            #
+            # GPFS: NCAR's OpenMPI is built with ROMIO's GPFS ADIO backend, so
+            # libmpi.so.40 carries a hard NEEDED on libgpfs.so.  On the host that
+            # resolves out of /etc/ld.so.conf; inside the container it does not
+            # exist at all, and every rank dies before main() with
+            #     libgpfs.so: cannot open shared object file
+            # Hence /usr/lpp/mmfs is bound above and its lib/ is on the path
+            # below.  Cray MPICH's ABI shim has no such dependency, which is why
+            # only this arm needed it.
             #-------------------------------------------------------------------
-            echo "gk: in openmpi case"
             # Host OpenMPI is normally loaded by load_host_modules (compiler
             # first, then the matching openmpi build).  Fall back to loading it
             # here so a standalone call still resolves NCAR_ROOT_OPENMPI.
@@ -222,11 +247,19 @@ make_apptainer_launcher () {
             binds="${binds} \\
     --bind ${ompi_root}"
             ld_path="$(_join_libpath "${ompi_root}/lib" /opt/cray/pe/lib64 \
-                                     "${PALS_LIB}" "${FABRIC_LIB}" /usr/lib64):/host_lib64"
+                                     "${PALS_LIB}" "${FABRIC_LIB}" "${GPFS_LIB}" \
+                                     /usr/lib64):/host_lib64"
             # Avoid UCX poking /proc of other ranks, which the container
             # namespace forbids (same reason as the Casper script).
-            env_lines='    --env UCX_POSIX_USE_PROC_LINK=n \
-    --env OMPI_MCA_btl_vader_single_copy_mechanism=none \'
+            #
+            # OPAL_PREFIX pins the host OpenMPI's idea of its own install root.
+            # Open MPI normally derives it from the runtime location of
+            # libopen-pal, but the container also ships an OpenMPI under
+            # /container; naming it explicitly guarantees the MCA components,
+            # help files and wrapper data come from the HOST tree we just bound.
+            env_lines="    --env UCX_POSIX_USE_PROC_LINK=n \\
+    --env OMPI_MCA_btl_vader_single_copy_mechanism=none \\
+    --env OPAL_PREFIX=${ompi_root} \\"
             ;;
 
         *)

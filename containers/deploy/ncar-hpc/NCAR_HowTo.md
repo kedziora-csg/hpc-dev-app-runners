@@ -23,7 +23,8 @@ All NCAR-specific deployment files are located under [containers/deploy/ncar-hpc
   The PBS test scripts dynamically generate a launching wrapper `apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh` inside the PBS job environment.
   The launcher overrides performance-critical environment variables and binds host-system libraries and files:
   - **Derecho (Cray MPICH)**: Maps `/opt/cray` and `/usr/lib64`. It overrides `LD_LIBRARY_PATH` to prioritize Cray MPICH ABI-compatible paths (e.g., `${CRAY_MPICH_DIR}/lib-abi-mpich`) and preloads the Cray GPU Transport Layer (GTL) library (`libmpi_gtl_cuda.so`) for GPU communication.
-  - **Casper (NCAR OpenMPI)**: Binds the NCAR OpenMPI environment path `${NCAR_ROOT_OPENMPI}`, GPFS file systems `/usr/lpp/mmfs`, and configures UCX flags such as `UCX_POSIX_USE_PROC_LINK=n`. This bypasses permission limitations and guarantees fast inter-node communication.
+  - **Casper / Derecho (NCAR OpenMPI)**: Binds the NCAR OpenMPI environment path `${NCAR_ROOT_OPENMPI}`, GPFS file systems `/usr/lpp/mmfs`, and configures UCX flags such as `UCX_POSIX_USE_PROC_LINK=n`. This bypasses permission limitations and guarantees fast inter-node communication.
+    The GPFS bind is **not optional**: NCAR's OpenMPI is built with ROMIO's GPFS backend, so `libmpi.so.40` has a hard `NEEDED` on `libgpfs.so`. On the host that resolves out of `/etc/ld.so.conf`; inside the container it does not, and every rank dies before `main()` with `libgpfs.so: cannot open shared object file`. `/usr/lpp/mmfs/lib` must therefore also be on the injected `LD_LIBRARY_PATH`, not just bind-mounted. Cray MPICH's ABI shim has no such dependency, which is why only the OpenMPI path needs it.
 
 ---
 
