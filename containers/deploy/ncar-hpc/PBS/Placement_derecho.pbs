@@ -36,7 +36,8 @@
            module --force purge && \
            module load ncarenv/25.10 && \
            module reset && \
-           module load gcc/14.3.0 && \
+           #gk: move to make_apptainer_launcher.sh
+           #gk: module load gcc/14.3.0 && \
            module load apptainer
 module list
 
@@ -93,6 +94,7 @@ for img in ${IMAGES}; do
     fi
 
     launcher="./apptainer-launch-${NCAR_HOST}-${tag}.sh"
+    echo "gk: launcher = $launcher"
     if ! make_apptainer_launcher "${launcher}" "${img}" "${container_mpi:-}"; then
         results="${results}\n${tag} FAIL FAIL launcher"
         continue
@@ -108,6 +110,7 @@ for img in ${IMAGES}; do
     echo "  --- ldd: through the launcher (must be a HOST path) ---"
     host_mpi="$(${launcher} ldd ${exe} 2>/dev/null | grep -i 'libmpi\.so')"
     echo "${host_mpi}" | sed 's/^/    /'
+    echo "gk: examining host_mpi = ${host_mpi}"
     case "${host_mpi}" in
         *"/container/"*|"")
             echo "    *** shim did NOT take -- skipping runs for ${tag} ***"
@@ -121,9 +124,16 @@ for img in ${IMAGES}; do
     #    therefore straddles two of Milan's 8-core L3 groups -> want 2.
     #---------------------------------------------------------------------------
     echo "  --- A: 8 ranks/node x 16 threads, --cpu-bind depth -d 16 ---"
+    echo "gk: mpiexec command line"
+    #gk: debug
+    set -x
+    #gk: end
     OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) -ppn 8 --cpu-bind depth -d 16 \
         ${launcher} ${exe} > "placement_${tag}_bound.out" 2>&1
     grep -m1 "^# mpi" "placement_${tag}_bound.out" | sed 's/^/    /'
+    #gk: debug
+    set +x
+    #gk: end
     check_placement "placement_${tag}_bound.out" 2
     check_placement_rc "placement_${tag}_bound.out" 2 && a=PASS || a=FAIL
 
