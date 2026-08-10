@@ -77,6 +77,54 @@ results=""
 export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
+#-------------------------------------------------------------------------------
+# Run one placement sweep, recording in the output file exactly how it was
+# launched.
+#
+# The .out files are the only artifacts that outlive the job, and a placement
+# table on its own is unattributable: "8 ranks over 3 L3 groups" means nothing
+# without the request that produced it.  It matters doubly here because the two
+# MPI families spell the same intent completely differently -- Cray PALS
+# `-ppn 8 --cpu-bind depth -d 16` versus Open MPI `--map-by ppr:8:node:pe=16
+# --bind-to core` -- so the flags are the only way to tell, from the file alone,
+# which dialect was in play and whether it said what we meant.
+#
+# Every header line starts with '#': check_placement greps '^MPI rank', so the
+# block is invisible to it, and the style matches report_placement's own
+# '# exe' / '# mpi' / '# openmp' preamble.
+#
+# Reads the loop's img/tag/comp_family/mpi_family and the job's NNODES.
+# Usage: run_placement <outfile> <mode> <nranks> <nthreads> <launcher> <exe> [flags...]
+#-------------------------------------------------------------------------------
+run_placement () {
+    local out="$1" mode="$2" nranks="$3" nthreads="$4" run_launcher="$5" run_exe="$6"
+    shift 6
+    local flags="$*"
+    local cmd="mpiexec -n ${nranks} ${flags} ${run_launcher} ${run_exe}"
+
+    {
+        echo "# ---------------------------- launch ----------------------------"
+        echo "# image        ${img}"
+        echo "# tag          ${tag}"
+        echo "# compiler     ${comp_family}"
+        echo "# mpi_family   ${mpi_family}"
+        echo "# mode         ${mode}"
+        echo "# nodes        ${NNODES}"
+        echo "# ranks        ${nranks}  (${nthreads} threads each)"
+        echo "# mpiexec_flags ${flags:-(none)}"
+        echo "# launch       OMP_NUM_THREADS=${nthreads} ${cmd}"
+        echo "# omp          OMP_PROC_BIND=${OMP_PROC_BIND:-unset} OMP_PLACES=${OMP_PLACES:-unset}"
+        echo "# ----------------------------------------------------------------"
+    } > "${out}"
+
+    # Echo to the job log too, so the log and the .out never disagree about
+    # what ran.  (This replaces the ad-hoc `set -x` that only wrapped sweep A.)
+    echo "    + OMP_NUM_THREADS=${nthreads} ${cmd}"
+
+    OMP_NUM_THREADS="${nthreads}" mpiexec -n "${nranks}" ${flags} \
+        "${run_launcher}" "${run_exe}" >> "${out}" 2>&1
+}
+
 for img in ${IMAGES}; do
     tag="$(basename ${img} .sif)"
 
@@ -144,11 +192,9 @@ for img in ${IMAGES}; do
     #    therefore straddles two of Milan's 8-core L3 groups -> want 2.
     #---------------------------------------------------------------------------
     echo "  --- A: 8 ranks/node x 16 threads, bound (${bound_flags}) ---"
-    set -x
-    OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) ${bound_flags} \
-        ${launcher} ${exe} > "placement_${tag}_bound.out" 2>&1
-    set +x
-    grep -m1 "^# mpi" "placement_${tag}_bound.out" | sed 's/^/    /'
+    run_placement "placement_${tag}_bound.out" bound $(( NNODES * 8 )) 16 \
+        "${launcher}" "${exe}" ${bound_flags}
+    grep -m1 "^# mpi " "placement_${tag}_bound.out" | sed 's/^/    /'
     check_placement "placement_${tag}_bound.out" 2
     check_placement_rc "placement_${tag}_bound.out" 2 && a=PASS || a=FAIL
 
@@ -158,8 +204,8 @@ for img in ${IMAGES}; do
     #    (Open MPI's default binding differs, so a PASS here is informational.)
     #---------------------------------------------------------------------------
     echo "  --- B: same, but no per-rank binding (${trap_flags}); expect the trap ---"
-    OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) ${trap_flags} \
-        ${launcher} ${exe} > "placement_${tag}_trap.out" 2>&1
+    run_placement "placement_${tag}_trap.out" trap $(( NNODES * 8 )) 16 \
+        "${launcher}" "${exe}" ${trap_flags}
     check_placement "placement_${tag}_trap.out" 1
     check_placement_rc "placement_${tag}_trap.out" 1 && b=UNEXPECTED-PASS || b=trap-reproduced
 
