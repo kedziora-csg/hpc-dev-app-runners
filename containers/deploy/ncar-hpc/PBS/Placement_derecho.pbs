@@ -51,7 +51,7 @@ NNODES="$(sort -u $PBS_NODEFILE | wc -l)"
 
 #-------------------------------------------------------------------------------
 # Integration test over the blessed Derecho image set.  For each image: build the
-# launcher, prove the ABI shim actually displaced the container's MPI, and run
+# launcher, prove the derecho environment displaced the container's MPI, and run
 # two sweeps -- the correct binding, and the classic trap.  Emits a PASS/FAIL
 # matrix at the end.
 #
