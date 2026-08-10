@@ -16,7 +16,15 @@
 #   mpi_family defaults to being sniffed from the image name, then from
 #   $LMOD_FAMILY_MPI.  Pass it explicitly when the image name is uninformative.
 #
-# Sets (and exports) LAUNCHER_MPI_FAMILY to what it actually used.
+# Sets (and exports) LAUNCHER_MPI_FAMILY and LAUNCHER_COMPILER_FAMILY to what it
+# actually used, so the caller can load the matching host modules.
+#
+# Also provides two helpers the PBS scripts use to stay family-agnostic:
+#     load_host_modules <compiler_family> <mpi_family>
+#         load the Derecho modules matching the container's toolchain.
+#     mpi_launch_flags <mpi_family> <ranks_per_node> <depth> <bound|trap>
+#         emit the mpiexec placement flags in the right dialect (Cray PALS vs
+#         Open MPI), since the two share almost no spelling.
 #-------------------------------------------------------------------------------
 
 #-------------------------------------------------------------------------------
@@ -56,6 +64,92 @@ _launcher_sniff_family () {
     echo "${fam}"
 }
 
+# Sniff the compiler family from the image name (<os>-<compiler>-<mpi>[...].sif).
+# Order matters: gcc14 must be tested before the bare gcc substring.  Defaults to
+# oneapi -- the Derecho site-default compiler -- when the name is uninformative.
+_launcher_sniff_compiler () {
+    local img="$1" comp=""
+    case "${img}" in
+        *oneapi*) comp="oneapi" ;;
+        *nvhpc*)  comp="nvhpc"  ;;
+        *aocc*)   comp="aocc"   ;;
+        *gcc14*)  comp="gcc14"  ;;
+        *clang*)  comp="clang"  ;;
+        *gcc*)    comp="gcc"    ;;
+    esac
+    [ -n "${comp}" ] || comp="${LMOD_FAMILY_COMPILER:-oneapi}"
+    echo "${comp}"
+}
+
+# Map a container compiler tag to the matching Derecho module.  oneapi -> intel
+# because the site-default `intel` module IS the oneapi toolchain (intel/2025.2.1);
+# gcc14 -> gcc/14.3.0 to match the container's gcc exactly.
+_launcher_compiler_module () {
+    case "$1" in
+        oneapi) echo "intel"      ;;
+        gcc14)  echo "gcc/14.3.0" ;;
+        gcc)    echo "gcc"        ;;
+        nvhpc)  echo "nvhpc"      ;;
+        aocc)   echo "aocc"       ;;
+        clang)  echo "clang"      ;;
+        *)      echo ""           ;;
+    esac
+}
+
+# Load the Derecho host modules matching the container's toolchain, so the host
+# MPI that displaces the container's is built with a compatible compiler.  The
+# compiler MUST be loaded before the MPI: Lmod resolves the openmpi build against
+# the loaded compiler, and NCAR_ROOT_OPENMPI is only set once openmpi is loaded.
+load_host_modules () {
+    local comp="$1" mpi="$2" cmod
+    cmod="$(_launcher_compiler_module "${comp}")"
+    if [ -n "${cmod}" ]; then
+        echo "load_host_modules: module load ${cmod}"
+        module load "${cmod}" || return 1
+    else
+        echo "load_host_modules: WARNING no module mapping for compiler '${comp}'"
+    fi
+    case "${mpi}" in
+        openmpi)
+            echo "load_host_modules: module load openmpi"
+            module load openmpi || return 1
+            ;;
+        mpich|mpich3)
+            # Cray MPICH ships in the default ncarenv; nothing to add.  Drop any
+            # openmpi left loaded by a previous image so its mpiexec and libs do
+            # not shadow Cray PALS / the MPICH ABI shim.
+            module unload openmpi 2>/dev/null || true
+            ;;
+    esac
+}
+
+# Emit the mpiexec placement flags (everything except -n and the executable) in
+# the dialect of <mpi_family>.  Cray PALS (mpich) and Open MPI 5.0.x (openmpi,
+# Derecho's host is 5.0.9) disagree on every spelling:
+#   procs-per-node : PALS -ppn N          Open MPI -N N
+#   depth binding  : PALS --cpu-bind depth -d D
+#                    Open MPI --map-by ppr:P:node:pe=D --bind-to core
+# mode=bound gives each rank a D-core span (OpenMP spreads its threads inside);
+# mode=trap omits the per-rank binding request, reproducing the classic pile-up
+# the placement checker must catch.
+mpi_launch_flags () {
+    local fam="$1" ppn="$2" depth="$3" mode="$4"
+    case "${fam}" in
+        openmpi)
+            case "${mode}" in
+                bound) echo "--map-by ppr:${ppn}:node:pe=${depth} --bind-to core" ;;
+                *)     echo "-N ${ppn}" ;;
+            esac
+            ;;
+        *)  # Cray PALS: mpich / mpich3
+            case "${mode}" in
+                bound) echo "-ppn ${ppn} --cpu-bind depth -d ${depth}" ;;
+                *)     echo "-ppn ${ppn}" ;;
+            esac
+            ;;
+    esac
+}
+
 make_apptainer_launcher () {
     local outfile="$1" img="$2" family="${3:-}"
 
@@ -64,6 +158,7 @@ make_apptainer_launcher () {
     [ -f "${img}" ] || { echo "no such image: ${img}"; return 1; }
 
     [ -n "${family}" ] || family="$(_launcher_sniff_family "${img}")"
+    export LAUNCHER_COMPILER_FAMILY="$(_launcher_sniff_compiler "${img}")"
     _launcher_common_paths
 
     local binds env_lines ld_path
@@ -71,8 +166,6 @@ make_apptainer_launcher () {
     --bind /run --bind /var/run \
     --bind /opt/cray --bind /etc/cray \
     --bind /usr/lib64:/host_lib64'
-
-    echo "gk: in make_apptainer_launcher"
 
     case "${family}" in
         mpich|mpich3)
@@ -112,9 +205,12 @@ make_apptainer_launcher () {
             # check the '# mpi' header line of report_placement to see which
             # library actually loaded.
             #-------------------------------------------------------------------
-            echo "gk: in openmpi case, issuing `module load openmpi`"
-            module load openmpi
-            
+            echo "gk: in openmpi case"
+            # Host OpenMPI is normally loaded by load_host_modules (compiler
+            # first, then the matching openmpi build).  Fall back to loading it
+            # here so a standalone call still resolves NCAR_ROOT_OPENMPI.
+            [ -n "${NCAR_ROOT_OPENMPI:-}" ] || module load openmpi 2>/dev/null
+
             local ompi_root="${NCAR_ROOT_OPENMPI:-}"
             [ -n "${ompi_root}" ] || {
                 echo "make_apptainer_launcher: NCAR_ROOT_OPENMPI is unset."
@@ -143,12 +239,9 @@ make_apptainer_launcher () {
 
     echo "gk: making launcher for ${img} (family=${family}) in dir $(pwd)"
     echo "gk: outfile=${outfile}"
-    echo 
+    echo
 
-    echo "gk: making launcher for ${img} (family=${family}) in dir $(pwd)"
-    echo "gk: outfile=${outfile}"
-    echo 
-
+    cat <<EOF > "${outfile}" && chmod +x "${outfile}"
 #!/bin/bash
 # generated by make_apptainer_launcher.sh -- family=${family}
 \$(which apptainer) --quiet exec \\
