@@ -140,7 +140,7 @@ load_host_modules () {
 # the dialect of <mpi_family>.  Cray PALS (mpich) and Open MPI 5.0.x (openmpi,
 # Derecho's host is 5.0.9) disagree on every spelling:
 #   procs-per-node : PALS -ppn N          Open MPI -N N
-#   depth binding  : PALS --cpu-bind depth -d D
+#   depth binding  : PALS --cpu-bind core -d D
 #                    Open MPI --map-by ppr:P:node:pe=D --bind-to core
 # mode=bound gives each rank a D-core span (OpenMP spreads its threads inside);
 # mode=trap omits the per-rank binding request, reproducing the classic pile-up
