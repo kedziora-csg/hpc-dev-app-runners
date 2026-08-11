@@ -96,7 +96,7 @@ run_placement () {
         echo "# nodes        ${NNODES}"
         echo "# ranks        ${nranks}  (${nthreads} threads each)"
         echo "# mpiexec_flags ${flags:-(none)}"
-        echo "# launch       OMP_NUM_THREADS=${nthreads} mpiexec -n ${nranks} ${flags} <launcher> ${run_exe}"
+        echo "# launch       OMP_NUM_THREADS=${nthreads} mpiexec -n ${nranks} ${flags} ${run_launcher} ${run_exe}"
         echo "# omp          OMP_PROC_BIND=${OMP_PROC_BIND:-unset} OMP_PLACES=${OMP_PLACES:-unset}"
     } > "${out}"
 
