@@ -12,7 +12,7 @@
 
 #-------------------------------------------------------------------------------
 # Run /container/bin/report_placement inside an Apptainer container on Derecho,
-# using host Cray MPICH via the MPICH ABI shim.
+# using the host's MPI library (displacing the container's).
 #
 # Requests whole nodes (ncpus=128) deliberately: with only a couple of cores per
 # node every rank lands on the same chiplet, socket and NUMA node, and the
@@ -75,6 +75,35 @@ results=""
 export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
+#-------------------------------------------------------------------------------
+# run_placement <outfile> <nranks> <nthreads> <launcher> <exe> [mpiexec flags...]
+#
+# Write a header to the output file documenting exactly how the run was
+# invoked, then execute it.  The .out files are the only artifacts that
+# outlive the job, and the header lets you read the placement table without
+# opening a second file to find the particulars.
+#-------------------------------------------------------------------------------
+run_placement () {
+    local out="$1" nranks="$2" nthreads="$3" run_launcher="$4" run_exe="$5"
+    shift 5
+    local flags="$*"
+
+    {
+        echo "# image        ${img}"
+        echo "# tag          ${tag}"
+        echo "# compiler     ${comp_family}"
+        echo "# mpi_family   ${mpi_family}"
+        echo "# nodes        ${NNODES}"
+        echo "# ranks        ${nranks}  (${nthreads} threads each)"
+        echo "# mpiexec_flags ${flags:-(none)}"
+        echo "# launch       OMP_NUM_THREADS=${nthreads} mpiexec -n ${nranks} ${flags} <launcher> ${run_exe}"
+        echo "# omp          OMP_PROC_BIND=${OMP_PROC_BIND:-unset} OMP_PLACES=${OMP_PLACES:-unset}"
+    } > "${out}"
+
+    OMP_NUM_THREADS="${nthreads}" mpiexec -n "${nranks}" ${flags} \
+        "${run_launcher}" "${run_exe}" >> "${out}" 2>&1
+}
+
 for img in ${IMAGES}; do
     tag="$(basename ${img} .sif)"
 
@@ -124,8 +153,8 @@ for img in ${IMAGES}; do
     echo "${host_mpi}" | sed 's/^/    /'
     case "${host_mpi}" in
         *"/container/"*|"")
-            echo "    *** shim did NOT take -- skipping runs for ${tag} ***"
-            results="${results}\n${tag} FAIL FAIL no-shim"
+            echo "    *** overlay did NOT take -- skipping runs for ${tag} ***"
+            results="${results}\n${tag} FAIL FAIL no-overlay"
             continue
             ;;
     esac
@@ -147,8 +176,8 @@ for img in ${IMAGES}; do
     # derives that minimum itself rather than being told.
     #---------------------------------------------------------------------------
     echo "  --- 8 ranks/node x 16 threads, bound (${bound_flags}) ---"
-    OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) ${bound_flags} \
-        ${launcher} ${exe} > "placement_${tag}_bound.out" 2>&1
+    run_placement "placement_${tag}_bound.out" $(( NNODES * 8 )) 16 \
+        "${launcher}" "${exe}" ${bound_flags}
     grep -m1 "^# mpi " "placement_${tag}_bound.out" | sed 's/^/    /'
     placement_summary "placement_${tag}_bound.out" && a=PASS || a=FAIL
 
@@ -167,8 +196,9 @@ echo -e "${results}" | while read -r t a n; do
     printf "  %-28s %-10s %s\n" "${t}" "${a}" "${n}"
 done
 echo
-echo "  PLACEMENT=PASS means the ABI shim worked, the host MPI displaced the"
-echo "  container's, and every thread landed on its own physical core with no"
-echo "  avoidable chiplet straddling.  FAIL prints the specific pathology above."
+echo "  PLACEMENT=PASS means the host MPI library overlay worked (for mpich this"
+echo "  is the Cray ABI shim; for openmpi it's a direct bind), every thread"
+echo "  landed on its own physical core, and no avoidable chiplet straddling"
+echo "  occurred.  FAIL prints the specific pathology above."
 
 echo && echo "Done at $(date)"
