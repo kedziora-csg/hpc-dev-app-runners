@@ -142,7 +142,8 @@ load_host_modules () {
 #   procs-per-node : PALS -ppn N          Open MPI -N N
 #   depth binding  : PALS --cpu-bind core -d D
 #                    Open MPI --map-by ppr:P:node:pe=D --bind-to core
-# mode=bound gives each rank a D-core span (OpenMP spreads its threads inside);
+# mode=bound gives each rank a D-core span (OpenMP spreads its threads inside)
+# plus one more if SMT is enabled. 
 # mode=trap omits the per-rank binding request, reproducing the classic pile-up
 # the placement checker must catch.
 mpi_launch_flags () {
@@ -270,8 +271,7 @@ make_apptainer_launcher () {
             ;;
     esac
 
-    echo "gk: making launcher for ${img} (family=${family}) in dir $(pwd)"
-    echo "gk: outfile=${outfile}"
+    echo "Making launcher for ${img} (family=${family}) in dir $(pwd)"
     echo
 
     cat <<EOF > "${outfile}" && chmod +x "${outfile}"

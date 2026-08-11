@@ -100,7 +100,7 @@ for img in ${IMAGES}; do
     #---------------------------------------------------------------------------
     comp_family="$(_launcher_sniff_compiler "${img}")"
     mpi_family="${container_mpi:-$(_launcher_sniff_family "${img}")}"
-    echo "  toolchain: compiler=${comp_family}  mpi=${mpi_family}"
+    echo "toolchain: compiler=${comp_family}  mpi=${mpi_family}"
     if ! load_host_modules "${comp_family}" "${mpi_family}"; then
         results="${results}\n${tag} FAIL FAIL modules"
         continue
@@ -117,12 +117,13 @@ for img in ${IMAGES}; do
     # resolves under /container the run below would produce N singletons and
     # look almost plausible, so stop here rather than mislead.
     #---------------------------------------------------------------------------
+    echo ""
+    echo "## Examining MPI linkage"
     echo "  --- ldd: container native ---"
     apptainer --quiet exec ${img} ldd ${exe} 2>/dev/null | grep -i "libmpi" | sed 's/^/    /'
     echo "  --- ldd: through the launcher (must be a HOST path) ---"
     host_mpi="$(${launcher} ldd ${exe} 2>/dev/null | grep -i 'libmpi\.so')"
     echo "${host_mpi}" | sed 's/^/    /'
-    echo "gk: examining host_mpi = ${host_mpi}"
     case "${host_mpi}" in
         *"/container/"*|"")
             echo "    *** shim did NOT take -- skipping runs for ${tag} ***"
@@ -139,19 +140,22 @@ for img in ${IMAGES}; do
     bound_flags="$(mpi_launch_flags "${mpi_family}" 8 16 bound)"
     trap_flags="$(mpi_launch_flags "${mpi_family}" 8 16 trap)"
 
+    echo 
+    echo "## Running placement tests"
+    echo 
+
     #---------------------------------------------------------------------------
     # A: 8 ranks/node x 16 threads, depth-bound.  Each rank gets 16 cores and
     #    therefore straddles two of Milan's 8-core L3 groups -> want 2.
     #---------------------------------------------------------------------------
     echo "  --- A: 8 ranks/node x 16 threads, bound (${bound_flags}) ---"
-    set -x
     OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) ${bound_flags} \
         ${launcher} ${exe} > "placement_${tag}_bound.out" 2>&1
-    set +x
     grep -m1 "^# mpi" "placement_${tag}_bound.out" | sed 's/^/    /'
     check_placement "placement_${tag}_bound.out" 2
     check_placement_rc "placement_${tag}_bound.out" 2 && a=PASS || a=FAIL
 
+    echo 
     #---------------------------------------------------------------------------
     # B: the trap -- no per-rank binding.  On Cray PALS each rank is still pinned
     #    to ONE core, so all 16 threads pile onto it; this SHOULD fail the check.
