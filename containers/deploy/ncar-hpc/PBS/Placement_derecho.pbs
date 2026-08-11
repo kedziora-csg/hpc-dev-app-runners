@@ -18,15 +18,14 @@
 # node every rank lands on the same chiplet, socket and NUMA node, and the
 # socket / numa / l3 columns cannot tell you anything.
 #
-# Sweeps four bindings so the difference is visible side by side:
-#   A. depth 1, 1 thread per rank    -- packs all 8 ranks onto cores 0-7
-#   B. depth 16, 16 threads per rank <- the realistic hybrid case
-#   C. no --cpu-bind at all          -- the trap: NOT unbound, see below
-#   D. --cpu-bind none + OMP_PROC_BIND=false -- a genuinely unbound baseline
+# Runs one binding per image -- the realistic hybrid case, 8 ranks/node x 16
+# threads, each thread on its own physical core -- and reports what the run
+# ACTUALLY got via placement_summary, naming any pathology it finds rather than
+# asserting against a hardcoded expectation.
 #
-# C and D are different on purpose.  "Omit the flag" and "ask for none" produce
-# opposite outcomes here, which is the single most surprising thing this script
-# demonstrates.
+# This is an integration test of the containers, so it only exercises bindings a
+# real job would use.  For what happens when the binding flags are omitted, see
+# the captured outputs in libexec/fixtures/ and the note at the sweep below.
 #
 # Compare with the same binary built natively (see NCAR_HowTo.md); the output
 # format is identical, so `diff` is the comparison.
@@ -51,8 +50,7 @@ NNODES="$(sort -u $PBS_NODEFILE | wc -l)"
 #-------------------------------------------------------------------------------
 # Integration test over the blessed Derecho image set.  For each image: build the
 # launcher, prove the derecho environment displaced the container's MPI, and run
-# two sweeps -- the correct binding, and the classic trap.  Emits a PASS/FAIL
-# matrix at the end.
+# the realistic hybrid binding.  Emits a PASS/FAIL matrix at the end.
 #
 # Default set comes from libexec/Makefile so there is one definition of "the six".
 # Override with:  qsub -v container_img=/path/to/one.sif ...
@@ -138,36 +136,23 @@ for img in ${IMAGES}; do
     # Open MPI 5.0 (openmpi) spells them -N and --map-by ...:pe=N --bind-to core.
     #---------------------------------------------------------------------------
     bound_flags="$(mpi_launch_flags "${mpi_family}" 8 16 bound)"
-    trap_flags="$(mpi_launch_flags "${mpi_family}" 8 16 trap)"
 
-    echo 
-    echo "## Running placement tests"
-    echo 
+    echo
+    echo "## Running placement test"
+    echo
 
     #---------------------------------------------------------------------------
-    # A: 8 ranks/node x 16 threads, depth-bound.  Each rank gets 16 cores and
-    #    therefore straddles two of Milan's 8-core L3 groups -> want 2.
+    # 8 ranks/node x 16 threads, core-bound.  Each rank gets 16 cores and
+    # therefore straddles two of Milan's 8-core L3 groups; placement_summary
+    # derives that minimum itself rather than being told.
     #---------------------------------------------------------------------------
-    echo "  --- A: 8 ranks/node x 16 threads, bound (${bound_flags}) ---"
+    echo "  --- 8 ranks/node x 16 threads, bound (${bound_flags}) ---"
     OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) ${bound_flags} \
         ${launcher} ${exe} > "placement_${tag}_bound.out" 2>&1
-    grep -m1 "^# mpi" "placement_${tag}_bound.out" | sed 's/^/    /'
-    check_placement "placement_${tag}_bound.out" 2
-    check_placement_rc "placement_${tag}_bound.out" 2 && a=PASS || a=FAIL
+    grep -m1 "^# mpi " "placement_${tag}_bound.out" | sed 's/^/    /'
+    placement_summary "placement_${tag}_bound.out" && a=PASS || a=FAIL
 
-    echo 
-    #---------------------------------------------------------------------------
-    # B: the trap -- no per-rank binding.  On Cray PALS each rank is still pinned
-    #    to ONE core, so all 16 threads pile onto it; this SHOULD fail the check.
-    #    (Open MPI's default binding differs, so a PASS here is informational.)
-    #---------------------------------------------------------------------------
-    echo "  --- B: same, but no per-rank binding (${trap_flags}); expect the trap ---"
-    OMP_NUM_THREADS=16 mpiexec -n $(( NNODES * 8 )) ${trap_flags} \
-        ${launcher} ${exe} > "placement_${tag}_trap.out" 2>&1
-    check_placement "placement_${tag}_trap.out" 1
-    check_placement_rc "placement_${tag}_trap.out" 1 && b=UNEXPECTED-PASS || b=trap-reproduced
-
-    results="${results}\n${tag} ${a} ${b} ok"
+    results="${results}\n${tag} ${a} ok"
 done
 
 #-------------------------------------------------------------------------------
@@ -175,15 +160,15 @@ echo
 echo "======================================================================="
 echo "INTEGRATION MATRIX"
 echo "======================================================================="
-printf "  %-28s %-6s %-18s %s\n" IMAGE BOUND UNBOUND NOTE
-printf "  %-28s %-6s %-18s %s\n" ---------------------------- ------ ------------------ ----
-echo -e "${results}" | while read -r t a b n; do
+printf "  %-28s %-10s %s\n" IMAGE PLACEMENT NOTE
+printf "  %-28s %-10s %s\n" ---------------------------- ---------- ----
+echo -e "${results}" | while read -r t a n; do
     [ -n "${t}" ] || continue
-    printf "  %-28s %-6s %-18s %s\n" "${t}" "${a}" "${b}" "${n}"
+    printf "  %-28s %-10s %s\n" "${t}" "${a}" "${n}"
 done
 echo
-echo "  BOUND=PASS means the ABI shim worked and placement was as requested."
-echo "  UNBOUND=trap-reproduced is the EXPECTED result -- omitting --cpu-bind"
-echo "  pins each rank to a single core, and the checker catches it."
+echo "  PLACEMENT=PASS means the ABI shim worked, the host MPI displaced the"
+echo "  container's, and every thread landed on its own physical core with no"
+echo "  avoidable chiplet straddling.  FAIL prints the specific pathology above."
 
 echo && echo "Done at $(date)"
