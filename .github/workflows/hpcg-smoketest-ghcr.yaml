@@ -25,16 +25,22 @@ on:
           - noble
 
       docker_repo:
-        description: "Base image repository (blank = ghcr.io/<this repo's owner>/hpcdev)"
+        description: "Base image repository"
         type: string
         required: false
-        default: ""
+        default: "ghcr.io/kedziora-csg/hpcdev"
 
       apps_repo:
-        description: "App image repository (blank = ghcr.io/<this repo's owner>/hpcdev-apps)"
+        description: "App image repository"
         type: string
         required: false
-        default: ""
+        default: "ghcr.io/kedziora-csg/hpcdev-apps"
+
+      image_version:
+        description: "Base image version tag suffix"
+        type: string
+        required: true
+        default: "26.08"
 
       nranks:
         description: "MPI ranks for the tiny HPCG smoke run"
@@ -79,10 +85,12 @@ jobs:
           fi
           base_repo="$(printf '%s' "${base_repo}" | tr '[:upper:]' '[:lower:]')"
           apps_repo="$(printf '%s' "${apps_repo}" | tr '[:upper:]' '[:lower:]')"
-          base_image="${base_repo}-${{ matrix.arch }}:${{ inputs.os }}-${{ matrix.compiler }}-${{ matrix.mpi }}-latest"
-          app_image="${apps_repo}-${{ matrix.arch }}:${{ inputs.os }}-${{ matrix.compiler }}-${{ matrix.mpi }}-hpcg-latest"
+          base_image="${base_repo}-${{ matrix.arch }}:${{ inputs.os }}-${{ matrix.compiler }}-${{ matrix.mpi }}-${{ inputs.image_version }}"
+          app_image="${apps_repo}-${{ matrix.arch }}:${{ inputs.os }}-${{ matrix.compiler }}-${{ matrix.mpi }}-hpcg-${{ inputs.image_version }}"
+          app_image_latest="${apps_repo}-${{ matrix.arch }}:${{ inputs.os }}-${{ matrix.compiler }}-${{ matrix.mpi }}-hpcg-latest"
           echo "base_image=${base_image}" | tee -a "${GITHUB_OUTPUT}"
           echo "app_image=${app_image}" | tee -a "${GITHUB_OUTPUT}"
+          echo "app_image_latest=${app_image_latest}" | tee -a "${GITHUB_OUTPUT}"
           mkdir -p hpcg-smoke-logs
 
       - name: Login to GHCR
@@ -104,7 +112,9 @@ jobs:
         with:
           push: true
           load: false
-          tags: ${{ steps.image.outputs.app_image }}
+          tags: |
+            ${{ steps.image.outputs.app_image }}
+            ${{ steps.image.outputs.app_image_latest }}
           provenance: mode=max
           sbom: true
           context: .
