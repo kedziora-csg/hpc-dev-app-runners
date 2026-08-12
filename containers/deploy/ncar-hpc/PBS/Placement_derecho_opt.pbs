@@ -54,7 +54,6 @@
            module --force purge && \
            module load ncarenv/25.10 && \
            module reset && \
-           module load gcc/14.3.0 && \
            module load apptainer
 module list
 
@@ -107,8 +106,15 @@ if [ "${RUN_MODE}" = "container" ]; then
     # sniffed from the image name unless container_mpi is set explicitly.
     . "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
 
-    launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh"
-    make_apptainer_launcher "${launcher}" "${container_img}" "${container_mpi:-}" \
+    comp_family="$(_launcher_sniff_compiler "${container_img}")"
+    mpi_family="${container_mpi:-$(_launcher_sniff_family "${container_img}")}"
+    echo "toolchain: compiler=${comp_family}  mpi=${mpi_family}"
+    load_host_modules "${comp_family}" "${mpi_family}" \
+        || exit 1
+    module list
+
+    launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST}-${mpi_family}.sh"
+    make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" \
         || exit 1
 
     REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
