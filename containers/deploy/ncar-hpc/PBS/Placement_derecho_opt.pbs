@@ -215,8 +215,11 @@ for cfg in "${CONFIGS[@]}"; do
     check_placement "${out}" "${want_l3}"
 
     if [ -n "${APP}" ]; then
+        echo && echo "--- ldd check on $APP ---"
+        ${launcher} ldd ${REPORT_EXE} || { echo "cannot ldd ${REPORT_EXE}"; exit 1; }
         echo 
         echo "##### timed run: ${APP} ${APP_ARGS} ---"
+        echo
 
         # Each configuration runs in its own directory: HPCG both reads hpcg.dat
         # and writes HPCG-Benchmark_*.txt relative to the cwd, so sharing one
