@@ -81,6 +81,12 @@ echo "NCAR_HPC_ROOT = ${NCAR_HPC_ROOT}"
 echo "NNODES        = ${NNODES}"
 nodes_list=$(sort -u $PBS_NODEFILE); echo "NODES    = ${nodes_list//.hpc.ucar.edu/}"
 
+# Create the per-image output directory before generating helper scripts.  The
+# launcher must live there too: later this script cd's into RESULTS_DIR, and a
+# relative ./apptainer-launch-* path would stop resolving.
+mkdir -p "${RESULTS_DIR}" \
+    || { echo "cannot create RESULTS_DIR=${RESULTS_DIR}"; exit 1; }
+
 #-------------------------------------------------------------------------------
 # Launcher.  In container mode every rank execs apptainer with host Cray MPICH
 # swapped in via the MPICH ABI shim; in native mode the launcher is a no-op.
@@ -101,7 +107,7 @@ if [ "${RUN_MODE}" = "container" ]; then
     # sniffed from the image name unless container_mpi is set explicitly.
     . "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
 
-    launcher="./apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh"
+    launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST}-${LMOD_FAMILY_MPI}.sh"
     make_apptainer_launcher "${launcher}" "${container_img}" "${container_mpi:-}" \
         || exit 1
 
@@ -132,7 +138,7 @@ fi
 # All output lands in its own directory, so parallel jobs (one per image, see
 # submit_placement_matrix.sh) cannot collide over report files, timings.txt, or
 # the generated launcher.
-mkdir -p "${RESULTS_DIR}" && cd "${RESULTS_DIR}" \
+cd "${RESULTS_DIR}" \
     || { echo "cannot use RESULTS_DIR=${RESULTS_DIR}"; exit 1; }
 echo && echo "results directory: ${RESULTS_DIR}"
 
@@ -168,21 +174,11 @@ if [ "${APP}" = "hpcg" ]; then
     fi
 
     APP="/container/bin/xhpcg"
-    echo "gk: checking for ${APP} in the container image ..."
-    echo "gk: launcher: ${launcher}"
-    echo "gk: checking for apptainer"
-    which apptainer || { echo "gk: apptainer not found"; exit 1; }
-    set -x
-    pwd
-    ls
-
-    #gk: if ! ${launcher} test -x ${APP} 2>/dev/null; then
-    if ! ${launcher} test -x ${APP} ; then
+    if ! ${launcher} test -x ${APP} 2>/dev/null; then
         echo "APP=hpcg requires an HPCG app image with ${APP} preinstalled."
         echo "Build/pull the *-hpcg.sif matrix, for example: cd libexec && make derecho-hpcg"
         exit 1
     fi
-    set +x
     echo "HPCG: ${HPCG_NX}^3 per rank, ${HPCG_SECONDS}s"
     echo "NOTE: runs under 1800s are NOT valid HPCG submissions -- comparison only."
 fi
