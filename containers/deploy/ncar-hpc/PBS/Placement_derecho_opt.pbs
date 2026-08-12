@@ -172,6 +172,7 @@ if [ "${APP}" = "hpcg" ]; then
     echo "gk: launcher: ${launcher}"
     echo "gk: checking for apptainer"
     which apptainer || { echo "gk: apptainer not found"; exit 1; }
+    pwd
 
     #gk: if ! ${launcher} test -x ${APP} 2>/dev/null; then
     if ! ${launcher} test -x ${APP} ; then
