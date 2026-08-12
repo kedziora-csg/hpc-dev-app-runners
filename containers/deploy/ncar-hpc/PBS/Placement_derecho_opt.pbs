@@ -168,6 +168,10 @@ if [ "${APP}" = "hpcg" ]; then
     fi
 
     APP="/container/bin/xhpcg"
+    echo "gk: checking for ${APP} in the container image ..."
+    echo "gk: launcher: ${launcher}"
+    echo "gk: checking for apptainer"
+    which apptainer || { echo "gk: apptainer not found"; exit 1; }
     if ! ${launcher} test -x ${APP} 2>/dev/null; then
         echo "APP=hpcg requires an HPCG app image with ${APP} preinstalled."
         echo "Build/pull the *-hpcg.sif matrix, for example: cd libexec && make derecho-hpcg"
