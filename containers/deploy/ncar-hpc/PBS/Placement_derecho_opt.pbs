@@ -152,7 +152,7 @@ CONFIGS=(
 )
 
 export OMP_PLACES=cores
-export OMP_PROC_BIND=close     # == spread when threads == cores in the mask
+export OMP_PROC_BIND=spread     # == spread when threads == cores in the mask
 
 #-------------------------------------------------------------------------------
 # APP=hpcg is a shorthand for a preinstalled /container/bin/xhpcg.  Anything
@@ -194,8 +194,11 @@ for cfg in "${CONFIGS[@]}"; do
     echo "======================================================================="
 
     export OMP_NUM_THREADS=${nthreads}
-    out="placement_${name}.out"
+    export OMP_PLACES=cores
+    export OMP_PROC_BIND=spread
     env | egrep OMP_
+
+    out="placement_${name}.out"
     set -x
     mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind core -d ${nthreads} \
         ${launcher} ${REPORT_EXE} > "${out}" 2>&1
