@@ -172,7 +172,9 @@ if [ "${APP}" = "hpcg" ]; then
     echo "gk: launcher: ${launcher}"
     echo "gk: checking for apptainer"
     which apptainer || { echo "gk: apptainer not found"; exit 1; }
+    set -x
     pwd
+    ls
 
     #gk: if ! ${launcher} test -x ${APP} 2>/dev/null; then
     if ! ${launcher} test -x ${APP} ; then
@@ -180,6 +182,7 @@ if [ "${APP}" = "hpcg" ]; then
         echo "Build/pull the *-hpcg.sif matrix, for example: cd libexec && make derecho-hpcg"
         exit 1
     fi
+    set +x
     echo "HPCG: ${HPCG_NX}^3 per rank, ${HPCG_SECONDS}s"
     echo "NOTE: runs under 1800s are NOT valid HPCG submissions -- comparison only."
 fi
