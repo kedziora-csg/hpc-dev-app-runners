@@ -122,6 +122,25 @@ grep -q 'shared(local_residual, v1v, v2v, n)' ${HPCG_SRC}/src/ComputeResidual.cp
     || { echo "ComputeResidual.cpp default(none) patch did not apply -- did upstream change?"; exit 1; }
 echo "patched: ComputeResidual.cpp default(none) shared clause"
 
+# HPCG's generated matrix metadata and CheckProblem validator both accumulate
+# nonzero counts inside OpenMP parallel loops.  The 3.1 source protects those
+# increments with unnamed critical sections; on the Derecho hybrid runs this can
+# make CheckProblem disagree with the matrix's recorded total nonzero count even
+# though the MPI-only run validates.  Use explicit OpenMP reductions for the
+# counters instead.  This keeps the MPI+OpenMP benchmark enabled while targeting
+# the failing assertion directly.
+for file in ${HPCG_SRC}/src/GenerateProblem_ref.cpp ${HPCG_SRC}/src/CheckProblem.cpp; do
+    perl -0pi -e 's/(local_int_t localNumberOfNonzeros = 0;\n\s*\/\/ TODO:.*?\n#ifndef HPCG_NO_OPENMP\n\s*)#pragma omp parallel for/${1}#pragma omp parallel for reduction(+:localNumberOfNonzeros)/s' \
+        ${file}
+    perl -0pi -e 's/\n#ifndef HPCG_NO_OPENMP\n\s*#pragma omp critical\n#endif\n(\s*localNumberOfNonzeros \+= numberOfNonzerosInRow;)/\n${1}/' \
+        ${file}
+    grep -q 'parallel for reduction(+:localNumberOfNonzeros)' ${file} \
+        || { echo "${file}: OpenMP nonzero reduction patch did not apply"; exit 1; }
+    grep -q 'localNumberOfNonzeros += numberOfNonzerosInRow' ${file} \
+        || { echo "${file}: nonzero accumulation was removed unexpectedly"; exit 1; }
+done
+echo "patched: OpenMP nonzero counters use reductions"
+
 #-------------------------------------------------------------------------------
 # Configure.  Deliberately NOT using upstream's -ffast-math: it means different
 # things to different compilers and can perturb HPCG's own validation, which
