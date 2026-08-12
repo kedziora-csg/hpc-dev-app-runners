@@ -195,9 +195,11 @@ for cfg in "${CONFIGS[@]}"; do
 
     export OMP_NUM_THREADS=${nthreads}
     out="placement_${name}.out"
-
-    mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind depth -d ${nthreads} \
+    env | egrep OMP_
+    set -x
+    mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind core -d ${nthreads} \
         ${launcher} ${REPORT_EXE} > "${out}" 2>&1
+    set +x
 
     grep -E '^#' "${out}" | head -5
     echo "  --- first rank ---"
