@@ -190,8 +190,12 @@ for cfg in "${CONFIGS[@]}"; do
     echo
     echo "======================================================================="
     echo "${name}: ${ppn} ranks/node x ${nthreads} threads   (${nranks} ranks total)"
-    echo "  mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind depth -d ${nthreads}"
+    echo "  mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind core -d ${nthreads}"
     echo "======================================================================="
+
+    echo 
+    echo "Running placement check only (no workload) ..."
+    echo 
 
     export OMP_NUM_THREADS=${nthreads}
     export OMP_PLACES=cores
@@ -211,7 +215,8 @@ for cfg in "${CONFIGS[@]}"; do
     check_placement "${out}" "${want_l3}"
 
     if [ -n "${APP}" ]; then
-        echo "  --- timed run: ${APP} ${APP_ARGS} ---"
+        echo 
+        echo "##### timed run: ${APP} ${APP_ARGS} ---"
 
         # Each configuration runs in its own directory: HPCG both reads hpcg.dat
         # and writes HPCG-Benchmark_*.txt relative to the cwd, so sharing one
@@ -226,11 +231,14 @@ for cfg in "${CONFIGS[@]}"; do
                 ;;
         esac
 
+        env | egrep OMP_
+        set -x
         t0=${SECONDS}
-        mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind depth -d ${nthreads} \
+        mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind core -d ${nthreads} \
             ${launcher} ${APP} ${APP_ARGS}
         rc=$?
         wall=$(( SECONDS - t0 ))
+        set +x
 
         # Surface HPCG's own verdict; a run that fails validation must not be
         # compared on wall time.
