@@ -23,11 +23,16 @@ derecho_images := leap-oneapi-mpich.sif \
                   leap-oneapi-openmpi.sif \
                   leap-gcc14-openmpi.sif \
                   leap-nvhpc-openmpi.sif
+derecho_hpcg_images := $(patsubst %.sif,%-hpcg.sif,$(derecho_images))
 
 derecho: $(derecho_images)
+derecho-hpcg: $(derecho_hpcg_images)
 
 echo-derecho:
 	@echo "$(derecho_images)"
+
+echo-derecho-hpcg:
+	@echo "$(derecho_hpcg_images)"
 
 echo:
 	@echo "$(all_images)"
@@ -39,6 +44,13 @@ pristine:
 	git clean -xdf -e "*.sif"
 
 # '$*' matches the '%' part, see https://www.gnu.org/software/make/manual/html_node/Automatic-Variables.html
+%-hpcg.def: Deffile.apps
+	@echo "Constructing $@ from $<"
+	@rm -f $@
+	@cp $< $@.tmp
+	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*-hpcg/g' $@.tmp
+	@mv $@{.tmp,}
+
 %.def: Deffile
 	@echo "Constructing $@ from $<"
 	@rm -f $@

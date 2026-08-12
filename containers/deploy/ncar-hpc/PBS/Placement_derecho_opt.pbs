@@ -149,9 +149,8 @@ export OMP_PLACES=cores
 export OMP_PROC_BIND=close     # == spread when threads == cores in the mask
 
 #-------------------------------------------------------------------------------
-# APP=hpcg is a shorthand: build HPCG inside the image if it is not already
-# there, then benchmark it.  Anything else in APP is taken as a path to run
-# as-is.
+# APP=hpcg is a shorthand for a preinstalled /container/bin/xhpcg.  Anything
+# else in APP is taken as a path to run as-is.
 #
 # HPCG reads ./hpcg.dat from the CURRENT DIRECTORY, so each configuration gets
 # its own directory below and writes its own hpcg.dat.  nx/ny/nz are the LOCAL
@@ -163,12 +162,16 @@ HPCG_NX="${HPCG_NX:-104}"
 HPCG_SECONDS="${HPCG_SECONDS:-60}"
 
 if [ "${APP}" = "hpcg" ]; then
+    if [ "${RUN_MODE}" != "container" ]; then
+        echo "APP=hpcg is a container shorthand; for RUN_MODE=native pass APP=/path/to/xhpcg"
+        exit 1
+    fi
+
     APP="/container/bin/xhpcg"
     if ! ${launcher} test -x ${APP} 2>/dev/null; then
-        echo
-        echo "--- xhpcg not in the image; building it now ---"
-        ${launcher} bash -lc "HPCG_RUN=0 /container/extras/build_hpcg.sh" \
-            || { echo "HPCG build failed"; exit 1; }
+        echo "APP=hpcg requires an HPCG app image with ${APP} preinstalled."
+        echo "Build/pull the *-hpcg.sif matrix, for example: cd libexec && make derecho-hpcg"
+        exit 1
     fi
     echo "HPCG: ${HPCG_NX}^3 per rank, ${HPCG_SECONDS}s"
     echo "NOTE: runs under 1800s are NOT valid HPCG submissions -- comparison only."

@@ -15,6 +15,8 @@
 #     --account CODE     PBS project to charge.  REQUIRED, no default.
 #     --app hpcg|none    what to benchmark after the placement check
 #                        (default: hpcg;  none = verify placement only)
+#                        hpcg selects the *-hpcg.sif matrix and requires
+#                        /container/bin/xhpcg to be preinstalled
 #     --images "a b"     override the image list (space separated .sif names)
 #     --nodes N          nodes per job (default 2)
 #     --walltime HH:MM:SS  (default 00:30:00)
@@ -22,7 +24,7 @@
 #     --collate          do not submit; summarise results already on disk
 #
 # TYPICAL SEQUENCE
-#     cd libexec && make derecho && cd ..        # build the six .sif images
+#     cd libexec && make derecho-hpcg && cd ..   # build the six app .sif images
 #     ./submit_placement_matrix.sh --account SCSG0001
 #     ...wait for the jobs...
 #     ./submit_placement_matrix.sh --collate
@@ -47,12 +49,14 @@ IMAGES=""
 # rather than a copy that silently drifts.
 #-------------------------------------------------------------------------------
 default_images () {
-    local from_make
-    from_make="$(cd "${HERE}/libexec" && make --no-print-directory echo-derecho 2>/dev/null)"
+    local from_make target
+    target="echo-derecho"
+    [ "${APP}" = "hpcg" ] && target="echo-derecho-hpcg"
+    from_make="$(cd "${HERE}/libexec" && make --no-print-directory "${target}" 2>/dev/null)"
     if [ -n "${from_make}" ]; then
         echo "${from_make}"
     else
-        echo "libexec/Makefile did not yield a derecho image list" >&2
+        echo "libexec/Makefile did not yield a derecho image list for APP=${APP}" >&2
         return 1
     fi
 }
@@ -133,7 +137,11 @@ if [ -n "${missing}" ]; then
     echo "ERROR: these .sif images do not exist under libexec/:" >&2
     for m in ${missing}; do echo "    ${m}" >&2; done
     echo >&2
-    echo "  build them with:  cd libexec && make derecho" >&2
+    if [ "${APP}" = "hpcg" ]; then
+        echo "  build them with:  cd libexec && make derecho-hpcg" >&2
+    else
+        echo "  build them with:  cd libexec && make derecho" >&2
+    fi
     exit 1
 fi
 
