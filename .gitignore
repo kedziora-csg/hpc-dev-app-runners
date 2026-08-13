@@ -7,3 +7,4 @@ megalinter-reports/
 # Digit-anchored so ordinary *.o / *.e names are unaffected.
 *.o[0-9]*
 *.e[0-9]*
+myscripts
