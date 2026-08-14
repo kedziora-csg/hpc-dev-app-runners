@@ -42,9 +42,6 @@
 #       qsub -v APP=/container/osu-micro-benchmarks/7.5/libexec/\
 #osu-micro-benchmarks/mpi/collective/osu_alltoall,APP_ARGS="-m 4:8192" ...
 #
-#   Run bare metal instead of through the container:
-#       qsub -v RUN_MODE=native,APP=./my_exe Placement_derecho_opt.pbs
-#
 # Each configuration prints a placement report first, then a PASS/FAIL summary of
 # whether the binding is what was asked for, then the timed workload.  Placement
 # is therefore never a confounder in the timings.
@@ -62,7 +59,6 @@ module list
 #-------------------------------------------------------------------------------
 APP="${APP:-}"                       # '', or hpcg, or a path to your executable
 APP_ARGS="${APP_ARGS:-}"
-RUN_MODE="${RUN_MODE:-container}"    # container | native
 NNODES="$(sort -u $PBS_NODEFILE | wc -l)"
 
 # Where libexec/ and the .sif images live.  Jobs on Derecho start in the
@@ -75,7 +71,6 @@ RESULTS_DIR="${RESULTS_DIR:-$(pwd)}"
 echo
 echo "APP           = ${APP:-<none: placement verification only>}"
 echo "APP_ARGS      = ${APP_ARGS}"
-echo "RUN_MODE      = ${RUN_MODE}"
 echo "NCAR_HPC_ROOT = ${NCAR_HPC_ROOT}"
 echo "NNODES        = ${NNODES}"
 nodes_list=$(sort -u $PBS_NODEFILE); echo "NODES    = ${nodes_list//.hpc.ucar.edu/}"
@@ -87,51 +82,40 @@ mkdir -p "${RESULTS_DIR}" \
     || { echo "cannot create RESULTS_DIR=${RESULTS_DIR}"; exit 1; }
 
 #-------------------------------------------------------------------------------
-# Launcher.  In container mode every rank execs apptainer with host Cray MPICH
-# swapped in via the MPICH ABI shim; in native mode the launcher is a no-op.
+# Launcher.  Every rank execs apptainer with the host MPI (Cray MPICH or
+# OpenMPI) swapped in.  The MPI-family dialect and the native-vs-container
+# agreement get validated in Placement_derecho.pbs; this script only consumes
+# already-correct settings via the shared helper.
 #
 # lib-abi-mpich, NOT lib: only the ABI directory exports a libmpi.so.12 that can
 # displace the container's own.  Get this wrong and every rank silently
 # singleton-initialises -- N serial programs that look like a running job.
 #-------------------------------------------------------------------------------
-if [ "${RUN_MODE}" = "container" ]; then
-    # leap because openSUSE Leap 15 is built from the same SLE 15 SP6 sources as
-    # Derecho's host OS; oneapi because intel/2025.2.1 is the site default
-    # compiler, so a native `CC` reference build uses the same toolchain and the
-    # compiler stops being a confound in the timings.
-    export container_img="${container_img:-${NCAR_HPC_ROOT}/libexec/leap-oneapi-mpich.sif}"
+. "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
 
-    # Everything MPI-family-specific lives in the shared helper: the Cray MPICH
-    # ABI shim for mpich/mpich3, the host-OpenMPI bind for openmpi.  Family is
-    # sniffed from the image name unless container_mpi is set explicitly.
-    . "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
+# leap because openSUSE Leap 15 is built from the same SLE 15 SP6 sources as
+# Derecho's host OS; oneapi because intel/2025.2.1 is the site default
+# compiler, keeping this default image representative of the host toolchain.
+export container_img="${container_img:-${NCAR_HPC_ROOT}/libexec/leap-oneapi-mpich.sif}"
 
-    comp_family="$(_launcher_sniff_compiler "${container_img}")"
-    mpi_family="${container_mpi:-$(_launcher_sniff_family "${container_img}")}"
-    echo "toolchain: compiler=${comp_family}  mpi=${mpi_family}"
-    load_host_modules "${comp_family}" "${mpi_family}" \
-        || exit 1
-    module list
+# Family is sniffed from the image name unless container_mpi is set explicitly.
+comp_family="$(_launcher_sniff_compiler "${container_img}")"
+mpi_family="${container_mpi:-$(_launcher_sniff_family "${container_img}")}"
+echo "toolchain: compiler=${comp_family}  mpi=${mpi_family}"
+load_host_modules "${comp_family}" "${mpi_family}" \
+    || exit 1
+module list
 
-    launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST}-${mpi_family}.sh"
-    make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" \
-        || exit 1
+launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST}-${mpi_family}.sh"
+make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" \
+    || exit 1
 
-    REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
+REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
 
-    echo && echo "--- generated launcher ---" && cat ${launcher}
-    echo && echo "--- shim check: the MPI below must come from the HOST ---"
-    ${launcher} ldd ${REPORT_EXE} | grep -i "libmpi" \
-        || { echo "cannot ldd ${REPORT_EXE}"; exit 1; }
-else
-    launcher=""
-    REPORT_EXE="${REPORT_EXE:-${NCAR_HPC_ROOT}/report_placement_native}"
-    if [ ! -x "${REPORT_EXE}" ]; then
-        echo "building ${REPORT_EXE} with the Cray wrappers ..."
-        CC -fopenmp -o "${REPORT_EXE}" "${NCAR_HPC_ROOT}/../../../scripts/report_placement.cxx" \
-            || { echo "native build failed"; exit 1; }
-    fi
-fi
+echo && echo "--- generated launcher ---" && cat ${launcher}
+echo && echo "--- shim check: the MPI below must come from the HOST ---"
+${launcher} ldd ${REPORT_EXE} | grep -i "libmpi" \
+    || { echo "cannot ldd ${REPORT_EXE}"; exit 1; }
 
 #-------------------------------------------------------------------------------
 # The placement validator lives in libexec so the control script and the other
@@ -174,11 +158,6 @@ HPCG_NX="${HPCG_NX:-104}"
 HPCG_SECONDS="${HPCG_SECONDS:-60}"
 
 if [ "${APP}" = "hpcg" ]; then
-    if [ "${RUN_MODE}" != "container" ]; then
-        echo "APP=hpcg is a container shorthand; for RUN_MODE=native pass APP=/path/to/xhpcg"
-        exit 1
-    fi
-
     APP="/container/bin/xhpcg"
     if ! ${launcher} test -x ${APP} 2>/dev/null; then
         echo "APP=hpcg requires an HPCG app image with ${APP} preinstalled."
@@ -193,15 +172,21 @@ for cfg in "${CONFIGS[@]}"; do
     IFS=: read -r name ppn nthreads want_l3 <<< "${cfg}"
     nranks=$(( NNODES * ppn ))
 
+    # Translate ranks/node + depth into this run's MPI dialect: Cray PALS
+    # (mpich/mpich3) spells it -ppn N --cpu-bind core -d D; Open MPI has no
+    # -ppn at all and spells the same request --map-by ppr:N:node:pe=D
+    # --bind-to core.  See mpi_launch_flags in libexec/make_apptainer_launcher.sh.
+    bound_flags="$(mpi_launch_flags "${mpi_family}" ${ppn} ${nthreads} bound)"
+
     echo
     echo "======================================================================="
     echo "${name}: ${ppn} ranks/node x ${nthreads} threads   (${nranks} ranks total)"
-    echo "  mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind core -d ${nthreads}"
+    echo "  mpiexec -n ${nranks} ${bound_flags}"
     echo "======================================================================="
 
-    echo 
+    echo
     echo "Running placement check only (no workload) ..."
-    echo 
+    echo
 
     export OMP_NUM_THREADS=${nthreads}
     export OMP_PLACES=cores
@@ -210,7 +195,7 @@ for cfg in "${CONFIGS[@]}"; do
 
     out="placement_${name}.out"
     set -x
-    mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind core -d ${nthreads} \
+    mpiexec -n ${nranks} ${bound_flags} \
         ${launcher} ${REPORT_EXE} > "${out}" 2>&1
     set +x
 
@@ -243,7 +228,7 @@ for cfg in "${CONFIGS[@]}"; do
         env | egrep OMP_
         set -x
         t0=${SECONDS}
-        mpiexec -n ${nranks} -ppn ${ppn} --cpu-bind core -d ${nthreads} \
+        mpiexec -n ${nranks} ${bound_flags} \
             ${launcher} ${APP} ${APP_ARGS}
         rc=$?
         wall=$(( SECONDS - t0 ))
