@@ -189,7 +189,7 @@ for cfg in "${CONFIGS[@]}"; do
     echo
 
     export OMP_NUM_THREADS=${nthreads}
-    export OMP_PLACES=cores
+    export OMP_PLACES=threads
     export OMP_PROC_BIND=spread
     env | egrep OMP_
 

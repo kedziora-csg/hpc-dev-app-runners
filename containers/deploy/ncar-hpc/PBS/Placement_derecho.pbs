@@ -73,6 +73,11 @@ fi
 exe="/container/bin/report_placement"
 results=""
 
+# This gives one physical core per thread
+#export OMP_PROC_BIND=spread
+#export OMP_PLACES=threads
+
+# This gives two logical cores per thread
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 
