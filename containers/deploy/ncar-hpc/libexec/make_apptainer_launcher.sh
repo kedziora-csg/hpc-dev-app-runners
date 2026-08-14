@@ -157,7 +157,7 @@ mpi_launch_flags () {
             ;;
         *)  # Cray PALS: mpich / mpich3
             case "${mode}" in
-                bound) echo "-ppn ${ppn} --cpu-bind core -d ${depth}" ;;
+                bound) echo "-ppn ${ppn} --cpu-bind depth -d ${depth}" ;;
                 *)     echo "-ppn ${ppn}" ;;
             esac
             ;;

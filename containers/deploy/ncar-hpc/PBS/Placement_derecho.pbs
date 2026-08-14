@@ -8,20 +8,15 @@
 #PBS -j oe
 #PBS -q main
 #PBS -l walltime=00:15:00
-#PBS -l select=2:ncpus=128:mpiprocs=8:ompthreads=16
+#PBS -l select=2:ncpus=128:mpiprocs=16:ompthreads=8
 
 #-------------------------------------------------------------------------------
 # Run /container/bin/report_placement inside an Apptainer container on Derecho,
 # using the host's MPI library (displacing the container's).
 #
-# Requests whole nodes (ncpus=128) deliberately: with only a couple of cores per
-# node every rank lands on the same chiplet, socket and NUMA node, and the
-# socket / numa / l3 columns cannot tell you anything.
-#
-# Runs one binding per image -- the realistic hybrid case, 8 ranks/node x 16
-# threads, each thread on its own physical core -- and reports what the run
-# ACTUALLY got via placement_summary, naming any pathology it finds rather than
-# asserting against a hardcoded expectation.
+# Runs one binding per image based on the PBS Pro chunk specification and
+# reports what the run ACTUALLY got via placement_summary, naming any pathology
+# it finds rather than asserting against a hardcoded expectation.
 #
 # This is an integration test of the containers, so it only exercises bindings a
 # real job would use.  For what happens when the binding flags are omitted, see
@@ -45,7 +40,13 @@ nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
 nodes_list=${nodes_list//.hpc.ucar.edu/}
 echo 
 echo "NODES=\""${nodes_list}"\""
-NNODES="$(sort -u $PBS_NODEFILE | wc -l)"
+NUM_NODES="$(sort -u $PBS_NODEFILE | wc -l)"
+TOTAL_MPI_RANKS=$(wc -l < $PBS_NODEFILE)
+MPIPROCS_PER_CHUNK=$(grep -c "^$(head -n 1 $PBS_NODEFILE)$" $PBS_NODEFILE)
+
+echo "OpenMP Threads per rank: $OMP_NUM_THREADS"
+echo "Total MPI Ranks: $TOTAL_MPI_RANKS"
+echo "MPI Ranks per chunk: $MPIPROCS_PER_CHUNK"
 
 #-------------------------------------------------------------------------------
 # Integration test over the blessed Derecho image set.  For each image: build the
@@ -72,7 +73,7 @@ fi
 exe="/container/bin/report_placement"
 results=""
 
-export OMP_PROC_BIND=spread
+export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 
 #-------------------------------------------------------------------------------
@@ -93,7 +94,7 @@ run_placement () {
         echo "# tag          ${tag}"
         echo "# compiler     ${comp_family}"
         echo "# mpi_family   ${mpi_family}"
-        echo "# nodes        ${NNODES}"
+        echo "# num nodes    ${NUM_NODES}"
         echo "# ranks        ${nranks}  (${nthreads} threads each)"
         echo "# mpiexec_flags ${flags:-(none)}"
         echo "# launch       OMP_NUM_THREADS=${nthreads} mpiexec -n ${nranks} ${flags} ${run_launcher} ${run_exe}"
@@ -164,19 +165,14 @@ for img in ${IMAGES}; do
     # PALS (mpich) spells procs-per-node -ppn and depth binding --cpu-bind depth;
     # Open MPI 5.0 (openmpi) spells them -N and --map-by ...:pe=N --bind-to core.
     #---------------------------------------------------------------------------
-    bound_flags="$(mpi_launch_flags "${mpi_family}" 8 16 bound)"
+    bound_flags="$(mpi_launch_flags "${mpi_family}" $MPIPROCS_PER_CHUNK $OMP_NUM_THREADS bound)"
 
     echo
     echo "## Running placement test"
     echo
 
-    #---------------------------------------------------------------------------
-    # 8 ranks/node x 16 threads, core-bound.  Each rank gets 16 cores and
-    # therefore straddles two of Milan's 8-core L3 groups; placement_summary
-    # derives that minimum itself rather than being told.
-    #---------------------------------------------------------------------------
-    echo "  --- 8 ranks/node x 16 threads, bound (${bound_flags}) ---"
-    run_placement "placement_${tag}_bound.out" $(( NNODES * 8 )) 16 \
+    echo "  --- $MPIPROCS_PER_CHUNK ranks/node x $OMP_NUM_THREADS threads, bound (${bound_flags}) ---"
+    run_placement "placement_${tag}_bound.out" $(( NUM_NODES * MPIPROCS_PER_CHUNK )) $OMP_NUM_THREADS \
         "${launcher}" "${exe}" ${bound_flags}
     grep -m1 "^# mpi " "placement_${tag}_bound.out" | sed 's/^/    /'
     placement_summary "placement_${tag}_bound.out" && a=PASS || a=FAIL
