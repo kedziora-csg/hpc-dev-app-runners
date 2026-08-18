@@ -94,8 +94,7 @@ mkdir -p "${RESULTS_DIR}" \
 . "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
 
 # leap because openSUSE Leap 15 is built from the same SLE 15 SP6 sources as
-# Derecho's host OS; oneapi because intel/2025.2.1 is the site default
-# compiler, keeping this default image representative of the host toolchain.
+# Derecho's host OS; oneapi because intel is the site default compiler family.
 export container_img="${container_img:-${NCAR_HPC_ROOT}/libexec/leap-oneapi-mpich.sif}"
 
 # Family is sniffed from the image name unless container_mpi is set explicitly.

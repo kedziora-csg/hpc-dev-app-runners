@@ -122,13 +122,13 @@ grep -q 'shared(local_residual, v1v, v2v, n)' ${HPCG_SRC}/src/ComputeResidual.cp
     || { echo "ComputeResidual.cpp default(none) patch did not apply -- did upstream change?"; exit 1; }
 echo "patched: ComputeResidual.cpp default(none) shared clause"
 
-# HPCG's generated matrix metadata and CheckProblem validator both accumulate
-# nonzero counts inside OpenMP parallel loops.  The 3.1 source protects those
-# increments with unnamed critical sections; on the Derecho hybrid runs this can
-# make CheckProblem disagree with the matrix's recorded total nonzero count even
-# though the MPI-only run validates.  Use explicit OpenMP reductions for the
-# counters instead.  This keeps the MPI+OpenMP benchmark enabled while targeting
-# the failing assertion directly.
+#-------------------------------------------------------------------------------
+# Patch: use explicit OpenMP reductions for HPCG's nonzero counters instead of the
+# 3.1 source's unnamed critical sections.  GenerateProblem_ref records the matrix
+# metadata and CheckProblem validates it; both accumulate the same count inside a
+# parallel loop.  Defensive only -- no failure is known to require it, and removing
+# it is untested (BenchmarkRunnerPlan.md open question 9).
+#-------------------------------------------------------------------------------
 for file in ${HPCG_SRC}/src/GenerateProblem_ref.cpp ${HPCG_SRC}/src/CheckProblem.cpp; do
     perl -0pi -e 's/(local_int_t localNumberOfNonzeros = 0;\n\s*\/\/ TODO:.*?\n#ifndef HPCG_NO_OPENMP\n\s*)#pragma omp parallel for/${1}#pragma omp parallel for reduction(+:localNumberOfNonzeros)/s' \
         ${file}
