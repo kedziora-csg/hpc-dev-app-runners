@@ -1,0 +1,520 @@
+MPI VERSION    : CRAY MPICH version 8.1.32.110 (ANL base 3.4a2)
+MPI BUILD INFO : Thu Feb 06 22:55 2025 (git hash f9c5634) (CH4)
+# exe /container/bin/report_placement
+# mpi MPI VERSION    : CRAY MPICH version 8.1.32.110 (ANL base 3.4a2)
+# thread_level requested=FUNNELED provided=FUNNELED
+# openmp 201511 procbind spread | ranks 16 | topology sysfs | mpiname dec0153
+# env OMP_NUM_THREADS=16 OMP_PROC_BIND=spread OMP_PLACES=cores PBS_JOBID=7092561.desched1
+MPI rank 0/16 thread 0/16 host dec0153 cpu 128 core 0 socket 0 numa 0 l3 0 place 0 nallowed 2 affinity 0,128
+MPI rank 0/16 thread 1/16 host dec0153 cpu 1 core 1 socket 0 numa 0 l3 0 place 1 nallowed 2 affinity 1,129
+MPI rank 0/16 thread 2/16 host dec0153 cpu 2 core 2 socket 0 numa 0 l3 0 place 2 nallowed 2 affinity 2,130
+MPI rank 0/16 thread 3/16 host dec0153 cpu 3 core 3 socket 0 numa 0 l3 0 place 3 nallowed 2 affinity 3,131
+MPI rank 0/16 thread 4/16 host dec0153 cpu 4 core 4 socket 0 numa 0 l3 0 place 4 nallowed 2 affinity 4,132
+MPI rank 0/16 thread 5/16 host dec0153 cpu 5 core 5 socket 0 numa 0 l3 0 place 5 nallowed 2 affinity 5,133
+MPI rank 0/16 thread 6/16 host dec0153 cpu 6 core 6 socket 0 numa 0 l3 0 place 6 nallowed 2 affinity 6,134
+MPI rank 0/16 thread 7/16 host dec0153 cpu 7 core 7 socket 0 numa 0 l3 0 place 7 nallowed 2 affinity 7,135
+MPI rank 0/16 thread 8/16 host dec0153 cpu 8 core 8 socket 0 numa 0 l3 8 place 8 nallowed 2 affinity 8,136
+MPI rank 0/16 thread 9/16 host dec0153 cpu 9 core 9 socket 0 numa 0 l3 8 place 9 nallowed 2 affinity 9,137
+MPI rank 0/16 thread 10/16 host dec0153 cpu 10 core 10 socket 0 numa 0 l3 8 place 10 nallowed 2 affinity 10,138
+MPI rank 0/16 thread 11/16 host dec0153 cpu 11 core 11 socket 0 numa 0 l3 8 place 11 nallowed 2 affinity 11,139
+MPI rank 0/16 thread 12/16 host dec0153 cpu 12 core 12 socket 0 numa 0 l3 8 place 12 nallowed 2 affinity 12,140
+MPI rank 0/16 thread 13/16 host dec0153 cpu 13 core 13 socket 0 numa 0 l3 8 place 13 nallowed 2 affinity 13,141
+MPI rank 0/16 thread 14/16 host dec0153 cpu 14 core 14 socket 0 numa 0 l3 8 place 14 nallowed 2 affinity 14,142
+MPI rank 0/16 thread 15/16 host dec0153 cpu 15 core 15 socket 0 numa 0 l3 8 place 15 nallowed 2 affinity 15,143
+MPI rank 1/16 thread 0/16 host dec0153 cpu 16 core 16 socket 0 numa 1 l3 16 place 0 nallowed 2 affinity 16,144
+MPI rank 1/16 thread 1/16 host dec0153 cpu 17 core 17 socket 0 numa 1 l3 16 place 1 nallowed 2 affinity 17,145
+MPI rank 1/16 thread 2/16 host dec0153 cpu 18 core 18 socket 0 numa 1 l3 16 place 2 nallowed 2 affinity 18,146
+MPI rank 1/16 thread 3/16 host dec0153 cpu 19 core 19 socket 0 numa 1 l3 16 place 3 nallowed 2 affinity 19,147
+MPI rank 1/16 thread 4/16 host dec0153 cpu 20 core 20 socket 0 numa 1 l3 16 place 4 nallowed 2 affinity 20,148
+MPI rank 1/16 thread 5/16 host dec0153 cpu 21 core 21 socket 0 numa 1 l3 16 place 5 nallowed 2 affinity 21,149
+MPI rank 1/16 thread 6/16 host dec0153 cpu 22 core 22 socket 0 numa 1 l3 16 place 6 nallowed 2 affinity 22,150
+MPI rank 1/16 thread 7/16 host dec0153 cpu 23 core 23 socket 0 numa 1 l3 16 place 7 nallowed 2 affinity 23,151
+MPI rank 1/16 thread 8/16 host dec0153 cpu 24 core 24 socket 0 numa 1 l3 24 place 8 nallowed 2 affinity 24,152
+MPI rank 1/16 thread 9/16 host dec0153 cpu 25 core 25 socket 0 numa 1 l3 24 place 9 nallowed 2 affinity 25,153
+MPI rank 1/16 thread 10/16 host dec0153 cpu 26 core 26 socket 0 numa 1 l3 24 place 10 nallowed 2 affinity 26,154
+MPI rank 1/16 thread 11/16 host dec0153 cpu 27 core 27 socket 0 numa 1 l3 24 place 11 nallowed 2 affinity 27,155
+MPI rank 1/16 thread 12/16 host dec0153 cpu 28 core 28 socket 0 numa 1 l3 24 place 12 nallowed 2 affinity 28,156
+MPI rank 1/16 thread 13/16 host dec0153 cpu 29 core 29 socket 0 numa 1 l3 24 place 13 nallowed 2 affinity 29,157
+MPI rank 1/16 thread 14/16 host dec0153 cpu 30 core 30 socket 0 numa 1 l3 24 place 14 nallowed 2 affinity 30,158
+MPI rank 1/16 thread 15/16 host dec0153 cpu 31 core 31 socket 0 numa 1 l3 24 place 15 nallowed 2 affinity 31,159
+MPI rank 2/16 thread 0/16 host dec0153 cpu 160 core 32 socket 0 numa 2 l3 32 place 0 nallowed 2 affinity 32,160
+MPI rank 2/16 thread 1/16 host dec0153 cpu 33 core 33 socket 0 numa 2 l3 32 place 1 nallowed 2 affinity 33,161
+MPI rank 2/16 thread 2/16 host dec0153 cpu 34 core 34 socket 0 numa 2 l3 32 place 2 nallowed 2 affinity 34,162
+MPI rank 2/16 thread 3/16 host dec0153 cpu 35 core 35 socket 0 numa 2 l3 32 place 3 nallowed 2 affinity 35,163
+MPI rank 2/16 thread 4/16 host dec0153 cpu 36 core 36 socket 0 numa 2 l3 32 place 4 nallowed 2 affinity 36,164
+MPI rank 2/16 thread 5/16 host dec0153 cpu 37 core 37 socket 0 numa 2 l3 32 place 5 nallowed 2 affinity 37,165
+MPI rank 2/16 thread 6/16 host dec0153 cpu 38 core 38 socket 0 numa 2 l3 32 place 6 nallowed 2 affinity 38,166
+MPI rank 2/16 thread 7/16 host dec0153 cpu 39 core 39 socket 0 numa 2 l3 32 place 7 nallowed 2 affinity 39,167
+MPI rank 2/16 thread 8/16 host dec0153 cpu 40 core 40 socket 0 numa 2 l3 40 place 8 nallowed 2 affinity 40,168
+MPI rank 2/16 thread 9/16 host dec0153 cpu 41 core 41 socket 0 numa 2 l3 40 place 9 nallowed 2 affinity 41,169
+MPI rank 2/16 thread 10/16 host dec0153 cpu 42 core 42 socket 0 numa 2 l3 40 place 10 nallowed 2 affinity 42,170
+MPI rank 2/16 thread 11/16 host dec0153 cpu 43 core 43 socket 0 numa 2 l3 40 place 11 nallowed 2 affinity 43,171
+MPI rank 2/16 thread 12/16 host dec0153 cpu 44 core 44 socket 0 numa 2 l3 40 place 12 nallowed 2 affinity 44,172
+MPI rank 2/16 thread 13/16 host dec0153 cpu 45 core 45 socket 0 numa 2 l3 40 place 13 nallowed 2 affinity 45,173
+MPI rank 2/16 thread 14/16 host dec0153 cpu 46 core 46 socket 0 numa 2 l3 40 place 14 nallowed 2 affinity 46,174
+MPI rank 2/16 thread 15/16 host dec0153 cpu 47 core 47 socket 0 numa 2 l3 40 place 15 nallowed 2 affinity 47,175
+MPI rank 3/16 thread 0/16 host dec0153 cpu 176 core 48 socket 0 numa 3 l3 48 place 0 nallowed 2 affinity 48,176
+MPI rank 3/16 thread 1/16 host dec0153 cpu 177 core 49 socket 0 numa 3 l3 48 place 1 nallowed 2 affinity 49,177
+MPI rank 3/16 thread 2/16 host dec0153 cpu 178 core 50 socket 0 numa 3 l3 48 place 2 nallowed 2 affinity 50,178
+MPI rank 3/16 thread 3/16 host dec0153 cpu 179 core 51 socket 0 numa 3 l3 48 place 3 nallowed 2 affinity 51,179
+MPI rank 3/16 thread 4/16 host dec0153 cpu 180 core 52 socket 0 numa 3 l3 48 place 4 nallowed 2 affinity 52,180
+MPI rank 3/16 thread 5/16 host dec0153 cpu 181 core 53 socket 0 numa 3 l3 48 place 5 nallowed 2 affinity 53,181
+MPI rank 3/16 thread 6/16 host dec0153 cpu 182 core 54 socket 0 numa 3 l3 48 place 6 nallowed 2 affinity 54,182
+MPI rank 3/16 thread 7/16 host dec0153 cpu 183 core 55 socket 0 numa 3 l3 48 place 7 nallowed 2 affinity 55,183
+MPI rank 3/16 thread 8/16 host dec0153 cpu 184 core 56 socket 0 numa 3 l3 56 place 8 nallowed 2 affinity 56,184
+MPI rank 3/16 thread 9/16 host dec0153 cpu 185 core 57 socket 0 numa 3 l3 56 place 9 nallowed 2 affinity 57,185
+MPI rank 3/16 thread 10/16 host dec0153 cpu 186 core 58 socket 0 numa 3 l3 56 place 10 nallowed 2 affinity 58,186
+MPI rank 3/16 thread 11/16 host dec0153 cpu 187 core 59 socket 0 numa 3 l3 56 place 11 nallowed 2 affinity 59,187
+MPI rank 3/16 thread 12/16 host dec0153 cpu 188 core 60 socket 0 numa 3 l3 56 place 12 nallowed 2 affinity 60,188
+MPI rank 3/16 thread 13/16 host dec0153 cpu 189 core 61 socket 0 numa 3 l3 56 place 13 nallowed 2 affinity 61,189
+MPI rank 3/16 thread 14/16 host dec0153 cpu 190 core 62 socket 0 numa 3 l3 56 place 14 nallowed 2 affinity 62,190
+MPI rank 3/16 thread 15/16 host dec0153 cpu 191 core 63 socket 0 numa 3 l3 56 place 15 nallowed 2 affinity 63,191
+MPI rank 4/16 thread 0/16 host dec0153 cpu 192 core 64 socket 1 numa 4 l3 64 place 0 nallowed 2 affinity 64,192
+MPI rank 4/16 thread 1/16 host dec0153 cpu 193 core 65 socket 1 numa 4 l3 64 place 1 nallowed 2 affinity 65,193
+MPI rank 4/16 thread 2/16 host dec0153 cpu 194 core 66 socket 1 numa 4 l3 64 place 2 nallowed 2 affinity 66,194
+MPI rank 4/16 thread 3/16 host dec0153 cpu 195 core 67 socket 1 numa 4 l3 64 place 3 nallowed 2 affinity 67,195
+MPI rank 4/16 thread 4/16 host dec0153 cpu 196 core 68 socket 1 numa 4 l3 64 place 4 nallowed 2 affinity 68,196
+MPI rank 4/16 thread 5/16 host dec0153 cpu 197 core 69 socket 1 numa 4 l3 64 place 5 nallowed 2 affinity 69,197
+MPI rank 4/16 thread 6/16 host dec0153 cpu 198 core 70 socket 1 numa 4 l3 64 place 6 nallowed 2 affinity 70,198
+MPI rank 4/16 thread 7/16 host dec0153 cpu 199 core 71 socket 1 numa 4 l3 64 place 7 nallowed 2 affinity 71,199
+MPI rank 4/16 thread 8/16 host dec0153 cpu 200 core 72 socket 1 numa 4 l3 72 place 8 nallowed 2 affinity 72,200
+MPI rank 4/16 thread 9/16 host dec0153 cpu 201 core 73 socket 1 numa 4 l3 72 place 9 nallowed 2 affinity 73,201
+MPI rank 4/16 thread 10/16 host dec0153 cpu 202 core 74 socket 1 numa 4 l3 72 place 10 nallowed 2 affinity 74,202
+MPI rank 4/16 thread 11/16 host dec0153 cpu 203 core 75 socket 1 numa 4 l3 72 place 11 nallowed 2 affinity 75,203
+MPI rank 4/16 thread 12/16 host dec0153 cpu 204 core 76 socket 1 numa 4 l3 72 place 12 nallowed 2 affinity 76,204
+MPI rank 4/16 thread 13/16 host dec0153 cpu 205 core 77 socket 1 numa 4 l3 72 place 13 nallowed 2 affinity 77,205
+MPI rank 4/16 thread 14/16 host dec0153 cpu 206 core 78 socket 1 numa 4 l3 72 place 14 nallowed 2 affinity 78,206
+MPI rank 4/16 thread 15/16 host dec0153 cpu 207 core 79 socket 1 numa 4 l3 72 place 15 nallowed 2 affinity 79,207
+MPI rank 5/16 thread 0/16 host dec0153 cpu 80 core 80 socket 1 numa 5 l3 80 place 0 nallowed 2 affinity 80,208
+MPI rank 5/16 thread 1/16 host dec0153 cpu 209 core 81 socket 1 numa 5 l3 80 place 1 nallowed 2 affinity 81,209
+MPI rank 5/16 thread 2/16 host dec0153 cpu 210 core 82 socket 1 numa 5 l3 80 place 2 nallowed 2 affinity 82,210
+MPI rank 5/16 thread 3/16 host dec0153 cpu 211 core 83 socket 1 numa 5 l3 80 place 3 nallowed 2 affinity 83,211
+MPI rank 5/16 thread 4/16 host dec0153 cpu 212 core 84 socket 1 numa 5 l3 80 place 4 nallowed 2 affinity 84,212
+MPI rank 5/16 thread 5/16 host dec0153 cpu 213 core 85 socket 1 numa 5 l3 80 place 5 nallowed 2 affinity 85,213
+MPI rank 5/16 thread 6/16 host dec0153 cpu 214 core 86 socket 1 numa 5 l3 80 place 6 nallowed 2 affinity 86,214
+MPI rank 5/16 thread 7/16 host dec0153 cpu 215 core 87 socket 1 numa 5 l3 80 place 7 nallowed 2 affinity 87,215
+MPI rank 5/16 thread 8/16 host dec0153 cpu 216 core 88 socket 1 numa 5 l3 88 place 8 nallowed 2 affinity 88,216
+MPI rank 5/16 thread 9/16 host dec0153 cpu 217 core 89 socket 1 numa 5 l3 88 place 9 nallowed 2 affinity 89,217
+MPI rank 5/16 thread 10/16 host dec0153 cpu 218 core 90 socket 1 numa 5 l3 88 place 10 nallowed 2 affinity 90,218
+MPI rank 5/16 thread 11/16 host dec0153 cpu 219 core 91 socket 1 numa 5 l3 88 place 11 nallowed 2 affinity 91,219
+MPI rank 5/16 thread 12/16 host dec0153 cpu 220 core 92 socket 1 numa 5 l3 88 place 12 nallowed 2 affinity 92,220
+MPI rank 5/16 thread 13/16 host dec0153 cpu 221 core 93 socket 1 numa 5 l3 88 place 13 nallowed 2 affinity 93,221
+MPI rank 5/16 thread 14/16 host dec0153 cpu 222 core 94 socket 1 numa 5 l3 88 place 14 nallowed 2 affinity 94,222
+MPI rank 5/16 thread 15/16 host dec0153 cpu 223 core 95 socket 1 numa 5 l3 88 place 15 nallowed 2 affinity 95,223
+MPI rank 6/16 thread 0/16 host dec0153 cpu 96 core 96 socket 1 numa 6 l3 96 place 0 nallowed 2 affinity 96,224
+MPI rank 6/16 thread 1/16 host dec0153 cpu 225 core 97 socket 1 numa 6 l3 96 place 1 nallowed 2 affinity 97,225
+MPI rank 6/16 thread 2/16 host dec0153 cpu 226 core 98 socket 1 numa 6 l3 96 place 2 nallowed 2 affinity 98,226
+MPI rank 6/16 thread 3/16 host dec0153 cpu 227 core 99 socket 1 numa 6 l3 96 place 3 nallowed 2 affinity 99,227
+MPI rank 6/16 thread 4/16 host dec0153 cpu 228 core 100 socket 1 numa 6 l3 96 place 4 nallowed 2 affinity 100,228
+MPI rank 6/16 thread 5/16 host dec0153 cpu 229 core 101 socket 1 numa 6 l3 96 place 5 nallowed 2 affinity 101,229
+MPI rank 6/16 thread 6/16 host dec0153 cpu 230 core 102 socket 1 numa 6 l3 96 place 6 nallowed 2 affinity 102,230
+MPI rank 6/16 thread 7/16 host dec0153 cpu 231 core 103 socket 1 numa 6 l3 96 place 7 nallowed 2 affinity 103,231
+MPI rank 6/16 thread 8/16 host dec0153 cpu 232 core 104 socket 1 numa 6 l3 104 place 8 nallowed 2 affinity 104,232
+MPI rank 6/16 thread 9/16 host dec0153 cpu 233 core 105 socket 1 numa 6 l3 104 place 9 nallowed 2 affinity 105,233
+MPI rank 6/16 thread 10/16 host dec0153 cpu 234 core 106 socket 1 numa 6 l3 104 place 10 nallowed 2 affinity 106,234
+MPI rank 6/16 thread 11/16 host dec0153 cpu 235 core 107 socket 1 numa 6 l3 104 place 11 nallowed 2 affinity 107,235
+MPI rank 6/16 thread 12/16 host dec0153 cpu 236 core 108 socket 1 numa 6 l3 104 place 12 nallowed 2 affinity 108,236
+MPI rank 6/16 thread 13/16 host dec0153 cpu 237 core 109 socket 1 numa 6 l3 104 place 13 nallowed 2 affinity 109,237
+MPI rank 6/16 thread 14/16 host dec0153 cpu 238 core 110 socket 1 numa 6 l3 104 place 14 nallowed 2 affinity 110,238
+MPI rank 6/16 thread 15/16 host dec0153 cpu 239 core 111 socket 1 numa 6 l3 104 place 15 nallowed 2 affinity 111,239
+MPI rank 7/16 thread 0/16 host dec0153 cpu 240 core 112 socket 1 numa 7 l3 112 place 0 nallowed 2 affinity 112,240
+MPI rank 7/16 thread 1/16 host dec0153 cpu 113 core 113 socket 1 numa 7 l3 112 place 1 nallowed 2 affinity 113,241
+MPI rank 7/16 thread 2/16 host dec0153 cpu 114 core 114 socket 1 numa 7 l3 112 place 2 nallowed 2 affinity 114,242
+MPI rank 7/16 thread 3/16 host dec0153 cpu 115 core 115 socket 1 numa 7 l3 112 place 3 nallowed 2 affinity 115,243
+MPI rank 7/16 thread 4/16 host dec0153 cpu 116 core 116 socket 1 numa 7 l3 112 place 4 nallowed 2 affinity 116,244
+MPI rank 7/16 thread 5/16 host dec0153 cpu 117 core 117 socket 1 numa 7 l3 112 place 5 nallowed 2 affinity 117,245
+MPI rank 7/16 thread 6/16 host dec0153 cpu 118 core 118 socket 1 numa 7 l3 112 place 6 nallowed 2 affinity 118,246
+MPI rank 7/16 thread 7/16 host dec0153 cpu 119 core 119 socket 1 numa 7 l3 112 place 7 nallowed 2 affinity 119,247
+MPI rank 7/16 thread 8/16 host dec0153 cpu 120 core 120 socket 1 numa 7 l3 120 place 8 nallowed 2 affinity 120,248
+MPI rank 7/16 thread 9/16 host dec0153 cpu 121 core 121 socket 1 numa 7 l3 120 place 9 nallowed 2 affinity 121,249
+MPI rank 7/16 thread 10/16 host dec0153 cpu 122 core 122 socket 1 numa 7 l3 120 place 10 nallowed 2 affinity 122,250
+MPI rank 7/16 thread 11/16 host dec0153 cpu 123 core 123 socket 1 numa 7 l3 120 place 11 nallowed 2 affinity 123,251
+MPI rank 7/16 thread 12/16 host dec0153 cpu 124 core 124 socket 1 numa 7 l3 120 place 12 nallowed 2 affinity 124,252
+MPI rank 7/16 thread 13/16 host dec0153 cpu 125 core 125 socket 1 numa 7 l3 120 place 13 nallowed 2 affinity 125,253
+MPI rank 7/16 thread 14/16 host dec0153 cpu 126 core 126 socket 1 numa 7 l3 120 place 14 nallowed 2 affinity 126,254
+MPI rank 7/16 thread 15/16 host dec0153 cpu 127 core 127 socket 1 numa 7 l3 120 place 15 nallowed 2 affinity 127,255
+MPI rank 8/16 thread 0/16 host dec0153 cpu 128 core 0 socket 0 numa 0 l3 0 place 0 nallowed 2 affinity 0,128
+MPI rank 8/16 thread 1/16 host dec0153 cpu 129 core 1 socket 0 numa 0 l3 0 place 1 nallowed 2 affinity 1,129
+MPI rank 8/16 thread 2/16 host dec0153 cpu 130 core 2 socket 0 numa 0 l3 0 place 2 nallowed 2 affinity 2,130
+MPI rank 8/16 thread 3/16 host dec0153 cpu 131 core 3 socket 0 numa 0 l3 0 place 3 nallowed 2 affinity 3,131
+MPI rank 8/16 thread 4/16 host dec0153 cpu 132 core 4 socket 0 numa 0 l3 0 place 4 nallowed 2 affinity 4,132
+MPI rank 8/16 thread 5/16 host dec0153 cpu 133 core 5 socket 0 numa 0 l3 0 place 5 nallowed 2 affinity 5,133
+MPI rank 8/16 thread 6/16 host dec0153 cpu 134 core 6 socket 0 numa 0 l3 0 place 6 nallowed 2 affinity 6,134
+MPI rank 8/16 thread 7/16 host dec0153 cpu 135 core 7 socket 0 numa 0 l3 0 place 7 nallowed 2 affinity 7,135
+MPI rank 8/16 thread 8/16 host dec0153 cpu 136 core 8 socket 0 numa 0 l3 8 place 8 nallowed 2 affinity 8,136
+MPI rank 8/16 thread 9/16 host dec0153 cpu 137 core 9 socket 0 numa 0 l3 8 place 9 nallowed 2 affinity 9,137
+MPI rank 8/16 thread 10/16 host dec0153 cpu 138 core 10 socket 0 numa 0 l3 8 place 10 nallowed 2 affinity 10,138
+MPI rank 8/16 thread 11/16 host dec0153 cpu 139 core 11 socket 0 numa 0 l3 8 place 11 nallowed 2 affinity 11,139
+MPI rank 8/16 thread 12/16 host dec0153 cpu 140 core 12 socket 0 numa 0 l3 8 place 12 nallowed 2 affinity 12,140
+MPI rank 8/16 thread 13/16 host dec0153 cpu 141 core 13 socket 0 numa 0 l3 8 place 13 nallowed 2 affinity 13,141
+MPI rank 8/16 thread 14/16 host dec0153 cpu 142 core 14 socket 0 numa 0 l3 8 place 14 nallowed 2 affinity 14,142
+MPI rank 8/16 thread 15/16 host dec0153 cpu 143 core 15 socket 0 numa 0 l3 8 place 15 nallowed 2 affinity 15,143
+MPI rank 9/16 thread 0/16 host dec0153 cpu 144 core 16 socket 0 numa 1 l3 16 place 0 nallowed 2 affinity 16,144
+MPI rank 9/16 thread 1/16 host dec0153 cpu 145 core 17 socket 0 numa 1 l3 16 place 1 nallowed 2 affinity 17,145
+MPI rank 9/16 thread 2/16 host dec0153 cpu 146 core 18 socket 0 numa 1 l3 16 place 2 nallowed 2 affinity 18,146
+MPI rank 9/16 thread 3/16 host dec0153 cpu 147 core 19 socket 0 numa 1 l3 16 place 3 nallowed 2 affinity 19,147
+MPI rank 9/16 thread 4/16 host dec0153 cpu 148 core 20 socket 0 numa 1 l3 16 place 4 nallowed 2 affinity 20,148
+MPI rank 9/16 thread 5/16 host dec0153 cpu 149 core 21 socket 0 numa 1 l3 16 place 5 nallowed 2 affinity 21,149
+MPI rank 9/16 thread 6/16 host dec0153 cpu 150 core 22 socket 0 numa 1 l3 16 place 6 nallowed 2 affinity 22,150
+MPI rank 9/16 thread 7/16 host dec0153 cpu 151 core 23 socket 0 numa 1 l3 16 place 7 nallowed 2 affinity 23,151
+MPI rank 9/16 thread 8/16 host dec0153 cpu 152 core 24 socket 0 numa 1 l3 24 place 8 nallowed 2 affinity 24,152
+MPI rank 9/16 thread 9/16 host dec0153 cpu 153 core 25 socket 0 numa 1 l3 24 place 9 nallowed 2 affinity 25,153
+MPI rank 9/16 thread 10/16 host dec0153 cpu 154 core 26 socket 0 numa 1 l3 24 place 10 nallowed 2 affinity 26,154
+MPI rank 9/16 thread 11/16 host dec0153 cpu 155 core 27 socket 0 numa 1 l3 24 place 11 nallowed 2 affinity 27,155
+MPI rank 9/16 thread 12/16 host dec0153 cpu 156 core 28 socket 0 numa 1 l3 24 place 12 nallowed 2 affinity 28,156
+MPI rank 9/16 thread 13/16 host dec0153 cpu 157 core 29 socket 0 numa 1 l3 24 place 13 nallowed 2 affinity 29,157
+MPI rank 9/16 thread 14/16 host dec0153 cpu 158 core 30 socket 0 numa 1 l3 24 place 14 nallowed 2 affinity 30,158
+MPI rank 9/16 thread 15/16 host dec0153 cpu 159 core 31 socket 0 numa 1 l3 24 place 15 nallowed 2 affinity 31,159
+MPI rank 10/16 thread 0/16 host dec0153 cpu 160 core 32 socket 0 numa 2 l3 32 place 0 nallowed 2 affinity 32,160
+MPI rank 10/16 thread 1/16 host dec0153 cpu 161 core 33 socket 0 numa 2 l3 32 place 1 nallowed 2 affinity 33,161
+MPI rank 10/16 thread 2/16 host dec0153 cpu 162 core 34 socket 0 numa 2 l3 32 place 2 nallowed 2 affinity 34,162
+MPI rank 10/16 thread 3/16 host dec0153 cpu 163 core 35 socket 0 numa 2 l3 32 place 3 nallowed 2 affinity 35,163
+MPI rank 10/16 thread 4/16 host dec0153 cpu 164 core 36 socket 0 numa 2 l3 32 place 4 nallowed 2 affinity 36,164
+MPI rank 10/16 thread 5/16 host dec0153 cpu 165 core 37 socket 0 numa 2 l3 32 place 5 nallowed 2 affinity 37,165
+MPI rank 10/16 thread 6/16 host dec0153 cpu 166 core 38 socket 0 numa 2 l3 32 place 6 nallowed 2 affinity 38,166
+MPI rank 10/16 thread 7/16 host dec0153 cpu 167 core 39 socket 0 numa 2 l3 32 place 7 nallowed 2 affinity 39,167
+MPI rank 10/16 thread 8/16 host dec0153 cpu 168 core 40 socket 0 numa 2 l3 40 place 8 nallowed 2 affinity 40,168
+MPI rank 10/16 thread 9/16 host dec0153 cpu 169 core 41 socket 0 numa 2 l3 40 place 9 nallowed 2 affinity 41,169
+MPI rank 10/16 thread 10/16 host dec0153 cpu 170 core 42 socket 0 numa 2 l3 40 place 10 nallowed 2 affinity 42,170
+MPI rank 10/16 thread 11/16 host dec0153 cpu 171 core 43 socket 0 numa 2 l3 40 place 11 nallowed 2 affinity 43,171
+MPI rank 10/16 thread 12/16 host dec0153 cpu 172 core 44 socket 0 numa 2 l3 40 place 12 nallowed 2 affinity 44,172
+MPI rank 10/16 thread 13/16 host dec0153 cpu 173 core 45 socket 0 numa 2 l3 40 place 13 nallowed 2 affinity 45,173
+MPI rank 10/16 thread 14/16 host dec0153 cpu 174 core 46 socket 0 numa 2 l3 40 place 14 nallowed 2 affinity 46,174
+MPI rank 10/16 thread 15/16 host dec0153 cpu 175 core 47 socket 0 numa 2 l3 40 place 15 nallowed 2 affinity 47,175
+MPI rank 11/16 thread 0/16 host dec0153 cpu 176 core 48 socket 0 numa 3 l3 48 place 0 nallowed 2 affinity 48,176
+MPI rank 11/16 thread 1/16 host dec0153 cpu 177 core 49 socket 0 numa 3 l3 48 place 1 nallowed 2 affinity 49,177
+MPI rank 11/16 thread 2/16 host dec0153 cpu 178 core 50 socket 0 numa 3 l3 48 place 2 nallowed 2 affinity 50,178
+MPI rank 11/16 thread 3/16 host dec0153 cpu 179 core 51 socket 0 numa 3 l3 48 place 3 nallowed 2 affinity 51,179
+MPI rank 11/16 thread 4/16 host dec0153 cpu 180 core 52 socket 0 numa 3 l3 48 place 4 nallowed 2 affinity 52,180
+MPI rank 11/16 thread 5/16 host dec0153 cpu 181 core 53 socket 0 numa 3 l3 48 place 5 nallowed 2 affinity 53,181
+MPI rank 11/16 thread 6/16 host dec0153 cpu 182 core 54 socket 0 numa 3 l3 48 place 6 nallowed 2 affinity 54,182
+MPI rank 11/16 thread 7/16 host dec0153 cpu 183 core 55 socket 0 numa 3 l3 48 place 7 nallowed 2 affinity 55,183
+MPI rank 11/16 thread 8/16 host dec0153 cpu 184 core 56 socket 0 numa 3 l3 56 place 8 nallowed 2 affinity 56,184
+MPI rank 11/16 thread 9/16 host dec0153 cpu 185 core 57 socket 0 numa 3 l3 56 place 9 nallowed 2 affinity 57,185
+MPI rank 11/16 thread 10/16 host dec0153 cpu 186 core 58 socket 0 numa 3 l3 56 place 10 nallowed 2 affinity 58,186
+MPI rank 11/16 thread 11/16 host dec0153 cpu 187 core 59 socket 0 numa 3 l3 56 place 11 nallowed 2 affinity 59,187
+MPI rank 11/16 thread 12/16 host dec0153 cpu 188 core 60 socket 0 numa 3 l3 56 place 12 nallowed 2 affinity 60,188
+MPI rank 11/16 thread 13/16 host dec0153 cpu 189 core 61 socket 0 numa 3 l3 56 place 13 nallowed 2 affinity 61,189
+MPI rank 11/16 thread 14/16 host dec0153 cpu 190 core 62 socket 0 numa 3 l3 56 place 14 nallowed 2 affinity 62,190
+MPI rank 11/16 thread 15/16 host dec0153 cpu 191 core 63 socket 0 numa 3 l3 56 place 15 nallowed 2 affinity 63,191
+MPI rank 12/16 thread 0/16 host dec0153 cpu 192 core 64 socket 1 numa 4 l3 64 place 0 nallowed 2 affinity 64,192
+MPI rank 12/16 thread 1/16 host dec0153 cpu 193 core 65 socket 1 numa 4 l3 64 place 1 nallowed 2 affinity 65,193
+MPI rank 12/16 thread 2/16 host dec0153 cpu 194 core 66 socket 1 numa 4 l3 64 place 2 nallowed 2 affinity 66,194
+MPI rank 12/16 thread 3/16 host dec0153 cpu 195 core 67 socket 1 numa 4 l3 64 place 3 nallowed 2 affinity 67,195
+MPI rank 12/16 thread 4/16 host dec0153 cpu 196 core 68 socket 1 numa 4 l3 64 place 4 nallowed 2 affinity 68,196
+MPI rank 12/16 thread 5/16 host dec0153 cpu 197 core 69 socket 1 numa 4 l3 64 place 5 nallowed 2 affinity 69,197
+MPI rank 12/16 thread 6/16 host dec0153 cpu 198 core 70 socket 1 numa 4 l3 64 place 6 nallowed 2 affinity 70,198
+MPI rank 12/16 thread 7/16 host dec0153 cpu 199 core 71 socket 1 numa 4 l3 64 place 7 nallowed 2 affinity 71,199
+MPI rank 12/16 thread 8/16 host dec0153 cpu 200 core 72 socket 1 numa 4 l3 72 place 8 nallowed 2 affinity 72,200
+MPI rank 12/16 thread 9/16 host dec0153 cpu 201 core 73 socket 1 numa 4 l3 72 place 9 nallowed 2 affinity 73,201
+MPI rank 12/16 thread 10/16 host dec0153 cpu 202 core 74 socket 1 numa 4 l3 72 place 10 nallowed 2 affinity 74,202
+MPI rank 12/16 thread 11/16 host dec0153 cpu 203 core 75 socket 1 numa 4 l3 72 place 11 nallowed 2 affinity 75,203
+MPI rank 12/16 thread 12/16 host dec0153 cpu 204 core 76 socket 1 numa 4 l3 72 place 12 nallowed 2 affinity 76,204
+MPI rank 12/16 thread 13/16 host dec0153 cpu 205 core 77 socket 1 numa 4 l3 72 place 13 nallowed 2 affinity 77,205
+MPI rank 12/16 thread 14/16 host dec0153 cpu 206 core 78 socket 1 numa 4 l3 72 place 14 nallowed 2 affinity 78,206
+MPI rank 12/16 thread 15/16 host dec0153 cpu 207 core 79 socket 1 numa 4 l3 72 place 15 nallowed 2 affinity 79,207
+MPI rank 13/16 thread 0/16 host dec0153 cpu 208 core 80 socket 1 numa 5 l3 80 place 0 nallowed 2 affinity 80,208
+MPI rank 13/16 thread 1/16 host dec0153 cpu 209 core 81 socket 1 numa 5 l3 80 place 1 nallowed 2 affinity 81,209
+MPI rank 13/16 thread 2/16 host dec0153 cpu 210 core 82 socket 1 numa 5 l3 80 place 2 nallowed 2 affinity 82,210
+MPI rank 13/16 thread 3/16 host dec0153 cpu 211 core 83 socket 1 numa 5 l3 80 place 3 nallowed 2 affinity 83,211
+MPI rank 13/16 thread 4/16 host dec0153 cpu 212 core 84 socket 1 numa 5 l3 80 place 4 nallowed 2 affinity 84,212
+MPI rank 13/16 thread 5/16 host dec0153 cpu 213 core 85 socket 1 numa 5 l3 80 place 5 nallowed 2 affinity 85,213
+MPI rank 13/16 thread 6/16 host dec0153 cpu 214 core 86 socket 1 numa 5 l3 80 place 6 nallowed 2 affinity 86,214
+MPI rank 13/16 thread 7/16 host dec0153 cpu 215 core 87 socket 1 numa 5 l3 80 place 7 nallowed 2 affinity 87,215
+MPI rank 13/16 thread 8/16 host dec0153 cpu 216 core 88 socket 1 numa 5 l3 88 place 8 nallowed 2 affinity 88,216
+MPI rank 13/16 thread 9/16 host dec0153 cpu 217 core 89 socket 1 numa 5 l3 88 place 9 nallowed 2 affinity 89,217
+MPI rank 13/16 thread 10/16 host dec0153 cpu 218 core 90 socket 1 numa 5 l3 88 place 10 nallowed 2 affinity 90,218
+MPI rank 13/16 thread 11/16 host dec0153 cpu 219 core 91 socket 1 numa 5 l3 88 place 11 nallowed 2 affinity 91,219
+MPI rank 13/16 thread 12/16 host dec0153 cpu 220 core 92 socket 1 numa 5 l3 88 place 12 nallowed 2 affinity 92,220
+MPI rank 13/16 thread 13/16 host dec0153 cpu 221 core 93 socket 1 numa 5 l3 88 place 13 nallowed 2 affinity 93,221
+MPI rank 13/16 thread 14/16 host dec0153 cpu 222 core 94 socket 1 numa 5 l3 88 place 14 nallowed 2 affinity 94,222
+MPI rank 13/16 thread 15/16 host dec0153 cpu 223 core 95 socket 1 numa 5 l3 88 place 15 nallowed 2 affinity 95,223
+MPI rank 14/16 thread 0/16 host dec0153 cpu 224 core 96 socket 1 numa 6 l3 96 place 0 nallowed 2 affinity 96,224
+MPI rank 14/16 thread 1/16 host dec0153 cpu 225 core 97 socket 1 numa 6 l3 96 place 1 nallowed 2 affinity 97,225
+MPI rank 14/16 thread 2/16 host dec0153 cpu 226 core 98 socket 1 numa 6 l3 96 place 2 nallowed 2 affinity 98,226
+MPI rank 14/16 thread 3/16 host dec0153 cpu 227 core 99 socket 1 numa 6 l3 96 place 3 nallowed 2 affinity 99,227
+MPI rank 14/16 thread 4/16 host dec0153 cpu 228 core 100 socket 1 numa 6 l3 96 place 4 nallowed 2 affinity 100,228
+MPI rank 14/16 thread 5/16 host dec0153 cpu 229 core 101 socket 1 numa 6 l3 96 place 5 nallowed 2 affinity 101,229
+MPI rank 14/16 thread 6/16 host dec0153 cpu 230 core 102 socket 1 numa 6 l3 96 place 6 nallowed 2 affinity 102,230
+MPI rank 14/16 thread 7/16 host dec0153 cpu 231 core 103 socket 1 numa 6 l3 96 place 7 nallowed 2 affinity 103,231
+MPI rank 14/16 thread 8/16 host dec0153 cpu 232 core 104 socket 1 numa 6 l3 104 place 8 nallowed 2 affinity 104,232
+MPI rank 14/16 thread 9/16 host dec0153 cpu 233 core 105 socket 1 numa 6 l3 104 place 9 nallowed 2 affinity 105,233
+MPI rank 14/16 thread 10/16 host dec0153 cpu 234 core 106 socket 1 numa 6 l3 104 place 10 nallowed 2 affinity 106,234
+MPI rank 14/16 thread 11/16 host dec0153 cpu 235 core 107 socket 1 numa 6 l3 104 place 11 nallowed 2 affinity 107,235
+MPI rank 14/16 thread 12/16 host dec0153 cpu 236 core 108 socket 1 numa 6 l3 104 place 12 nallowed 2 affinity 108,236
+MPI rank 14/16 thread 13/16 host dec0153 cpu 237 core 109 socket 1 numa 6 l3 104 place 13 nallowed 2 affinity 109,237
+MPI rank 14/16 thread 14/16 host dec0153 cpu 238 core 110 socket 1 numa 6 l3 104 place 14 nallowed 2 affinity 110,238
+MPI rank 14/16 thread 15/16 host dec0153 cpu 239 core 111 socket 1 numa 6 l3 104 place 15 nallowed 2 affinity 111,239
+MPI rank 15/16 thread 0/16 host dec0153 cpu 240 core 112 socket 1 numa 7 l3 112 place 0 nallowed 2 affinity 112,240
+MPI rank 15/16 thread 1/16 host dec0153 cpu 241 core 113 socket 1 numa 7 l3 112 place 1 nallowed 2 affinity 113,241
+MPI rank 15/16 thread 2/16 host dec0153 cpu 242 core 114 socket 1 numa 7 l3 112 place 2 nallowed 2 affinity 114,242
+MPI rank 15/16 thread 3/16 host dec0153 cpu 243 core 115 socket 1 numa 7 l3 112 place 3 nallowed 2 affinity 115,243
+MPI rank 15/16 thread 4/16 host dec0153 cpu 244 core 116 socket 1 numa 7 l3 112 place 4 nallowed 2 affinity 116,244
+MPI rank 15/16 thread 5/16 host dec0153 cpu 245 core 117 socket 1 numa 7 l3 112 place 5 nallowed 2 affinity 117,245
+MPI rank 15/16 thread 6/16 host dec0153 cpu 246 core 118 socket 1 numa 7 l3 112 place 6 nallowed 2 affinity 118,246
+MPI rank 15/16 thread 7/16 host dec0153 cpu 247 core 119 socket 1 numa 7 l3 112 place 7 nallowed 2 affinity 119,247
+MPI rank 15/16 thread 8/16 host dec0153 cpu 248 core 120 socket 1 numa 7 l3 120 place 8 nallowed 2 affinity 120,248
+MPI rank 15/16 thread 9/16 host dec0153 cpu 249 core 121 socket 1 numa 7 l3 120 place 9 nallowed 2 affinity 121,249
+MPI rank 15/16 thread 10/16 host dec0153 cpu 250 core 122 socket 1 numa 7 l3 120 place 10 nallowed 2 affinity 122,250
+MPI rank 15/16 thread 11/16 host dec0153 cpu 251 core 123 socket 1 numa 7 l3 120 place 11 nallowed 2 affinity 123,251
+MPI rank 15/16 thread 12/16 host dec0153 cpu 252 core 124 socket 1 numa 7 l3 120 place 12 nallowed 2 affinity 124,252
+MPI rank 15/16 thread 13/16 host dec0153 cpu 253 core 125 socket 1 numa 7 l3 120 place 13 nallowed 2 affinity 125,253
+MPI rank 15/16 thread 14/16 host dec0153 cpu 254 core 126 socket 1 numa 7 l3 120 place 14 nallowed 2 affinity 126,254
+MPI rank 15/16 thread 15/16 host dec0153 cpu 255 core 127 socket 1 numa 7 l3 120 place 15 nallowed 2 affinity 127,255
+csv: rank,thread,nthreads,host,cpu,core,socket,numa,l3,place,nallowed,affinity
+csv: 0,0,16,dec0153,128,0,0,0,0,0,2,"0,128"
+csv: 0,1,16,dec0153,1,1,0,0,0,1,2,"1,129"
+csv: 0,2,16,dec0153,2,2,0,0,0,2,2,"2,130"
+csv: 0,3,16,dec0153,3,3,0,0,0,3,2,"3,131"
+csv: 0,4,16,dec0153,4,4,0,0,0,4,2,"4,132"
+csv: 0,5,16,dec0153,5,5,0,0,0,5,2,"5,133"
+csv: 0,6,16,dec0153,6,6,0,0,0,6,2,"6,134"
+csv: 0,7,16,dec0153,7,7,0,0,0,7,2,"7,135"
+csv: 0,8,16,dec0153,8,8,0,0,8,8,2,"8,136"
+csv: 0,9,16,dec0153,9,9,0,0,8,9,2,"9,137"
+csv: 0,10,16,dec0153,10,10,0,0,8,10,2,"10,138"
+csv: 0,11,16,dec0153,11,11,0,0,8,11,2,"11,139"
+csv: 0,12,16,dec0153,12,12,0,0,8,12,2,"12,140"
+csv: 0,13,16,dec0153,13,13,0,0,8,13,2,"13,141"
+csv: 0,14,16,dec0153,14,14,0,0,8,14,2,"14,142"
+csv: 0,15,16,dec0153,15,15,0,0,8,15,2,"15,143"
+csv: 1,0,16,dec0153,16,16,0,1,16,0,2,"16,144"
+csv: 1,1,16,dec0153,17,17,0,1,16,1,2,"17,145"
+csv: 1,2,16,dec0153,18,18,0,1,16,2,2,"18,146"
+csv: 1,3,16,dec0153,19,19,0,1,16,3,2,"19,147"
+csv: 1,4,16,dec0153,20,20,0,1,16,4,2,"20,148"
+csv: 1,5,16,dec0153,21,21,0,1,16,5,2,"21,149"
+csv: 1,6,16,dec0153,22,22,0,1,16,6,2,"22,150"
+csv: 1,7,16,dec0153,23,23,0,1,16,7,2,"23,151"
+csv: 1,8,16,dec0153,24,24,0,1,24,8,2,"24,152"
+csv: 1,9,16,dec0153,25,25,0,1,24,9,2,"25,153"
+csv: 1,10,16,dec0153,26,26,0,1,24,10,2,"26,154"
+csv: 1,11,16,dec0153,27,27,0,1,24,11,2,"27,155"
+csv: 1,12,16,dec0153,28,28,0,1,24,12,2,"28,156"
+csv: 1,13,16,dec0153,29,29,0,1,24,13,2,"29,157"
+csv: 1,14,16,dec0153,30,30,0,1,24,14,2,"30,158"
+csv: 1,15,16,dec0153,31,31,0,1,24,15,2,"31,159"
+csv: 2,0,16,dec0153,160,32,0,2,32,0,2,"32,160"
+csv: 2,1,16,dec0153,33,33,0,2,32,1,2,"33,161"
+csv: 2,2,16,dec0153,34,34,0,2,32,2,2,"34,162"
+csv: 2,3,16,dec0153,35,35,0,2,32,3,2,"35,163"
+csv: 2,4,16,dec0153,36,36,0,2,32,4,2,"36,164"
+csv: 2,5,16,dec0153,37,37,0,2,32,5,2,"37,165"
+csv: 2,6,16,dec0153,38,38,0,2,32,6,2,"38,166"
+csv: 2,7,16,dec0153,39,39,0,2,32,7,2,"39,167"
+csv: 2,8,16,dec0153,40,40,0,2,40,8,2,"40,168"
+csv: 2,9,16,dec0153,41,41,0,2,40,9,2,"41,169"
+csv: 2,10,16,dec0153,42,42,0,2,40,10,2,"42,170"
+csv: 2,11,16,dec0153,43,43,0,2,40,11,2,"43,171"
+csv: 2,12,16,dec0153,44,44,0,2,40,12,2,"44,172"
+csv: 2,13,16,dec0153,45,45,0,2,40,13,2,"45,173"
+csv: 2,14,16,dec0153,46,46,0,2,40,14,2,"46,174"
+csv: 2,15,16,dec0153,47,47,0,2,40,15,2,"47,175"
+csv: 3,0,16,dec0153,176,48,0,3,48,0,2,"48,176"
+csv: 3,1,16,dec0153,177,49,0,3,48,1,2,"49,177"
+csv: 3,2,16,dec0153,178,50,0,3,48,2,2,"50,178"
+csv: 3,3,16,dec0153,179,51,0,3,48,3,2,"51,179"
+csv: 3,4,16,dec0153,180,52,0,3,48,4,2,"52,180"
+csv: 3,5,16,dec0153,181,53,0,3,48,5,2,"53,181"
+csv: 3,6,16,dec0153,182,54,0,3,48,6,2,"54,182"
+csv: 3,7,16,dec0153,183,55,0,3,48,7,2,"55,183"
+csv: 3,8,16,dec0153,184,56,0,3,56,8,2,"56,184"
+csv: 3,9,16,dec0153,185,57,0,3,56,9,2,"57,185"
+csv: 3,10,16,dec0153,186,58,0,3,56,10,2,"58,186"
+csv: 3,11,16,dec0153,187,59,0,3,56,11,2,"59,187"
+csv: 3,12,16,dec0153,188,60,0,3,56,12,2,"60,188"
+csv: 3,13,16,dec0153,189,61,0,3,56,13,2,"61,189"
+csv: 3,14,16,dec0153,190,62,0,3,56,14,2,"62,190"
+csv: 3,15,16,dec0153,191,63,0,3,56,15,2,"63,191"
+csv: 4,0,16,dec0153,192,64,1,4,64,0,2,"64,192"
+csv: 4,1,16,dec0153,193,65,1,4,64,1,2,"65,193"
+csv: 4,2,16,dec0153,194,66,1,4,64,2,2,"66,194"
+csv: 4,3,16,dec0153,195,67,1,4,64,3,2,"67,195"
+csv: 4,4,16,dec0153,196,68,1,4,64,4,2,"68,196"
+csv: 4,5,16,dec0153,197,69,1,4,64,5,2,"69,197"
+csv: 4,6,16,dec0153,198,70,1,4,64,6,2,"70,198"
+csv: 4,7,16,dec0153,199,71,1,4,64,7,2,"71,199"
+csv: 4,8,16,dec0153,200,72,1,4,72,8,2,"72,200"
+csv: 4,9,16,dec0153,201,73,1,4,72,9,2,"73,201"
+csv: 4,10,16,dec0153,202,74,1,4,72,10,2,"74,202"
+csv: 4,11,16,dec0153,203,75,1,4,72,11,2,"75,203"
+csv: 4,12,16,dec0153,204,76,1,4,72,12,2,"76,204"
+csv: 4,13,16,dec0153,205,77,1,4,72,13,2,"77,205"
+csv: 4,14,16,dec0153,206,78,1,4,72,14,2,"78,206"
+csv: 4,15,16,dec0153,207,79,1,4,72,15,2,"79,207"
+csv: 5,0,16,dec0153,80,80,1,5,80,0,2,"80,208"
+csv: 5,1,16,dec0153,209,81,1,5,80,1,2,"81,209"
+csv: 5,2,16,dec0153,210,82,1,5,80,2,2,"82,210"
+csv: 5,3,16,dec0153,211,83,1,5,80,3,2,"83,211"
+csv: 5,4,16,dec0153,212,84,1,5,80,4,2,"84,212"
+csv: 5,5,16,dec0153,213,85,1,5,80,5,2,"85,213"
+csv: 5,6,16,dec0153,214,86,1,5,80,6,2,"86,214"
+csv: 5,7,16,dec0153,215,87,1,5,80,7,2,"87,215"
+csv: 5,8,16,dec0153,216,88,1,5,88,8,2,"88,216"
+csv: 5,9,16,dec0153,217,89,1,5,88,9,2,"89,217"
+csv: 5,10,16,dec0153,218,90,1,5,88,10,2,"90,218"
+csv: 5,11,16,dec0153,219,91,1,5,88,11,2,"91,219"
+csv: 5,12,16,dec0153,220,92,1,5,88,12,2,"92,220"
+csv: 5,13,16,dec0153,221,93,1,5,88,13,2,"93,221"
+csv: 5,14,16,dec0153,222,94,1,5,88,14,2,"94,222"
+csv: 5,15,16,dec0153,223,95,1,5,88,15,2,"95,223"
+csv: 6,0,16,dec0153,96,96,1,6,96,0,2,"96,224"
+csv: 6,1,16,dec0153,225,97,1,6,96,1,2,"97,225"
+csv: 6,2,16,dec0153,226,98,1,6,96,2,2,"98,226"
+csv: 6,3,16,dec0153,227,99,1,6,96,3,2,"99,227"
+csv: 6,4,16,dec0153,228,100,1,6,96,4,2,"100,228"
+csv: 6,5,16,dec0153,229,101,1,6,96,5,2,"101,229"
+csv: 6,6,16,dec0153,230,102,1,6,96,6,2,"102,230"
+csv: 6,7,16,dec0153,231,103,1,6,96,7,2,"103,231"
+csv: 6,8,16,dec0153,232,104,1,6,104,8,2,"104,232"
+csv: 6,9,16,dec0153,233,105,1,6,104,9,2,"105,233"
+csv: 6,10,16,dec0153,234,106,1,6,104,10,2,"106,234"
+csv: 6,11,16,dec0153,235,107,1,6,104,11,2,"107,235"
+csv: 6,12,16,dec0153,236,108,1,6,104,12,2,"108,236"
+csv: 6,13,16,dec0153,237,109,1,6,104,13,2,"109,237"
+csv: 6,14,16,dec0153,238,110,1,6,104,14,2,"110,238"
+csv: 6,15,16,dec0153,239,111,1,6,104,15,2,"111,239"
+csv: 7,0,16,dec0153,240,112,1,7,112,0,2,"112,240"
+csv: 7,1,16,dec0153,113,113,1,7,112,1,2,"113,241"
+csv: 7,2,16,dec0153,114,114,1,7,112,2,2,"114,242"
+csv: 7,3,16,dec0153,115,115,1,7,112,3,2,"115,243"
+csv: 7,4,16,dec0153,116,116,1,7,112,4,2,"116,244"
+csv: 7,5,16,dec0153,117,117,1,7,112,5,2,"117,245"
+csv: 7,6,16,dec0153,118,118,1,7,112,6,2,"118,246"
+csv: 7,7,16,dec0153,119,119,1,7,112,7,2,"119,247"
+csv: 7,8,16,dec0153,120,120,1,7,120,8,2,"120,248"
+csv: 7,9,16,dec0153,121,121,1,7,120,9,2,"121,249"
+csv: 7,10,16,dec0153,122,122,1,7,120,10,2,"122,250"
+csv: 7,11,16,dec0153,123,123,1,7,120,11,2,"123,251"
+csv: 7,12,16,dec0153,124,124,1,7,120,12,2,"124,252"
+csv: 7,13,16,dec0153,125,125,1,7,120,13,2,"125,253"
+csv: 7,14,16,dec0153,126,126,1,7,120,14,2,"126,254"
+csv: 7,15,16,dec0153,127,127,1,7,120,15,2,"127,255"
+csv: 8,0,16,dec0153,128,0,0,0,0,0,2,"0,128"
+csv: 8,1,16,dec0153,129,1,0,0,0,1,2,"1,129"
+csv: 8,2,16,dec0153,130,2,0,0,0,2,2,"2,130"
+csv: 8,3,16,dec0153,131,3,0,0,0,3,2,"3,131"
+csv: 8,4,16,dec0153,132,4,0,0,0,4,2,"4,132"
+csv: 8,5,16,dec0153,133,5,0,0,0,5,2,"5,133"
+csv: 8,6,16,dec0153,134,6,0,0,0,6,2,"6,134"
+csv: 8,7,16,dec0153,135,7,0,0,0,7,2,"7,135"
+csv: 8,8,16,dec0153,136,8,0,0,8,8,2,"8,136"
+csv: 8,9,16,dec0153,137,9,0,0,8,9,2,"9,137"
+csv: 8,10,16,dec0153,138,10,0,0,8,10,2,"10,138"
+csv: 8,11,16,dec0153,139,11,0,0,8,11,2,"11,139"
+csv: 8,12,16,dec0153,140,12,0,0,8,12,2,"12,140"
+csv: 8,13,16,dec0153,141,13,0,0,8,13,2,"13,141"
+csv: 8,14,16,dec0153,142,14,0,0,8,14,2,"14,142"
+csv: 8,15,16,dec0153,143,15,0,0,8,15,2,"15,143"
+csv: 9,0,16,dec0153,144,16,0,1,16,0,2,"16,144"
+csv: 9,1,16,dec0153,145,17,0,1,16,1,2,"17,145"
+csv: 9,2,16,dec0153,146,18,0,1,16,2,2,"18,146"
+csv: 9,3,16,dec0153,147,19,0,1,16,3,2,"19,147"
+csv: 9,4,16,dec0153,148,20,0,1,16,4,2,"20,148"
+csv: 9,5,16,dec0153,149,21,0,1,16,5,2,"21,149"
+csv: 9,6,16,dec0153,150,22,0,1,16,6,2,"22,150"
+csv: 9,7,16,dec0153,151,23,0,1,16,7,2,"23,151"
+csv: 9,8,16,dec0153,152,24,0,1,24,8,2,"24,152"
+csv: 9,9,16,dec0153,153,25,0,1,24,9,2,"25,153"
+csv: 9,10,16,dec0153,154,26,0,1,24,10,2,"26,154"
+csv: 9,11,16,dec0153,155,27,0,1,24,11,2,"27,155"
+csv: 9,12,16,dec0153,156,28,0,1,24,12,2,"28,156"
+csv: 9,13,16,dec0153,157,29,0,1,24,13,2,"29,157"
+csv: 9,14,16,dec0153,158,30,0,1,24,14,2,"30,158"
+csv: 9,15,16,dec0153,159,31,0,1,24,15,2,"31,159"
+csv: 10,0,16,dec0153,160,32,0,2,32,0,2,"32,160"
+csv: 10,1,16,dec0153,161,33,0,2,32,1,2,"33,161"
+csv: 10,2,16,dec0153,162,34,0,2,32,2,2,"34,162"
+csv: 10,3,16,dec0153,163,35,0,2,32,3,2,"35,163"
+csv: 10,4,16,dec0153,164,36,0,2,32,4,2,"36,164"
+csv: 10,5,16,dec0153,165,37,0,2,32,5,2,"37,165"
+csv: 10,6,16,dec0153,166,38,0,2,32,6,2,"38,166"
+csv: 10,7,16,dec0153,167,39,0,2,32,7,2,"39,167"
+csv: 10,8,16,dec0153,168,40,0,2,40,8,2,"40,168"
+csv: 10,9,16,dec0153,169,41,0,2,40,9,2,"41,169"
+csv: 10,10,16,dec0153,170,42,0,2,40,10,2,"42,170"
+csv: 10,11,16,dec0153,171,43,0,2,40,11,2,"43,171"
+csv: 10,12,16,dec0153,172,44,0,2,40,12,2,"44,172"
+csv: 10,13,16,dec0153,173,45,0,2,40,13,2,"45,173"
+csv: 10,14,16,dec0153,174,46,0,2,40,14,2,"46,174"
+csv: 10,15,16,dec0153,175,47,0,2,40,15,2,"47,175"
+csv: 11,0,16,dec0153,176,48,0,3,48,0,2,"48,176"
+csv: 11,1,16,dec0153,177,49,0,3,48,1,2,"49,177"
+csv: 11,2,16,dec0153,178,50,0,3,48,2,2,"50,178"
+csv: 11,3,16,dec0153,179,51,0,3,48,3,2,"51,179"
+csv: 11,4,16,dec0153,180,52,0,3,48,4,2,"52,180"
+csv: 11,5,16,dec0153,181,53,0,3,48,5,2,"53,181"
+csv: 11,6,16,dec0153,182,54,0,3,48,6,2,"54,182"
+csv: 11,7,16,dec0153,183,55,0,3,48,7,2,"55,183"
+csv: 11,8,16,dec0153,184,56,0,3,56,8,2,"56,184"
+csv: 11,9,16,dec0153,185,57,0,3,56,9,2,"57,185"
+csv: 11,10,16,dec0153,186,58,0,3,56,10,2,"58,186"
+csv: 11,11,16,dec0153,187,59,0,3,56,11,2,"59,187"
+csv: 11,12,16,dec0153,188,60,0,3,56,12,2,"60,188"
+csv: 11,13,16,dec0153,189,61,0,3,56,13,2,"61,189"
+csv: 11,14,16,dec0153,190,62,0,3,56,14,2,"62,190"
+csv: 11,15,16,dec0153,191,63,0,3,56,15,2,"63,191"
+csv: 12,0,16,dec0153,192,64,1,4,64,0,2,"64,192"
+csv: 12,1,16,dec0153,193,65,1,4,64,1,2,"65,193"
+csv: 12,2,16,dec0153,194,66,1,4,64,2,2,"66,194"
+csv: 12,3,16,dec0153,195,67,1,4,64,3,2,"67,195"
+csv: 12,4,16,dec0153,196,68,1,4,64,4,2,"68,196"
+csv: 12,5,16,dec0153,197,69,1,4,64,5,2,"69,197"
+csv: 12,6,16,dec0153,198,70,1,4,64,6,2,"70,198"
+csv: 12,7,16,dec0153,199,71,1,4,64,7,2,"71,199"
+csv: 12,8,16,dec0153,200,72,1,4,72,8,2,"72,200"
+csv: 12,9,16,dec0153,201,73,1,4,72,9,2,"73,201"
+csv: 12,10,16,dec0153,202,74,1,4,72,10,2,"74,202"
+csv: 12,11,16,dec0153,203,75,1,4,72,11,2,"75,203"
+csv: 12,12,16,dec0153,204,76,1,4,72,12,2,"76,204"
+csv: 12,13,16,dec0153,205,77,1,4,72,13,2,"77,205"
+csv: 12,14,16,dec0153,206,78,1,4,72,14,2,"78,206"
+csv: 12,15,16,dec0153,207,79,1,4,72,15,2,"79,207"
+csv: 13,0,16,dec0153,208,80,1,5,80,0,2,"80,208"
+csv: 13,1,16,dec0153,209,81,1,5,80,1,2,"81,209"
+csv: 13,2,16,dec0153,210,82,1,5,80,2,2,"82,210"
+csv: 13,3,16,dec0153,211,83,1,5,80,3,2,"83,211"
+csv: 13,4,16,dec0153,212,84,1,5,80,4,2,"84,212"
+csv: 13,5,16,dec0153,213,85,1,5,80,5,2,"85,213"
+csv: 13,6,16,dec0153,214,86,1,5,80,6,2,"86,214"
+csv: 13,7,16,dec0153,215,87,1,5,80,7,2,"87,215"
+csv: 13,8,16,dec0153,216,88,1,5,88,8,2,"88,216"
+csv: 13,9,16,dec0153,217,89,1,5,88,9,2,"89,217"
+csv: 13,10,16,dec0153,218,90,1,5,88,10,2,"90,218"
+csv: 13,11,16,dec0153,219,91,1,5,88,11,2,"91,219"
+csv: 13,12,16,dec0153,220,92,1,5,88,12,2,"92,220"
+csv: 13,13,16,dec0153,221,93,1,5,88,13,2,"93,221"
+csv: 13,14,16,dec0153,222,94,1,5,88,14,2,"94,222"
+csv: 13,15,16,dec0153,223,95,1,5,88,15,2,"95,223"
+csv: 14,0,16,dec0153,224,96,1,6,96,0,2,"96,224"
+csv: 14,1,16,dec0153,225,97,1,6,96,1,2,"97,225"
+csv: 14,2,16,dec0153,226,98,1,6,96,2,2,"98,226"
+csv: 14,3,16,dec0153,227,99,1,6,96,3,2,"99,227"
+csv: 14,4,16,dec0153,228,100,1,6,96,4,2,"100,228"
+csv: 14,5,16,dec0153,229,101,1,6,96,5,2,"101,229"
+csv: 14,6,16,dec0153,230,102,1,6,96,6,2,"102,230"
+csv: 14,7,16,dec0153,231,103,1,6,96,7,2,"103,231"
+csv: 14,8,16,dec0153,232,104,1,6,104,8,2,"104,232"
+csv: 14,9,16,dec0153,233,105,1,6,104,9,2,"105,233"
+csv: 14,10,16,dec0153,234,106,1,6,104,10,2,"106,234"
+csv: 14,11,16,dec0153,235,107,1,6,104,11,2,"107,235"
+csv: 14,12,16,dec0153,236,108,1,6,104,12,2,"108,236"
+csv: 14,13,16,dec0153,237,109,1,6,104,13,2,"109,237"
+csv: 14,14,16,dec0153,238,110,1,6,104,14,2,"110,238"
+csv: 14,15,16,dec0153,239,111,1,6,104,15,2,"111,239"
+csv: 15,0,16,dec0153,240,112,1,7,112,0,2,"112,240"
+csv: 15,1,16,dec0153,241,113,1,7,112,1,2,"113,241"
+csv: 15,2,16,dec0153,242,114,1,7,112,2,2,"114,242"
+csv: 15,3,16,dec0153,243,115,1,7,112,3,2,"115,243"
+csv: 15,4,16,dec0153,244,116,1,7,112,4,2,"116,244"
+csv: 15,5,16,dec0153,245,117,1,7,112,5,2,"117,245"
+csv: 15,6,16,dec0153,246,118,1,7,112,6,2,"118,246"
+csv: 15,7,16,dec0153,247,119,1,7,112,7,2,"119,247"
+csv: 15,8,16,dec0153,248,120,1,7,120,8,2,"120,248"
+csv: 15,9,16,dec0153,249,121,1,7,120,9,2,"121,249"
+csv: 15,10,16,dec0153,250,122,1,7,120,10,2,"122,250"
+csv: 15,11,16,dec0153,251,123,1,7,120,11,2,"123,251"
+csv: 15,12,16,dec0153,252,124,1,7,120,12,2,"124,252"
+csv: 15,13,16,dec0153,253,125,1,7,120,13,2,"125,253"
+csv: 15,14,16,dec0153,254,126,1,7,120,14,2,"126,254"
+csv: 15,15,16,dec0153,255,127,1,7,120,15,2,"127,255"

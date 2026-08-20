@@ -73,6 +73,15 @@ fi
 exe="/container/bin/report_placement"
 results=""
 
+# Probe this node's topology once.  The placement rules derive every threshold
+# from it -- threads per core, the minimum L3 / NUMA / socket groups a rank of N
+# cores can occupy -- instead of carrying Milan constants, and check_placement.sh
+# picks the file up from the directory the reports are written into.  It is also
+# the only record of what hardware certified these images.
+probe_topology "$(pwd)/topology.json" \
+    && { echo && echo "--- node topology ---" && cat topology.json; } \
+    || echo "topology probe failed; falling back to built-in Derecho constants"
+
 # This gives one physical core per thread
 #export OMP_PROC_BIND=spread
 #export OMP_PLACES=threads
@@ -180,9 +189,15 @@ for img in ${IMAGES}; do
     run_placement "placement_${tag}_bound.out" $(( NUM_NODES * MPIPROCS_PER_CHUNK )) $OMP_NUM_THREADS \
         "${launcher}" "${exe}" ${bound_flags}
     grep -m1 "^# mpi " "placement_${tag}_bound.out" | sed 's/^/    /'
-    placement_summary "placement_${tag}_bound.out" && a=PASS || a=FAIL
+    # PASS/FAIL certifies the IMAGE, so it keys on `fail` only: a warn names a
+    # suboptimal placement, which is a property of how this job asked for the
+    # binding, not of whether the container's MPI overlay works.  The pathology
+    # is printed either way by placement_summary above.
+    placement_summary "placement_${tag}_bound.out"
+    v="$(placement_verdict "placement_${tag}_bound.out")"
+    case "${v}" in fail|nodata) a=FAIL ;; *) a=PASS ;; esac
 
-    results="${results}\n${tag} ${a} ok"
+    results="${results}\n${tag} ${a} ${v}"
 done
 
 #-------------------------------------------------------------------------------
@@ -198,8 +213,9 @@ echo -e "${results}" | while read -r t a n; do
 done
 echo
 echo "  PLACEMENT=PASS means the host MPI library overlay worked (for mpich this"
-echo "  is the Cray ABI shim; for openmpi it's a direct bind), every thread"
-echo "  landed on its own physical core, and no avoidable chiplet straddling"
-echo "  occurred.  FAIL prints the specific pathology above."
+echo "  is the Cray ABI shim; for openmpi it's a direct bind) and no severe"
+echo "  placement pathology was found.  The NOTE column carries the checker's own"
+echo "  verdict: ok, or warn for an avoidable straddle that does not disqualify"
+echo "  the image.  FAIL prints the specific pathology above."
 
 echo && echo "Done at $(date)"

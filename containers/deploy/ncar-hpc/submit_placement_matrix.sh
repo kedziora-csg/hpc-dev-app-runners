@@ -99,13 +99,13 @@ if [ "${COLLATE}" = "1" ]; then
     for r in "${reports[@]}"; do
         img="$(basename "$(dirname "${r}")")"
         cfg="$(basename "${r}" .out)"; cfg="${cfg#placement_}"
-        # Expected L3 groups per rank: 1 unless the rank spans two chiplets.
-        # 8 ranks x 16 threads takes 16 cores, and Milan puts 8 cores per L3.
-        case "${cfg}" in
-            numa) want=2 ;;
-            *)    want=1 ;;
-        esac
-        check_placement_rc "${r}" "${want}" && verdict=PASS || verdict=FAIL
+        # No per-configuration expectation here: the checker derives what this
+        # run should have got from its own OMP_PLACES header and the
+        # topology.json the job probed into this directory.  Keep it that way --
+        # a `case "${cfg}"` arm would be a second copy of a constant the PBS
+        # script carries, and it can only be right about configurations someone
+        # has already thought of.
+        verdict="$(placement_verdict "${r}")"
         t="$(dirname "${r}")/timings.txt"
         wall="$(awk -v c="${cfg}" '$1==c {print $2}' "${t}" 2>/dev/null | tail -1)"
         gf="$(awk -v c="${cfg}" '$1==c {print $4}' "${t}" 2>/dev/null | tail -1)"
@@ -113,8 +113,11 @@ if [ "${COLLATE}" = "1" ]; then
             "${img}" "${cfg}" "${verdict}" "${wall:--}" "${gf:--}"
     done
     echo
-    echo "PLACEMENT=FAIL means the binding was not what the configuration asked"
-    echo "for -- do not compare that row's numbers against the others."
+    echo "PLACEMENT=fail means the binding was not what the configuration asked"
+    echo "for -- do not compare that row's numbers against the others.  warn means"
+    echo "the placement is suboptimal but is what was measured, so the row still"
+    echo "counts; run the job's placement_*.out through libexec/check_placement.sh"
+    echo "(placement_summary) to see which pathology fired."
     echo "GFLOPS is HPCG's own rating; blank for non-HPCG workloads."
     exit 0
 fi

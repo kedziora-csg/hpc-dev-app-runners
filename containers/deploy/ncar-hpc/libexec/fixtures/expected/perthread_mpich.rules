@@ -1,0 +1,6 @@
+# Derived (see fixtures/derived/make_derived.sh): the good binding re-declared
+# as OMP_PLACES=threads, one logical CPU per thread.
+#
+# Nothing may fire.  A rule that starts firing here is asserting one OMP_PLACES
+# value against a run that declared the other, which makes every `threads`
+# configuration in the sweep unreadable.

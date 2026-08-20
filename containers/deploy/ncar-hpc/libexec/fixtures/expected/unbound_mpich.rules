@@ -1,0 +1,4 @@
+# Derived: every mask widened to the whole node, as if --cpu-bind none.
+# The `cpu` column still looks tidy -- the kernel's initial placement is neat
+# even in a completely unbound job -- so only the MASK catches this.
+unpinned

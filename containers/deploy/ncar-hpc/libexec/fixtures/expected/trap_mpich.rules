@@ -1,0 +1,4 @@
+# -ppn 8 with no binding flags.  Cray PALS pins each RANK to one hardware
+# thread, so all 16 OpenMP threads of a rank pile onto that single CPU.
+oversubscription
+partial_core

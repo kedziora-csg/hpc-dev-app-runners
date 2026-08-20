@@ -1,0 +1,5 @@
+# Derived: the good binding re-declared as OMP_PLACES=threads, masks untouched.
+# Each thread holds a whole core where it asked for a single logical CPU, so the
+# SMT sibling is available to it and the run is not the experiment it claims to
+# be.  Warn, not fail: the placement is clean, it is just not the declared one.
+wide_mask

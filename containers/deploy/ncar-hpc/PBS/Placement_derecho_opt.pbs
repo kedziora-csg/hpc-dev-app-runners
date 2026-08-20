@@ -42,9 +42,14 @@
 #       qsub -v APP=/container/osu-micro-benchmarks/7.5/libexec/\
 #osu-micro-benchmarks/mpi/collective/osu_alltoall,APP_ARGS="-m 4:8192" ...
 #
-# Each configuration prints a placement report first, then a PASS/FAIL summary of
-# whether the binding is what was asked for, then the timed workload.  Placement
-# is therefore never a confounder in the timings.
+# Each configuration prints a placement report first, then names any pathology
+# found in it, then the timed workload.  Placement is therefore never a
+# confounder in the timings.
+#
+# The verdict is DERIVED, not asserted against a per-configuration expectation:
+# the checker reads the run's own OMP_PLACES out of the report and crosses it
+# with the topology probed at the top of this job.  A configuration is a name, a
+# rank count and a thread count -- nothing else.
 #-------------------------------------------------------------------------------
 
 >/dev/null 2>&1 \
@@ -118,8 +123,9 @@ ${launcher} ldd ${REPORT_EXE} | grep -i "libmpi" \
 
 #-------------------------------------------------------------------------------
 # The placement validator lives in libexec so the control script and the other
-# PBS scripts share one copy.  Provides check_placement (prints) and
-# check_placement_rc (silent, returns 0/1).
+# PBS scripts share one copy.  Provides placement_summary (prints, 0/1/2 for
+# clean/warn/fail) and placement_summary_rc (silent, 0 unless a `fail` rule
+# fired, i.e. "is this row comparable?").
 #-------------------------------------------------------------------------------
 . "${NCAR_HPC_ROOT}/libexec/check_placement.sh" \
     || { echo "cannot locate ${NCAR_HPC_ROOT}/libexec/check_placement.sh"; exit 1; }
@@ -131,13 +137,27 @@ cd "${RESULTS_DIR}" \
     || { echo "cannot use RESULTS_DIR=${RESULTS_DIR}"; exit 1; }
 echo && echo "results directory: ${RESULTS_DIR}"
 
+# Probe this node's topology once, into the results directory.  Every threshold
+# the placement rules use -- threads per core, the minimum L3 / NUMA / socket
+# groups a rank of N cores can occupy -- is derived from this file, and the
+# checker picks it up from the directory each report lives in.  It is also the
+# only record of what the run actually ran on: without it a results directory
+# cannot say whether it came off a Milan node or something else.
+probe_topology "${RESULTS_DIR}/topology.json" \
+    && { echo "--- node topology ---"; cat "${RESULTS_DIR}/topology.json"; } \
+    || echo "topology probe failed; falling back to built-in Derecho constants"
+
 #-------------------------------------------------------------------------------
-# The sweep.  name : ranks-per-node : threads : expected L3 groups per rank
+# The sweep.  name : ranks-per-node : threads
+#
+# A configuration states only what it asks for.  What it should GET -- L3, NUMA
+# and socket footprint, threads per core -- follows from the probed topology, so
+# do not add an expectation field here for the checker to assert against.
 #-------------------------------------------------------------------------------
 CONFIGS=(
-    "pureMPI:128:1:1"
-    "ccd:16:8:1"
-    "numa:8:16:2"
+    "pureMPI:128:1"
+    "ccd:16:8"
+    "numa:8:16"
 )
 
 # Two optionts for threads on Derecho, since it has SMT on:
@@ -173,7 +193,7 @@ if [ "${APP}" = "hpcg" ]; then
 fi
 
 for cfg in "${CONFIGS[@]}"; do
-    IFS=: read -r name ppn nthreads want_l3 <<< "${cfg}"
+    IFS=: read -r name ppn nthreads <<< "${cfg}"
     nranks=$(( NNODES * ppn ))
 
     # Translate ranks/node + depth into this run's MPI dialect: Cray PALS
@@ -205,7 +225,8 @@ for cfg in "${CONFIGS[@]}"; do
     echo "  --- first rank ---"
     grep '^MPI rank 0/' "${out}" | head -4
     echo "  --- placement check ---"
-    check_placement "${out}" "${want_l3}"
+    placement_summary "${out}"
+    place="$(placement_verdict "${out}")"
 
     if [ -n "${APP}" ]; then
         echo && echo "--- ldd check on $APP ---"
@@ -247,8 +268,8 @@ for cfg in "${CONFIGS[@]}"; do
         fi
         cd ..
 
-        echo "  ${name}: wall=${wall}s  exit=${rc}  gflops=${score}"
-        echo "${name} ${wall} ${rc} ${score}" >> timings.txt
+        echo "  ${name}: wall=${wall}s  exit=${rc}  gflops=${score}  placement=${place}"
+        echo "${name} ${wall} ${rc} ${score} ${place}" >> timings.txt
     fi
 done
 
@@ -258,14 +279,15 @@ if [ -n "${APP}" ] && [ -f timings.txt ]; then
     echo "======================================================================="
     echo "SUMMARY  (${APP})"
     echo "======================================================================="
-    printf "  %-10s %8s %6s %10s\n" config wall_s exit gflops
-    while read -r n t r g; do
-        printf "  %-10s %8s %6s %10s\n" "$n" "$t" "$r" "${g:--}"
+    printf "  %-10s %8s %6s %10s %10s\n" config wall_s exit gflops placement
+    while read -r n t r g p; do
+        printf "  %-10s %8s %6s %10s %10s\n" "$n" "$t" "$r" "${g:--}" "${p:--}"
     done < timings.txt
     echo
-    echo "  Lowest wall time (or highest GFLOP/s) wins, but only compare rows"
-    echo "  whose placement check passed -- a mis-bound run is measuring the"
-    echo "  binding, not the code."
+    echo "  Lowest wall time (or highest GFLOP/s) wins, but placement=fail rows"
+    echo "  never win -- a mis-bound run is measuring the binding, not the code."
+    echo "  placement=warn is comparable: the binding is suboptimal but it is the"
+    echo "  binding that was measured, and the pathology is named above."
 fi
 
 # Machine-readable rows from every configuration, for spreadsheet work:

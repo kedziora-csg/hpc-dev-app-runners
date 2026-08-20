@@ -1,0 +1,8 @@
+# Derived: 16 ranks x 16 threads on ONE node -- 256 threads on 128 cores, so
+# both SMT siblings of every core are computing.  That is the geometry the run
+# asked for, so nothing may fire.
+#
+# This is the guard on the occupancy threshold.  want_occ is derived as
+# ceil(threads-on-this-node / cores-on-this-node): 1 for the usual 128-thread
+# node, 2 here.  Hardcoding one thread per core would make every deliberate SMT
+# run look oversubscribed and drop it from comparison.

@@ -1,0 +1,5 @@
+# Derived: two allowed CPUs per thread, but on two DIFFERENT cores.
+# The mask SIZE is correct for OMP_PLACES=cores, so counting nallowed passes
+# this.  Mapping the mask back to physical cores is what catches it, and that is
+# what the smt_layout carried in topology.json is for.
+split_mask

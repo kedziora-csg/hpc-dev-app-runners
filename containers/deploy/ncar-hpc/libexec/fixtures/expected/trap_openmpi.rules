@@ -1,0 +1,5 @@
+# -N 8 with no binding flags.  Open MPI core-pins each thread correctly -- the
+# masks are clean, which is why mask rules must NOT fire here -- but every rank
+# starts from core 0, so 8 threads share each core.  Only the occupancy rule
+# catches this, and that is the whole reason it exists.
+oversubscription

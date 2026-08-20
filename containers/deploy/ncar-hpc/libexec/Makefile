@@ -37,6 +37,12 @@ echo-derecho-hpcg:
 echo:
 	@echo "$(all_images)"
 
+# The placement checker's regression suite.  No node hours, no container, no
+# scheduler -- it runs against the frozen reports in fixtures/, so run it after
+# any edit to check_placement.sh, placement_rules.sh or probe_topology.sh.
+test:
+	@./self_test.sh
+
 clean:
 	rm -f *~
 

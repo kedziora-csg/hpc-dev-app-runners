@@ -1,0 +1,11 @@
+# Derived: every rank shifted 4 cores up the node.  Masks are clean whole cores
+# and nothing is oversubscribed -- the ranks are just badly placed, which is the
+# one class of pathology the mask rules cannot see.
+#
+# All three thresholds here are DERIVED from the probed topology crossed with the
+# rank's actual core footprint (min_l3 / min_numa / min_sock).  Comparing NUMA or
+# socket span against an absolute 1 instead would pass every rank narrow enough
+# to fit one domain and never fire at all.
+l3_straddle
+numa_straddle
+socket_straddle
