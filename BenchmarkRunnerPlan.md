@@ -1,6 +1,7 @@
 # Plan: An App Benchmark Runner With A Real App Contract
 
-Status: **proposal, for review and editing.** Nothing here is implemented yet.
+Status: **design accepted 2026-08-19; all four DECISIONs answered (see §12). Not yet
+implemented.**
 
 This document proposes the concrete interfaces that `SeparateConcerns.md` and
 `SeparationAnalysis.md` gesture at but do not specify. Those two argued *that* the
@@ -8,7 +9,7 @@ container factory and the application runners should be separable. This one argu
 the runner side should be built: what an application must provide, what a cluster must
 provide, what a result looks like, and what the file layout and rename path are.
 
-Points marked **DECISION** are where I need your call rather than a default.
+Decisions are recorded inline where they apply and collected in §12.
 
 ---
 
@@ -112,9 +113,42 @@ If we ever publish benchmark results as a deliverable, look at
 [Thicket](https://github.com/LLNL/thicket) for the analysis side, rather than growing our
 own table tooling.
 
-**DECISION 1:** accept "build thin, borrow vocabulary, revisit at 2 sites × 3 apps"? Or
-would you rather spend the effort up front on ReFrame (the one with real container
-support) and accept writing the host-MPI overlay as a ReFrame launcher subclass?
+**DECISION 1 — answered: build thin, borrow vocabulary, revisit later.** Build on the
+container infrastructure we already have; keep the exit criterion above as the trigger to
+reconsider.
+
+### The borrowed vocabulary, stated explicitly
+
+Borrowing names only helps if the correspondence is written down, so here it is. Every
+left-hand column is something this plan defines; the right-hand columns are what the same
+idea is called in the framework we would migrate to.
+
+| This plan | Ramble | ReFrame | Notes |
+|---|---|---|---|
+| `bench/experiments/*.yaml` | workspace `ramble.yaml` | test file + config | ours is flatter: no inheritance |
+| `images` × `placements` × `omp_variants` | `variables` + `matrices` | `@parameter` decorators | our `sweep.matrix` is Ramble's `matrices`; `sweep.per_job` has no equivalent in either |
+| `app.d/<app>/app.yaml` | application definition (`application.py`) | `RegressionTest` subclass | ours is declarative data, not code — deliberately, so an app author writes YAML + two scripts |
+| `prepare` | `executables` / input generation | `@run_before('run')` | |
+| `launch` | `executables` | `executable` + `executable_opts` | |
+| `extract` → `key=value` | `figures_of_merit` (regex + units) | `@performance_function` | ours moves the regex into the image with the app version it was written for |
+| `app.yaml: figures_of_merit` | `figures_of_merit` | `perf_variables` | same noun on purpose |
+| `app.yaml: success_criteria` | `success_criteria` | `@sanity_function` | same noun on purpose |
+| placement reporting as a toggle | Benchpark `modifier` (`affinity=on`) | no direct equivalent | Benchpark's `affinity.mpi.out` ≈ our `placement_<cell>.out` |
+| `topology.json` | Benchpark system description | `system`/`partition` config | ours is probed per job, not declared |
+| `sites/<site>.yaml` | Ramble/Benchpark system config | `systems:` in `settings.py` | |
+| `results.jsonl` | `workspace analyze` output | `--performance-report` / run report | |
+| `bench/collect` | `ramble results report` | `reframe --restore-session` | |
+
+Two asymmetries worth remembering, because they are where a migration would actually cost
+something:
+
+- **`sweep.per_job` is ours alone.** Neither framework lets you say "these axes iterate
+  inside one scheduler allocation, those axes become separate jobs." Ramble generates one
+  job per experiment; ReFrame one job per test instance. Keeping this knob means a migration
+  either gives it up or wraps N cells in a single generated script.
+- **Nobody models the host-MPI overlay.** In both frameworks it would live in a custom
+  launcher/container-platform subclass, i.e. exactly `make_apptainer_launcher.sh` with a
+  different call signature.
 
 ---
 
@@ -142,8 +176,55 @@ honours `BENCH_APP_DIR=<host path>` to override, bind-mounted in — fast iterat
 development. Results produced with an override get `app_dir_override: true` in the record,
 so they are never mistaken for reproducible ones.
 
-**DECISION 2:** in-image as the contract with a host override (recommended), or host-side
-as the contract with the image carrying only the binary?
+**DECISION 2 — answered: in-image as the contract, `BENCH_APP_DIR` as the override.**
+
+### On the "generalized layers" mental model
+
+Worth refining before it hardens, because the metaphor holds for part of this stack and
+bends in a specific place. There are really *two* composition mechanisms, and only one of
+them is layers:
+
+| | Build-time composition | Run-time composition |
+|---|---|---|
+| Mechanism | OCI layers, selected by build-args | bind mounts, `LD_LIBRARY_PATH`, env injection |
+| Behaviour | **additive** — each layer only adds | **substitutive** — the host MPI *displaces* the container's `libmpi.so.12` |
+| Artifacts | `base_os → … → compiler → mpi → iolibs → final`, then the app image `FROM` it | the generated launcher |
+| Where it lives | `containers/devenv/Dockerfile`, `containers/apps/Dockerfile` | `make_apptainer_launcher.sh` + the site profile |
+| Portable? | yes — that is the image contract | no — deliberately host-specific |
+
+So: the app image genuinely *is* another Docker layer, and that is the strongest argument
+for DECISION 2 — the contract rides the topmost build layer, so it travels with the content
+it describes. But the Apptainer step is **not** a layer; it is a format change that
+*flattens* the OCI layers into one immutable SquashFS. And the host-MPI overlay is a
+run-time substitution, which no Docker layer can express — layers cannot remove or replace,
+only add. The benchmark runner is not a layer at all: it is a driver that sits outside the
+container and invokes it.
+
+Stated that way the model earns its keep, because it predicts the right design: the app
+contract belongs in the image (build-time, additive, portable), and the site profile cannot
+(run-time, substitutive, host-specific). Baking the site into the image would destroy the
+portability the overlay exists to provide.
+
+### The seam has a provenance gap
+
+The OCI → SIF flattening loses layer identity, which matters for §7. Both
+`libexec/Deffile` and `libexec/Deffile.apps` bootstrap from a **mutable tag**:
+
+```
+From: ghcr.io/kedziora-csg/hpcdev-apps-x86_64:<tag>-latest
+```
+
+There is no `%labels` block and no digest anywhere, so a finished `.sif` cannot say which
+image build produced it — and two SIFs built a week apart from the same `-latest` tag are
+different content with no way to tell them apart. The `image.digest` field in §7's result
+record is therefore **currently unfillable**.
+
+Fix at SIF build time, in `libexec/Makefile`: resolve the tag to a digest once
+(`docker buildx imagetools inspect --format '{{.Manifest.Digest}}'`, or `skopeo inspect`),
+and stamp it into the definition file's `%labels` along with the app name and version.
+`apptainer inspect` then recovers it, and the runner reads it into every result row. Without
+this, phase 1 records an image name that cannot be resolved to an artifact — which defeats
+the point of recording it.
 
 ### The geometry ABI
 
@@ -448,10 +529,48 @@ profiles:
 benchmark's output is the production configuration rather than something transcribed by
 hand from a table.
 
-**DECISION 3:** is YAML worth the PyYAML dependency on the login node, or would you rather
-`bench/submit` be Python-with-JSON (stdlib only) and accept a less pleasant config format?
-My recommendation: YAML, read via PyYAML if importable and JSON otherwise, so the tool
-degrades rather than breaks.
+**DECISION 3 — answered: YAML, definitively.** Human readability of the experiment
+definition is a requirement, not a preference; JSON stays only as the degraded fallback if
+PyYAML is unavailable.
+
+### Designing for an eventual local-LLM agent
+
+Asked whether a future agent that authors these configs and app contracts should influence
+the design. It does — but almost entirely by *reinforcing* the same choices, with three
+cheap additions. It does not argue for a different architecture.
+
+What already helps, unchanged: declarative YAML over imperative scripts; `results.jsonl`
+over prose; `key=value` from `extract`; the facts/rules split in §5; `csv:` rows from
+`report_placement`. An agent and a careful human want the same things.
+
+The three additions worth making, and they help humans first:
+
+1. **A JSON Schema for both YAML formats** (`bench/schema/experiment.json`,
+   `bench/schema/app.json`). This is the single highest-value item: it turns "did I write
+   this correctly?" into a check that runs in a second instead of a build failure three
+   hours into a queue. It also gives editors autocomplete, and gives an agent a target it
+   can validate against without a cluster.
+2. **`bench validate` with structured output and stable exit codes.** Expand the matrix,
+   check every image exists, check every referenced app declares a contract, print the cells
+   that *would* run — submit nothing. Distinguish, by exit code, *config invalid* /
+   *image missing* / *app contract missing* / *geometry rejected by the app*. An agent
+   cannot read prose failure text reliably; neither can a script.
+3. **Keep files small and single-purpose.** A local model has a small context window, so
+   five 150-line scripts with a header comment each beat one 700-line runner. This also
+   happens to be the right call for review and testing.
+
+What to **avoid** doing for an agent's sake: adding templating, conditionals, or macros to
+the YAML to make it more expressive. Agents do worse with clever formats, not better — the
+same as humans. And do not build a natural-language front end; the schema *is* the
+interface.
+
+The observation that makes this tractable: **the app contract already turns app onboarding
+into an agent-sized task.** "Write `prepare` and `extract` for app X, then prove it under
+`BENCH_SCALE=smoke` in CI" is bounded, has a fast verifier, and cannot damage anything else.
+That is a far better shape for delegation than "modify the runner."
+
+Schema and `validate` are cheap enough that they belong in **phase 3**, alongside the config
+file they describe, rather than waiting for phase 6.
 
 ---
 
@@ -476,6 +595,8 @@ JSONL rather than CSV because metric sets differ per app, appending is crash-saf
   "image": {"sif": "leap-oneapi-mpich-hpcg.sif",
             "digest": "sha256:…", "os": "leap",
             "compiler": "oneapi", "mpi": "mpich"},
+  // digest: requires the SIF-labels fix in §3 -- today's Deffiles bootstrap
+  // from a mutable `-latest` tag and record no digest at all.
   "app": {"name": "hpcg", "version": "3.1", "scale": "node",
           "app_dir_override": false},
   "placement": {"name": "ccd", "ranks_per_node": 16, "threads": 8,
@@ -632,10 +753,22 @@ Note the matrix-axis gotcha from `CLAUDE.md` applies: if `compilers`/`mpis` beco
 dispatch inputs, they have to be expanded into the matrix via `fromJSON` on a base axis,
 not bolted on with `include:`.
 
-**DECISION 4:** should `app-image-builder-ghcr.yaml` replace
-`matrix-smoketest-applications.yaml` (which builds apps inside base images and discards
-them), or live beside it? They overlap substantially, and `SeparationAnalysis.md` already
-suggests renaming that one to `matrix-build-apps.yaml`.
+**DECISION 4 — answered: it replaces `matrix-smoketest-applications.yaml`**, with
+benkirk's consent to the direction.
+
+So phase 5 *deletes* that workflow rather than leaving it beside the new one. Two
+consequences:
+
+- The old workflow builds apps inside base images and discards them; the new one publishes
+  app-bearing images and smoke-tests them through the app contract. Anything the old matrix
+  covered that the new one does not — notably its `arch: [x86_64, aarch64]` axis and its
+  `continue-on-error` app list — has to move into `app-image-builder-ghcr.yaml`'s inputs, or
+  be dropped deliberately rather than by omission. Enumerate that before deleting.
+- `matrix-smoketest-applications.yaml` is currently in **`UpstreamPRPlan.md` Bucket A** (PR 2
+  edits it to swap `hello_world_mpi` → `report_placement`). Upstream still has the file, so
+  that hunk stays valid for PR 2 — but with benkirk's consent on record, the replacement
+  itself becomes a *future* upstream contribution rather than a fork-only change. Noted
+  there.
 
 ---
 
@@ -646,12 +779,13 @@ Each phase is independently useful and independently revertible.
 | Phase | Work | Why first / value |
 |---|---|---|
 | **0** | Split measurement from judgment in `check_placement.sh`; rule table with severities; probe topology into `topology.json`; make `want_smt` follow `OMP_PLACES`; derive the NUMA/socket thresholds; turn `fixtures/` into a test | Fixes the FAIL-everything bug in §5, and nothing else can be trusted until the checker is. No renames, no new files outside `libexec/`. |
-| **1** | `emit_provenance`, `run.meta`, `results.jsonl`, `bench/collect` | Results become self-contained and machine-readable. Still HPCG-specific. |
+| **1** | `emit_provenance`, `run.meta`, `results.jsonl`, `bench/collect`; **stamp the source image digest into SIF `%labels`** (§3) | Results become self-contained and machine-readable. Still HPCG-specific. Without the digest stamp, `image.digest` cannot be filled. |
 | **2** | App contract: `/container/app.d/hpcg/{app.yaml,prepare,extract}` from `build_hpcg.sh`; runner stops knowing about `hpcg.dat` | The structural change. Deletes every HPCG string from the PBS script. Prove it by adding OSU as the second app — if that needs no runner edit, the contract works. |
-| **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. |
+| **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
 | **4** | `sites/derecho.yaml`; extract the site-specific pieces; add Casper; fold `OSU_*.pbs` in | Second site validates the abstraction. Doing this before Casper is speculative. |
-| **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile` | CI now validates the contract on every app build. |
-| **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion | Deliberate, with data. |
+| **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9) | CI now validates the contract on every app build. |
+| **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
+| **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
 
 Phases 0–2 are worth doing regardless of whether you accept the rest of this document.
 
@@ -659,26 +793,51 @@ Phases 0–2 are worth doing regardless of whether you accept the rest of this d
 
 ## 11. Open questions
 
-1. **DECISION 1** — build thin and borrow vocabulary, or invest in ReFrame up front?
-2. **DECISION 2** — app contract in the image (with host override) or on the host?
-3. **DECISION 3** — YAML with PyYAML fallback to JSON, or JSON-only stdlib?
-4. **DECISION 4** — does the app image builder replace `matrix-smoketest-applications.yaml`?
-5. **Repo boundary.** This plan keeps everything in one repo and makes the boundary visible
+All four DECISIONs are answered — see §12. What remains open:
+
+1. **Repo boundary.** This plan keeps everything in one repo and makes the boundary visible
    through directories (`bench/`, `sites/`, `containers/apps/`), which is what
    `SeparationAnalysis.md` recommends. Does `bench/` belong under `containers/deploy/` at
    all? It is not a container and not a deployment. `benchmark/` at the repo root may be
    the more honest location, and a cleaner thing to move out later.
-6. **Where do results live?** Per-job directories under `results/` are fine for one user.
+2. **Where do results live?** Per-job directories under `results/` are fine for one user.
    If these become a shared record, they need a naming convention that includes site, date,
    and harness git SHA — and a decision about whether they are committed, published as
    workflow artifacts, or pushed somewhere.
-7. **GPU placement.** `report_placement` is CPU-only. Benchpark separates
+3. **GPU placement.** `report_placement` is CPU-only. Benchpark separates
    `affinity.mpi` from `affinity.cuda`/`affinity.rocm`, and `hello_jobstep`/`gpu_check`
    report per-rank GPU visibility. Casper and any GPU app will need this. Add it to the
    contract now as an optional field, or defer?
-8. **Multi-node scaling.** `nodes` is currently a single value per job. Weak/strong scaling
+4. **Multi-node scaling.** `nodes` is currently a single value per job. Weak/strong scaling
    studies need it as a swept axis, which changes what "the same problem" means across
    cells — an app concern (`BENCH_SCALE`) as much as a runner one.
+5. **Does the HPCG OpenMP reduction patch survive phase 2?** `scripts/build_hpcg.sh` rewrites
+   HPCG's nonzero counters to use OpenMP reductions. It is defensive only: the assertion it
+   was believed to fix was an oneAPI 2026.0.0 codegen bug (see `UpstreamPRPlan.md` §3), and
+   the patch was already applied when that failure was observed, so it is not what made HPCG
+   pass. Phase 2 moves this script's knowledge into `/container/app.d/hpcg/` — decide there
+   whether the patch is dropped or kept. `build_hpcg.sh` points at this item by number.
+
+---
+
+## 12. Decision log
+
+Answered 2026-08-19.
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Thin runner, or adopt ReFrame up front? | **Thin runner**, built on the container infrastructure we already have, borrowing Ramble/ReFrame vocabulary. Correspondence table in §2; revisit at ≥2 sites × ≥3 apps. |
+| 2 | App contract in the image or on the host? | **In the image**, `BENCH_APP_DIR` as the development override. The app image is genuinely another build layer, so the contract travels with the content — see the layers discussion in §3. |
+| 3 | YAML, or JSON-only stdlib? | **YAML.** Human readability is a requirement. JSON remains the fallback if PyYAML is missing. A future local-LLM agent reinforces this choice and adds schema + `validate` at phase 3; it does not argue for a different architecture. |
+| 4 | Replace `matrix-smoketest-applications.yaml`? | **Yes, replace it**, with benkirk's consent. Phase 5 deletes it after enumerating its coverage. |
+
+Two findings surfaced while answering these, both folded into the phases above:
+
+- The SIF-to-image **provenance gap** (§3): today's Deffiles bootstrap from a mutable
+  `-latest` tag and record no digest, so `image.digest` in §7 is unfillable until phase 1
+  stamps it into `%labels`.
+- **`sweep.per_job` has no equivalent** in either Ramble or ReFrame (§2), so it is a real
+  cost to weigh at the phase-6 decision rather than a free abstraction.
 
 ---
 
