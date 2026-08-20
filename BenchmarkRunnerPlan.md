@@ -382,7 +382,7 @@ You asked for exactly two things here. The good news is that half of it already 
 `check_placement` from the benchmark path** and use `placement_summary` everywhere, which
 also removes the duplicated `case "${cfg}" in numa) want=2` logic from the collator.
 
-### A verified bug this exposes
+### The checker cannot express a deliberate experiment
 
 `Placement_derecho_opt.pbs` currently sets, uncommented:
 
@@ -397,12 +397,17 @@ each OpenMP thread* (confirmed at `scripts/report_placement.cxx:466`), so under 
 setting every thread reports `nallowed 1` and an affinity list of one CPU.
 
 `check_placement` requires `nallowed == SMT_CPUS_PER_CORE` (2) and `affinity == c,c+128`.
-Both fail. **As committed, every configuration in the sweep will report PLACEMENT NOT AS
-INTENDED**, and `--collate` will print `FAIL` for all of them — while the binding is
-actually fine. The checker is asserting `OMP_PLACES=cores` against a run configured for
-`OMP_PLACES=threads`.
+Both fail. **As committed, every configuration in the sweep reports PLACEMENT NOT AS
+INTENDED**, and `--collate` prints `FAIL` for all of them.
 
-This is not a one-line fix, it is the argument for the design: **the rules must be told
+The defect is in the *checker*, not the script. Toggling `OMP_PLACES` between `threads` and
+`cores` is a deliberate experiment — it is how you ask whether SMT siblings should
+participate in the threaded computation — and `check_placement` simply has no way to
+represent the `threads` intent. It asserts `OMP_PLACES=cores` against every run regardless
+of what the run declared.
+
+So the fix is not to change the script back, it is the argument for the design: **the rules
+must be told
 the intent.** `OMP_PLACES=cores` → expect `smt_cpus_per_thread=2`; `OMP_PLACES=threads` →
 expect 1. Since OpenMP settings are about to become a swept axis (§6), the rule set has to
 take them as input.
@@ -494,23 +499,52 @@ placements:
   - {name: numa,    ranks_per_node: 8,   threads: 16}
 
 omp_variants:
+  # Default is ONE variant.  Measured on HPCG (2026-08-19) the difference between these
+  # two is minor at best, so crossing them doubles every sweep for little signal -- opt in
+  # per experiment instead, via sweep.matrix below.
   - {name: percore, OMP_PROC_BIND: close,  OMP_PLACES: cores}    # 2 logical CPUs/thread
-  - {name: perthr,  OMP_PROC_BIND: spread, OMP_PLACES: threads}  # 1 logical CPU/thread
+  # - {name: perthr,  OMP_PROC_BIND: spread, OMP_PLACES: threads}  # 1 logical CPU/thread
 
 sweep:
   matrix:  [images, apps, placements, omp_variants]   # the full cross product
   per_job: [placements, omp_variants]                 # what ONE job iterates
 ```
 
+**First measured data point.** On HPCG, `OMP_PLACES=threads` versus `cores` made little or
+no difference to the score. That is consistent with HPCG being memory-bandwidth-bound — DRAM
+is the limit, not core throughput or the shared FPU that SMT siblings contend for — so the
+*magnitude* of this axis should be expected to be app-dependent, and an FP-throughput-bound
+code (HPL, dense kernels) could behave quite differently. Two consequences:
+
+- keep the toggle, drop it from the default cross-product (above);
+- treat "which axes actually move this app" as something `app.yaml` could eventually
+  declare, so a sweep does not spend node hours on axes a given app is insensitive to.
+
 `per_job` is the knob that is hardcoded today (one job per image; all placements inside
 it). Naming it explicitly lets you trade queue wait against job length without editing a
 script — and lets a long app go one-cell-per-job.
 
-`ranks_x_threads == cores_per_node` is currently an invariant enforced by prose in the
-header comment. Make it a validation in `bench/submit`, with an `allow_undersubscribed:
-true` escape hatch, because `--cpu-bind depth` packing from core 0 means a smaller product
-crowds the low chiplets rather than idling cores — a wrong answer that looks like a valid
-data point.
+`ranks × threads` is currently constrained to `cores_per_node` by prose in the header
+comment. Make it a validation in `bench/submit`, but with **two** legal products rather than
+one:
+
+| `ranks × threads` | Meaning | SMT siblings |
+|---|---|---|
+| `cores_per_node` (128) | one thread per physical core | **not** used for compute |
+| `cores_per_node × smt` (256) | one thread per hardware thread | both siblings compute |
+| anything else | rejected unless `allow_undersubscribed: true` | — |
+
+The rejection matters because `--cpu-bind depth` packs consecutively from core 0, so a
+smaller product crowds every rank onto the low chiplets rather than idling cores — a wrong
+answer that looks like a valid data point.
+
+The 256 row is the one worth calling out, because it is easy to conflate with `OMP_PLACES`.
+**At `ranks × threads == 128`, neither `OMP_PLACES=cores` nor `OMP_PLACES=threads` puts work
+on both SMT siblings** — you have 128 threads on 128 cores either way, and the two settings
+differ only in whether a thread's mask is one logical CPU or two. Genuinely engaging SMT for
+computation requires the 256 product (e.g. `16 ranks × 16 threads`, or `8 × 32`). So
+"threads vs cores" and "SMT on vs off for compute" are two different axes, and the config
+needs to express both.
 
 ### Running the winner
 
