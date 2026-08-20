@@ -665,6 +665,43 @@ Keep the `# key value` shape — `grep '^#'` gives a human the header, and it st
 machine-parseable. The rule is: **a results directory is self-contained.** Reading it
 should never require the config file, the workflow log, or knowing which script ran.
 
+### What goes to stdout
+
+The same rule settles what the job log should look like, because the two are the same
+question asked twice. Both PBS scripts currently print their diagnostics — `module
+list`, the environment dump, `ldd`, the generated launcher — into the log.
+`Placement_derecho.pbs` spends about 86 lines on it once, which is tolerable.
+`Placement_derecho_opt.pbs` spends roughly 375 lines per job on it against about 40
+lines of narrative, and two items account for most of that: a 113-line `cat
+${launcher}`, and an unfiltered `ldd` repeated for every configuration.
+
+The fix is **not** a `--verbose` flag. Relocate, do not suppress: every file in the
+table above is written unconditionally, and stdout carries only what a person reads
+while a job is queued or after it fails —
+
+- the geometry of each cell and its placement verdict,
+- the figure of merit and the wall time,
+- anything that made the runner decline, skip or abort a cell.
+
+A flag that *hides* detail by default is the wrong trade for the case it exists to
+serve. Porting to a new site, or bringing up a new app, is exactly when the detail is
+wanted — and exactly when re-queuing a job to get it back costs hours. A file costs
+nothing and is there either way. So `BENCH_VERBOSE=1` means only "also echo those
+files to stdout as they are written", for watching a live job. It changes what is
+*displayed*, never what is *recorded*, and no run is ever missing information because
+nobody set it.
+
+Two specifics to carry into the rewrite, since they are the current noise and both
+dissolve once the loop moves into `bench/runner.sh`:
+
+| Today | Then |
+|---|---|
+| `cat ${launcher}` into the log | `launcher.sh`, verbatim, in the results directory — already in the table above |
+| unfiltered `ldd` per configuration | the one `libmpi` line into `run.meta`, the full `ldd` into a sibling file, once per image rather than once per cell |
+
+Note while moving the second one: it is announced as `--- ldd check on $APP ---` but
+inspects `${REPORT_EXE}`, so it has never checked the application binary it names.
+
 ### Timing hygiene
 
 - **`SECONDS` has 1-second granularity.** The current `t0=${SECONDS}` is too coarse for
@@ -813,7 +850,7 @@ Each phase is independently useful and independently revertible.
 | Phase | Work | Why first / value |
 |---|---|---|
 | **0** | Split measurement from judgment in `check_placement.sh`; rule table with severities; probe topology into `topology.json`; make `want_smt` follow `OMP_PLACES`; derive the NUMA/socket thresholds; turn `fixtures/` into a test | Fixes the FAIL-everything bug in §5, and nothing else can be trusted until the checker is. No renames, no new files outside `libexec/`. |
-| **1** | `emit_provenance`, `run.meta`, `results.jsonl`, `bench/collect`; **stamp the source image digest into SIF `%labels`** (§3) | Results become self-contained and machine-readable. Still HPCG-specific. Without the digest stamp, `image.digest` cannot be filled. |
+| **1** | `emit_provenance`, `run.meta`, `results.jsonl`, `bench/collect`; **stamp the source image digest into SIF `%labels`** (§3); **quiet the job log by relocating the diagnostics into the sibling files, with `BENCH_VERBOSE=1` to echo them** (§7) | Results become self-contained and machine-readable. Still HPCG-specific. Without the digest stamp, `image.digest` cannot be filled. The stdout cleanup is the same edit as writing the sibling files, so it costs nothing here and would be duplicated work done separately. |
 | **2** | App contract: `/container/app.d/hpcg/{app.yaml,prepare,extract}` from `build_hpcg.sh`; runner stops knowing about `hpcg.dat` | The structural change. Deletes every HPCG string from the PBS script. Prove it by adding OSU as the second app — if that needs no runner edit, the contract works. |
 | **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
 | **4** | `sites/derecho.yaml`; extract the site-specific pieces; add Casper; fold `OSU_*.pbs` in | Second site validates the abstraction. Doing this before Casper is speculative. |
