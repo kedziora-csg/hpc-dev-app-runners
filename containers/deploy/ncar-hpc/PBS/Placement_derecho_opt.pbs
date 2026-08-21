@@ -72,41 +72,61 @@
 # rank count and a thread count -- nothing else.
 #-------------------------------------------------------------------------------
 
->/dev/null 2>&1 \
-           module --force purge && \
-           module load ncarenv/25.10 && \
-           module reset && \
-           module load apptainer
 
 #-------------------------------------------------------------------------------
-# Locate the ncar-hpc checkout.
+# Find and source the site profile.  This is the only thing the script knows how
+# to do before it knows anything, so it is inline in each PBS script rather than
+# in libexec/ -- libexec is one of the things the profile locates.
 #
-# Not $(pwd): a job is often submitted from a per-run subdirectory so its
-# artifacts stay together, and PBS copies this script into its own spool, so
-# neither the cwd nor $0 points at the checkout.  Walk up from the submission
-# directory instead, looking for libexec/.
+# Search order (first hit wins):
+#   1. $BENCH_SITE_CONF                                    explicit, via qsub -v
+#   2. ./site.sh in the submission directory               per-run override
+#   3. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh    per-user
+#   4. ../sites/<site>/site.sh, walking up from there      in-tree
 #
-# Deliberately inline in both PBS scripts rather than in libexec/ -- this is the
-# code that FINDS libexec, so it cannot live there.  Phase 3's generated job
-# scripts set NCAR_HPC_ROOT explicitly and skip the search.
+# Rule 3 is what lets this script be qsub'd from any directory on the machine.
+# Rule 4 keeps submit-from-the-checkout working with no setup at all.
+#
+# PBS copies this script into its spool, so $0 does not point at the checkout;
+# $PBS_O_WORKDIR is the only reliable clue about where the operator was.
 #-------------------------------------------------------------------------------
-_find_ncar_hpc_root () {
-    local d="$1"
-    [ -n "${d}" ] || return 1
-    d="$(cd "${d}" 2>/dev/null && pwd)" || return 1
+_find_site_conf () {
+    local from="${1:-$(pwd)}" site="${2:-derecho}" d
+
+    [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ] && {
+        printf '%s' "${BENCH_SITE_CONF}"; return 0; }
+    [ -f "${from}/site.sh" ] && { printf '%s' "${from}/site.sh"; return 0; }
+
+    d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/site.sh"
+    [ -f "${d}" ] && { printf '%s' "${d}"; return 0; }
+
+    d="$(cd "${from}" 2>/dev/null && pwd)" || return 1
     while [ -n "${d}" ] && [ "${d}" != "/" ]; do
-        if [ -f "${d}/libexec/check_placement.sh" ]; then printf '%s' "${d}"; return 0; fi
+        [ -f "${d}/sites/${site}/site.sh" ] && {
+            printf '%s' "${d}/sites/${site}/site.sh"; return 0; }
         d="$(dirname "${d}")"
     done
     return 1
 }
 
-NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-$(_find_ncar_hpc_root "${PBS_O_WORKDIR:-$(pwd)}")}"
-if [ -z "${NCAR_HPC_ROOT}" ] || [ ! -d "${NCAR_HPC_ROOT}/libexec" ]; then
-    echo "cannot find the ncar-hpc checkout above ${PBS_O_WORKDIR:-$(pwd)}" >&2
-    echo "  submit from anywhere inside it, or pass -v NCAR_HPC_ROOT=/path/to/ncar-hpc" >&2
+_site_conf="$(_find_site_conf "${PBS_O_WORKDIR:-$(pwd)}" "${BENCH_SITE:-derecho}")"
+if [ -z "${_site_conf}" ]; then
+    echo "cannot find a site profile for '${BENCH_SITE:-derecho}'." >&2
+    echo "  looked at: \$BENCH_SITE_CONF, ./site.sh, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/site.sh," >&2
+    echo "             and sites/<site>/site.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
+    echo "  to run from anywhere, copy containers/deploy/sites/derecho/site.sh to" >&2
+    echo "  ~/.config/hpcdev/ and set NCAR_HPC_ROOT in it." >&2
     exit 1
 fi
+# shellcheck source=../../sites/derecho/site.sh
+. "${_site_conf}" || { echo "cannot source ${_site_conf}" >&2; exit 1; }
+[ -d "${NCAR_HPC_ROOT:-}/libexec" ] || {
+    echo "${_site_conf} does not point NCAR_HPC_ROOT at a checkout with libexec/" >&2
+    echo "  NCAR_HPC_ROOT=${NCAR_HPC_ROOT:-<unset>}" >&2
+    exit 1
+}
+
+bench_site_modules || { echo "site module bootstrap failed" >&2; exit 1; }
 
 #-------------------------------------------------------------------------------
 # Knobs
@@ -116,10 +136,9 @@ APP_ARGS="${APP_ARGS:-}"
 NNODES="$(sort -u $PBS_NODEFILE | wc -l | tr -d '[:space:]')"
 
 
-# Artifacts land in the directory the job was submitted from unless told
-# otherwise; submit_placement_matrix.sh passes this explicitly so each image
-# gets its own.
-RESULTS_DIR="${RESULTS_DIR:-${PBS_O_WORKDIR:-$(pwd)}}"
+# Artifacts land in the site's results root unless told otherwise;
+# submit_placement_matrix.sh passes this explicitly so each image gets its own.
+RESULTS_DIR="${RESULTS_DIR:-${BENCH_RESULTS_ROOT}}"
 
 nodes_list="$(sort -u $PBS_NODEFILE | tr '\n' ' ' | sed 's/ *$//')"
 echo
@@ -158,7 +177,7 @@ done
 
 # leap because openSUSE Leap 15 is built from the same SLE 15 SP6 sources as
 # Derecho's host OS; oneapi because intel is the site default compiler family.
-export container_img="${container_img:-${NCAR_HPC_ROOT}/libexec/leap-oneapi-mpich.sif}"
+export container_img="${container_img:-${BENCH_IMAGE_DIR}/leap-oneapi-mpich.sif}"
 
 # Family is sniffed from the image name unless container_mpi is set explicitly.
 comp_family="$(_launcher_sniff_compiler "${container_img}")"
@@ -395,7 +414,7 @@ for cfg in "${CONFIGS[@]}"; do
     # completed cell and loses only the one that was running.
     #---------------------------------------------------------------------------
     result_reset
-    result_set  site           "${BENCH_SITE:-${NCAR_HOST:-unknown}}"
+    result_set  site           "${BENCH_SITE}"
     result_set  job_id         "${PBS_JOBID:-none}"
     result_set  nodes          "${NNODES}"
     result_str  image.sif      "$(basename "${container_img}")"

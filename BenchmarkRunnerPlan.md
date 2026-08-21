@@ -343,6 +343,31 @@ with `sites/derecho/job.tmpl` (the scheduler-directive skeleton) and
 YAML plus whatever its overlay recipe differs by; adding a Slurm site is a second
 `job.tmpl` and a `srun` arm in `mpi_launch_flags`.
 
+### `site.sh` is split out early; the YAML is not
+
+The two halves have very different payback, so they land in different phases.
+
+`sites/derecho/site.sh` exists **as of phase 1**, because without it a PBS script has
+no way to answer "where is the harness" except `$(pwd)` — which forces every job to be
+submitted from inside the checkout. That is backwards: a benchmark run belongs in a
+scratch directory of the operator's choosing, and the harness belongs wherever it was
+cloned. Those are independent paths and neither should be derived from the other.
+It also removes the `module --force purge && module load ncarenv/25.10 …` bootstrap
+that was copied into all five PBS scripts.
+
+It carries four facts and one function — `NCAR_HPC_ROOT`, `BENCH_IMAGE_DIR`,
+`BENCH_RESULTS_ROOT`, `BENCH_SCRATCH`, and `bench_site_modules` — and is found by a
+four-step search so that a per-user copy at `~/.config/hpcdev/site.sh` makes
+`qsub /path/to/Placement_derecho.pbs` work from any directory on the machine. The
+in-tree copy derives its paths from its own location, so two checkouts cannot be
+crossed and cloning the repo somewhere new needs no edit.
+
+`sites/derecho.yaml` — scheduler dialect, queue, bind list, topology fallbacks, the
+container/host-MPI recipe — stays at **phase 4**, unchanged. It is a *description*
+rather than a dependency: nothing is blocked without it, and its shape cannot be
+validated until a second site exists to disagree with it. Splitting it out now would be
+guessing at Casper's requirements from Derecho's.
+
 ### Probe the topology, do not hardcode it
 
 `check_placement.sh` argues — correctly — that `MILAN_CORES_PER_L3` must not be *measured
@@ -850,10 +875,10 @@ Each phase is independently useful and independently revertible.
 | Phase | Work | Why first / value |
 |---|---|---|
 | **0** | Split measurement from judgment in `check_placement.sh`; rule table with severities; probe topology into `topology.json`; make `want_smt` follow `OMP_PLACES`; derive the NUMA/socket thresholds; turn `fixtures/` into a test | Fixes the FAIL-everything bug in §5, and nothing else can be trusted until the checker is. No renames, no new files outside `libexec/`. |
-| **1** | `emit_provenance`, `run.meta`, `results.jsonl`, `bench/collect`; **stamp the source image digest into SIF `%labels`** (§3); **quiet the job log by relocating the diagnostics into the sibling files, with `BENCH_VERBOSE=1` to echo them** (§7) | Results become self-contained and machine-readable. Still HPCG-specific. Without the digest stamp, `image.digest` cannot be filled. The stdout cleanup is the same edit as writing the sibling files, so it costs nothing here and would be duplicated work done separately. |
+| **1** | `emit_provenance`, `run.meta`, `results.jsonl`, `bench/collect`; **stamp the source image digest into SIF `%labels`** (§3); **quiet the job log by relocating the diagnostics into the sibling files, with `BENCH_VERBOSE=1` to echo them** (§7); **`sites/derecho/site.sh` so a job can be submitted from anywhere** (§4) | Results become self-contained and machine-readable. Still HPCG-specific. Without the digest stamp, `image.digest` cannot be filled. The stdout cleanup is the same edit as writing the sibling files, so it costs nothing here and would be duplicated work done separately. |
 | **2** | App contract: `/container/app.d/hpcg/{app.yaml,prepare,extract}` from `build_hpcg.sh`; runner stops knowing about `hpcg.dat` | The structural change. Deletes every HPCG string from the PBS script. Prove it by adding OSU as the second app — if that needs no runner edit, the contract works. |
 | **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
-| **4** | `sites/derecho.yaml`; extract the site-specific pieces; add Casper; fold `OSU_*.pbs` in | Second site validates the abstraction. Doing this before Casper is speculative. |
+| **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9) | CI now validates the contract on every app build. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |

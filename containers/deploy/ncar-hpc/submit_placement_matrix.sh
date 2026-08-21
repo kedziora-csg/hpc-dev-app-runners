@@ -172,7 +172,10 @@ for img in ${IMAGES}; do
     # gives it a private directory to write into, so sibling jobs cannot collide
     # over report files, timings.txt or the generated launcher.  We deliberately
     # qsub from HERE (not from outdir) so PBS_O_WORKDIR stays meaningful.
-    vars="NCAR_HPC_ROOT=${HERE}"
+    # Name this checkout's site profile explicitly rather than let the job
+    # search: a submitter that ran from here must drive the job from here, even
+    # if the operator also has a ~/.config/hpcdev/site.sh pointing elsewhere.
+    vars="BENCH_SITE_CONF=${HERE}/../sites/${BENCH_SITE:-derecho}/site.sh,NCAR_HPC_ROOT=${HERE}"
     vars="${vars},container_img=${HERE}/libexec/${img}"
     vars="${vars},RESULTS_DIR=${outdir}"
     [ "${APP}" = "none" ] || vars="${vars},APP=${APP}"
