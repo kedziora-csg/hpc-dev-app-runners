@@ -28,28 +28,27 @@
 
 
 #-------------------------------------------------------------------------------
-# Find and source the site profile.  This is the only thing the script knows how
-# to do before it knows anything, so it is inline in each PBS script rather than
-# in libexec/ -- libexec is one of the things the profile locates.
+# Find and source the site profile.
 #
-# Search order (first hit wins):
-#   1. $BENCH_SITE_CONF                                    explicit, via qsub -v
-#   2. ./site.sh in the submission directory               per-run override
-#   3. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh    per-user
-#   4. ../sites/<site>/site.sh, walking up from there      in-tree
+# Inline in each PBS script rather than in libexec/, because libexec is one of
+# the things the profile locates.
 #
-# Rule 3 is what lets this script be qsub'd from any directory on the machine.
-# Rule 4 keeps submit-from-the-checkout working with no setup at all.
+# Looked for in three places, first one found wins:
+#   1. $BENCH_SITE_CONF                                    named outright
+#   2. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh    your own copy
+#   3. sites/<site>/site.sh, walking up from $PBS_O_WORKDIR
 #
-# PBS copies this script into its spool, so $0 does not point at the checkout;
-# $PBS_O_WORKDIR is the only reliable clue about where the operator was.
+# 3 keeps a submit-from-the-checkout workflow working with no setup at all.
+# 2 is what lets this script be submitted from any directory on the machine.
+#
+# PBS copies this script into its own spool, so $0 does not point at the
+# checkout; $PBS_O_WORKDIR is the only reliable record of where you were.
 #-------------------------------------------------------------------------------
 _find_site_conf () {
     local from="${1:-$(pwd)}" site="${2:-derecho}" d
 
     [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ] && {
         printf '%s' "${BENCH_SITE_CONF}"; return 0; }
-    [ -f "${from}/site.sh" ] && { printf '%s' "${from}/site.sh"; return 0; }
 
     d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/site.sh"
     [ -f "${d}" ] && { printf '%s' "${d}"; return 0; }
@@ -66,17 +65,18 @@ _find_site_conf () {
 _site_conf="$(_find_site_conf "${PBS_O_WORKDIR:-$(pwd)}" "${BENCH_SITE:-derecho}")"
 if [ -z "${_site_conf}" ]; then
     echo "cannot find a site profile for '${BENCH_SITE:-derecho}'." >&2
-    echo "  looked at: \$BENCH_SITE_CONF, ./site.sh, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/site.sh," >&2
-    echo "             and sites/<site>/site.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
-    echo "  to run from anywhere, copy containers/deploy/sites/derecho/site.sh to" >&2
-    echo "  ~/.config/hpcdev/ and set NCAR_HPC_ROOT in it." >&2
+    echo "  looked for: \$BENCH_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/site.sh," >&2
+    echo "              and sites/<site>/site.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
+    echo "  to submit from outside the checkout, copy" >&2
+    echo "  containers/deploy/sites/derecho/site.sh to ~/.config/hpcdev/ and set" >&2
+    echo "  NCAR_HPC_ROOT in it." >&2
     exit 1
 fi
-# shellcheck source=../../sites/derecho/site.sh
 . "${_site_conf}" || { echo "cannot source ${_site_conf}" >&2; exit 1; }
 [ -d "${NCAR_HPC_ROOT:-}/libexec" ] || {
     echo "${_site_conf} does not point NCAR_HPC_ROOT at a checkout with libexec/" >&2
     echo "  NCAR_HPC_ROOT=${NCAR_HPC_ROOT:-<unset>}" >&2
+    echo "  set it near the top of that file" >&2
     exit 1
 }
 

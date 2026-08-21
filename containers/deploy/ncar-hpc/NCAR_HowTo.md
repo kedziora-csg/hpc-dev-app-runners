@@ -98,37 +98,53 @@ qsub PBS/OSU_casper.pbs
 
 ### Step 4.2a: Running a Job From Anywhere
 
-The PBS scripts locate the harness through a **site profile**, not through the
-directory you submitted from, so a run can live wherever you want its results.
-They look for one in this order, first hit wins:
+The PBS scripts get their paths from a **site profile**,
+`containers/deploy/sites/derecho/site.sh`, rather than from the directory you
+submitted from. So a run can live wherever you want its results.
 
-1. `$BENCH_SITE_CONF` — explicit, e.g. `qsub -v BENCH_SITE_CONF=/path/to/site.sh ...`
-2. `./site.sh` in the submission directory — a per-run override
-3. `~/.config/hpcdev/site.sh` — per-user
-4. `sites/<site>/site.sh`, walking up from the submission directory — in-tree
+**Submitting from inside the checkout: nothing to set up.** The scripts walk up
+from the submission directory, find `sites/derecho/site.sh`, and work the paths
+out from where that file itself lives.
 
-Rule 4 means submitting from anywhere inside the checkout works with no setup.
-For rule 3 — which is what lets you `qsub` the script by absolute path from any
-directory on the machine:
+**Submitting from anywhere else: one copy, one edited line.**
 
 ```bash
 mkdir -p ~/.config/hpcdev
 cp <checkout>/containers/deploy/sites/derecho/site.sh ~/.config/hpcdev/
-$EDITOR ~/.config/hpcdev/site.sh     # set NCAR_HPC_ROOT to your checkout
+$EDITOR ~/.config/hpcdev/site.sh     # set NCAR_HPC_ROOT to your clone
 ```
 
-The profile carries four paths and one function:
+`NCAR_HPC_ROOT` is the only line that must change; it is the first setting in
+the file. A copy inside the checkout can work its own location out, one outside
+cannot, so it has to be told.
+
+Alternatively, name the file outright and skip the copy — this always uses the
+repository's current version:
+
+```bash
+export BENCH_SITE_CONF=<checkout>/containers/deploy/sites/derecho/site.sh
+```
+
+The scripts look in three places, first one found wins: `$BENCH_SITE_CONF`, then
+`~/.config/hpcdev/site.sh`, then `sites/<site>/site.sh` walking up from the
+submission directory.
+
+**What the profile sets:**
 
 | Name | Meaning |
 |---|---|
-| `NCAR_HPC_ROOT` | the harness: `libexec/`, `PBS/` |
+| `NCAR_HPC_ROOT` | the clone: `libexec/`, `PBS/` |
 | `BENCH_IMAGE_DIR` | where the `.sif` images live (default `$NCAR_HPC_ROOT/libexec`) |
 | `BENCH_RESULTS_ROOT` | where results directories are created (default: the submission directory) |
 | `BENCH_SCRATCH` | big, fast, purgeable space for apps that stage large inputs |
-| `bench_site_modules` | the module bootstrap every job here starts from |
+| `bench_site_modules` | the module set-up every job here starts from |
 
-The in-tree copy derives `NCAR_HPC_ROOT` from its own location, so it always
-names the checkout it belongs to and two checkouts cannot be crossed.
+Every one honours a value that is already set, so a one-off change needs no
+edit at all:
+
+```bash
+qsub -v BENCH_RESULTS_ROOT=$SCRATCH/hpcdev-bench Placement_derecho.pbs
+```
 
 ### Step 4.2b: What a Benchmark Job Leaves Behind
 

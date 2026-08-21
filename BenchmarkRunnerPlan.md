@@ -355,12 +355,18 @@ cloned. Those are independent paths and neither should be derived from the other
 It also removes the `module --force purge && module load ncarenv/25.10 …` bootstrap
 that was copied into all five PBS scripts.
 
-It carries four facts and one function — `NCAR_HPC_ROOT`, `BENCH_IMAGE_DIR`,
-`BENCH_RESULTS_ROOT`, `BENCH_SCRATCH`, and `bench_site_modules` — and is found by a
-four-step search so that a per-user copy at `~/.config/hpcdev/site.sh` makes
-`qsub /path/to/Placement_derecho.pbs` work from any directory on the machine. The
-in-tree copy derives its paths from its own location, so two checkouts cannot be
-crossed and cloning the repo somewhere new needs no edit.
+It carries five settings and one function — `NCAR_HPC_ROOT`, `BENCH_IMAGE_DIR`,
+`BENCH_RESULTS_ROOT`, `BENCH_SCRATCH`, `BENCH_SITE`, and `bench_site_modules` — and is
+found in three places, first one found wins: `$BENCH_SITE_CONF`, then
+`~/.config/hpcdev/site.sh`, then `sites/<site>/site.sh` walking up from
+`$PBS_O_WORKDIR`. The last keeps a submit-from-the-checkout workflow working with no
+setup; the middle one is what makes `qsub /path/to/Placement_derecho.pbs` work from any
+directory on the machine.
+
+A copy inside the checkout works `NCAR_HPC_ROOT` out from its own location, so two
+checkouts cannot be crossed and cloning the repository somewhere new needs no edit. A
+copy outside one has nothing to work it out from and must state it — which is the single
+line the setup instructions tell you to change.
 
 `sites/derecho.yaml` — scheduler dialect, queue, bind list, topology fallbacks, the
 container/host-MPI recipe — stays at **phase 4**, unchanged. It is a *description*
