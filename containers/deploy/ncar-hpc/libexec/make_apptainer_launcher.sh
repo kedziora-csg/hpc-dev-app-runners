@@ -27,6 +27,12 @@
 #         Open MPI), since the two share almost no spelling.
 #-------------------------------------------------------------------------------
 
+# Progress chatter is verbose-only; WARNINGS and errors always print.  vecho
+# belongs to provenance.sh -- this fallback keeps the file usable when sourced
+# on its own, e.g. from an interactive shell.
+command -v vecho >/dev/null 2>&1 \
+    || vecho () { [ "${BENCH_VERBOSE:-0}" != "0" ] && echo "$@"; return 0; }
+
 #-------------------------------------------------------------------------------
 # Resolve version-bearing paths at runtime; hardcoded version numbers rot at the
 # next system update.
@@ -117,14 +123,14 @@ load_host_modules () {
     local comp="$1" mpi="$2" cmod
     cmod="$(_launcher_compiler_module "${comp}")"
     if [ -n "${cmod}" ]; then
-        echo "load_host_modules: module load ${cmod}"
+        vecho "load_host_modules: module load ${cmod}"
         module load "${cmod}" || return 1
     else
         echo "load_host_modules: WARNING no module mapping for compiler '${comp}'"
     fi
     case "${mpi}" in
         openmpi)
-            echo "load_host_modules: module load openmpi"
+            vecho "load_host_modules: module load openmpi"
             module load openmpi || return 1
             ;;
         mpich|mpich3)
@@ -271,8 +277,7 @@ make_apptainer_launcher () {
             ;;
     esac
 
-    echo "Making launcher for ${img} (family=${family}) in dir $(pwd)"
-    echo
+    vecho "Making launcher for ${img} (family=${family}) in dir $(pwd)"
 
     cat <<EOF > "${outfile}" && chmod +x "${outfile}"
 #!/bin/bash
@@ -285,5 +290,5 @@ ${env_lines}
 EOF
 
     export LAUNCHER_MPI_FAMILY="${family}"
-    echo "launcher: ${outfile}  (family=${family})"
+    vecho "launcher: ${outfile}  (family=${family})"
 }

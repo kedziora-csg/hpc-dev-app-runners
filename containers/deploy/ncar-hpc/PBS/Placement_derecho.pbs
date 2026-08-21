@@ -32,6 +32,36 @@
            module reset && \
            module load apptainer
 
+#-------------------------------------------------------------------------------
+# Locate the ncar-hpc checkout.
+#
+# Not $(pwd): a job is often submitted from a per-run subdirectory so its
+# artifacts stay together, and PBS copies this script into its own spool, so
+# neither the cwd nor $0 points at the checkout.  Walk up from the submission
+# directory instead, looking for libexec/.
+#
+# Deliberately inline in both PBS scripts rather than in libexec/ -- this is the
+# code that FINDS libexec, so it cannot live there.  Phase 3's generated job
+# scripts set NCAR_HPC_ROOT explicitly and skip the search.
+#-------------------------------------------------------------------------------
+_find_ncar_hpc_root () {
+    local d="$1"
+    [ -n "${d}" ] || return 1
+    d="$(cd "${d}" 2>/dev/null && pwd)" || return 1
+    while [ -n "${d}" ] && [ "${d}" != "/" ]; do
+        if [ -f "${d}/libexec/check_placement.sh" ]; then printf '%s' "${d}"; return 0; fi
+        d="$(dirname "${d}")"
+    done
+    return 1
+}
+
+NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-$(_find_ncar_hpc_root "${PBS_O_WORKDIR:-$(pwd)}")}"
+if [ -z "${NCAR_HPC_ROOT}" ] || [ ! -d "${NCAR_HPC_ROOT}/libexec" ]; then
+    echo "cannot find the ncar-hpc checkout above ${PBS_O_WORKDIR:-$(pwd)}" >&2
+    echo "  submit from anywhere inside it, or pass -v NCAR_HPC_ROOT=/path/to/ncar-hpc" >&2
+    exit 1
+fi
+
 nodes_list="$(sort -u $PBS_NODEFILE | tr '\n' ' ' | sed 's/ *$//')"
 nodes_list=${nodes_list//.hpc.ucar.edu/}
 NUM_NODES="$(sort -u $PBS_NODEFILE | wc -l | tr -d '[:space:]')"
@@ -50,11 +80,17 @@ echo "geometry  ${MPIPROCS_PER_CHUNK} ranks/node x ${OMP_NUM_THREADS} threads ($
 # Default set comes from libexec/Makefile so there is one definition of "the six".
 # Override with:  qsub -v container_img=/path/to/one.sif ...
 #-------------------------------------------------------------------------------
-NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-$(pwd)}"
 
-. "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
-. "${NCAR_HPC_ROOT}/libexec/check_placement.sh"
-. "${NCAR_HPC_ROOT}/libexec/provenance.sh"
+# Artifacts land where the job was submitted from, so a per-run directory keeps
+# one certification pass together.
+cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
+
+# Sourcing these is not optional: without them the loop below silently produces
+# an empty matrix, which reads like "no images" rather than "broken harness".
+for lib in make_apptainer_launcher.sh check_placement.sh provenance.sh; do
+    . "${NCAR_HPC_ROOT}/libexec/${lib}" \
+        || { echo "cannot source ${NCAR_HPC_ROOT}/libexec/${lib}" >&2; exit 1; }
+done
 
 if [ -n "${container_img:-}" ]; then
     IMAGES="${container_img}"
@@ -161,18 +197,21 @@ for img in ${IMAGES}; do
     # resolves under /container the run below would produce N singletons and
     # look almost plausible, so stop here rather than mislead.
     #---------------------------------------------------------------------------
-    # Full linkage to a file; the one line that matters to stdout.
-    apptainer --quiet exec ${img} ldd ${exe} > "ldd_${tag}_native.txt" 2>&1
-    ${launcher}                    ldd ${exe} > "ldd_${tag}_overlay.txt" 2>&1
-    vshow "ldd_${tag}_native.txt"  "ldd (container native): ${tag}"
-    vshow "ldd_${tag}_overlay.txt" "ldd (through the launcher): ${tag}"
+    # Full linkage to a file; the one line that matters to stdout.  The two
+    # files are named for whose libraries they resolve to -- the CONTAINER's own,
+    # and the HOST's after the launcher substitutes them -- because that
+    # substitution is the entire thing being certified.
+    apptainer --quiet exec ${img} ldd ${exe} > "ldd_${tag}_container.txt" 2>&1
+    ${launcher}                    ldd ${exe} > "ldd_${tag}_host.txt" 2>&1
+    vshow "ldd_${tag}_container.txt" "ldd inside the container: ${tag}"
+    vshow "ldd_${tag}_host.txt"      "ldd through the launcher (host): ${tag}"
 
-    host_mpi="$(grep -i 'libmpi\.so' "ldd_${tag}_overlay.txt" 2>/dev/null)"
+    host_mpi="$(grep -i 'libmpi\.so' "ldd_${tag}_host.txt" 2>/dev/null)"
     echo "  libmpi -> $(echo "${host_mpi}" | head -1 | sed 's/^[[:space:]]*//')"
     case "${host_mpi}" in
         *"/container/"*|"")
-            echo "    *** overlay did NOT take -- see ldd_${tag}_overlay.txt ***"
-            results="${results}\n${tag} FAIL FAIL no-overlay"
+            echo "    *** still linking the container's MPI -- see ldd_${tag}_host.txt ***"
+            results="${results}\n${tag} FAIL FAIL container-mpi"
             continue
             ;;
     esac
@@ -189,7 +228,7 @@ for img in ${IMAGES}; do
 
     # PASS/FAIL certifies the IMAGE, so it keys on `fail` only: a warn names a
     # suboptimal placement, which is a property of how this job asked for the
-    # binding, not of whether the container's MPI overlay works.  The pathology
+    # binding, not of whether the host MPI displaced the container's.  The pathology
     # is printed either way by placement_summary above.
     placement_summary "placement_${tag}_bound.out"
     v="$(placement_verdict "placement_${tag}_bound.out")"
@@ -210,8 +249,8 @@ echo -e "${results}" | while read -r t a n; do
     printf "  %-28s %-10s %s\n" "${t}" "${a}" "${n}"
 done
 echo
-echo "  PLACEMENT=PASS means the host MPI library overlay worked (for mpich this"
-echo "  is the Cray ABI shim; for openmpi it's a direct bind) and no severe"
+echo "  PLACEMENT=PASS means the host MPI libraries displaced the container's own"
+echo "  (for mpich that is the Cray ABI shim; for openmpi a direct bind) and no severe"
 echo "  placement pathology was found.  The NOTE column carries the checker's own"
 echo "  verdict: ok, or warn for an avoidable straddle that does not disqualify"
 echo "  the image.  FAIL prints the specific pathology above."

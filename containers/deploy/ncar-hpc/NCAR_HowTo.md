@@ -108,7 +108,7 @@ the job log, or knowing what was submitted.
 | `topology.json` | the node topology this job probed; every placement threshold is derived from it |
 | `modules.txt`, `env.txt` | the environment the run actually had |
 | `launcher.sh` | the generated Apptainer launcher, verbatim |
-| `ldd_*.txt` | full linkage of the report binary and the app |
+| `ldd_*_host.txt` | linkage through the launcher, i.e. after the host libraries displace the container's |
 | `placement_<cfg>.out` | `report_placement` output, provenance header first |
 | `run_<cfg>/` | the app's own working directory: inputs, `app.out`, `metrics.kv` |
 

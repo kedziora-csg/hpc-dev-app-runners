@@ -56,7 +56,8 @@
 #     topology.json            the node topology this job probed
 #     modules.txt env.txt      the environment the run actually had
 #     launcher.sh              the generated Apptainer launcher, verbatim
-#     ldd_*.txt                full linkage of the report binary and the app
+#     ldd_*_host.txt           linkage through the launcher, after the host
+#                              libraries displace the container's
 #     placement_<cfg>.out      report_placement output, provenance header first
 #     run_<cfg>/               the app's own cwd: inputs, app.out, metrics.kv
 #
@@ -78,18 +79,47 @@
            module load apptainer
 
 #-------------------------------------------------------------------------------
+# Locate the ncar-hpc checkout.
+#
+# Not $(pwd): a job is often submitted from a per-run subdirectory so its
+# artifacts stay together, and PBS copies this script into its own spool, so
+# neither the cwd nor $0 points at the checkout.  Walk up from the submission
+# directory instead, looking for libexec/.
+#
+# Deliberately inline in both PBS scripts rather than in libexec/ -- this is the
+# code that FINDS libexec, so it cannot live there.  Phase 3's generated job
+# scripts set NCAR_HPC_ROOT explicitly and skip the search.
+#-------------------------------------------------------------------------------
+_find_ncar_hpc_root () {
+    local d="$1"
+    [ -n "${d}" ] || return 1
+    d="$(cd "${d}" 2>/dev/null && pwd)" || return 1
+    while [ -n "${d}" ] && [ "${d}" != "/" ]; do
+        if [ -f "${d}/libexec/check_placement.sh" ]; then printf '%s' "${d}"; return 0; fi
+        d="$(dirname "${d}")"
+    done
+    return 1
+}
+
+NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-$(_find_ncar_hpc_root "${PBS_O_WORKDIR:-$(pwd)}")}"
+if [ -z "${NCAR_HPC_ROOT}" ] || [ ! -d "${NCAR_HPC_ROOT}/libexec" ]; then
+    echo "cannot find the ncar-hpc checkout above ${PBS_O_WORKDIR:-$(pwd)}" >&2
+    echo "  submit from anywhere inside it, or pass -v NCAR_HPC_ROOT=/path/to/ncar-hpc" >&2
+    exit 1
+fi
+
+#-------------------------------------------------------------------------------
 # Knobs
 #-------------------------------------------------------------------------------
 APP="${APP:-}"                       # '', or hpcg, or a path to your executable
 APP_ARGS="${APP_ARGS:-}"
 NNODES="$(sort -u $PBS_NODEFILE | wc -l | tr -d '[:space:]')"
 
-# Where libexec/ and the .sif images live.  Jobs on Derecho start in the
-# submission directory, so $(pwd) is right for a hand-qsub from ncar-hpc/;
-# submit_placement_matrix.sh passes this explicitly because it needs each job to
-# write into its own results directory.
-NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-$(pwd)}"
-RESULTS_DIR="${RESULTS_DIR:-$(pwd)}"
+
+# Artifacts land in the directory the job was submitted from unless told
+# otherwise; submit_placement_matrix.sh passes this explicitly so each image
+# gets its own.
+RESULTS_DIR="${RESULTS_DIR:-${PBS_O_WORKDIR:-$(pwd)}}"
 
 nodes_list="$(sort -u $PBS_NODEFILE | tr '\n' ' ' | sed 's/ *$//')"
 echo
@@ -105,7 +135,7 @@ mkdir -p "${RESULTS_DIR}" \
 
 #-------------------------------------------------------------------------------
 # Launcher.  Every rank execs apptainer with the host MPI (Cray MPICH or
-# OpenMPI) swapped in.  The MPI-family dialect and the native-vs-container
+# OpenMPI) swapped in.  The MPI-family dialect and the host-vs-container
 # agreement get validated in Placement_derecho.pbs; this script only consumes
 # already-correct settings via the shared helper.
 #
@@ -113,7 +143,18 @@ mkdir -p "${RESULTS_DIR}" \
 # displace the container's own.  Get this wrong and every rank silently
 # singleton-initialises -- N serial programs that look like a running job.
 #-------------------------------------------------------------------------------
-. "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
+# Every library up front, before anything calls into them: make_apptainer_launcher
+# routes its progress chatter through vecho, which provenance.sh owns.
+#
+#   make_apptainer_launcher.sh  the host-MPI launcher and the mpiexec dialects
+#   check_placement.sh          placement_summary / _verdict / _rules_fired
+#   results.sh                  the results.jsonl record; pulls in provenance.sh
+#                               for emit_provenance, capture_run_context, the
+#                               sub-second clock and the BENCH_VERBOSE helpers
+for lib in make_apptainer_launcher.sh check_placement.sh results.sh; do
+    . "${NCAR_HPC_ROOT}/libexec/${lib}" \
+        || { echo "cannot source ${NCAR_HPC_ROOT}/libexec/${lib}" >&2; exit 1; }
+done
 
 # leap because openSUSE Leap 15 is built from the same SLE 15 SP6 sources as
 # Derecho's host OS; oneapi because intel is the site default compiler family.
@@ -131,18 +172,6 @@ make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" \
     || exit 1
 
 REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
-
-#-------------------------------------------------------------------------------
-# Shared libraries.  check_placement.sh gives placement_summary (prints, 0/1/2
-# for clean/warn/fail), placement_verdict (one word) and placement_rules_fired.
-# results.sh gives the results.jsonl record and pulls in provenance.sh, which
-# gives emit_provenance, capture_run_context, the sub-second clock and the
-# BENCH_VERBOSE helpers.
-#-------------------------------------------------------------------------------
-for lib in check_placement.sh results.sh; do
-    . "${NCAR_HPC_ROOT}/libexec/${lib}" \
-        || { echo "cannot locate ${NCAR_HPC_ROOT}/libexec/${lib}"; exit 1; }
-done
 
 # All output lands in its own directory, so parallel jobs (one per image, see
 # submit_placement_matrix.sh) cannot collide over report files, timings.txt, or
@@ -164,18 +193,20 @@ vshow "${RESULTS_DIR}/topology.json" "node topology"
 # written once per job because none of them change between cells.
 capture_run_context "${RESULTS_DIR}" "${launcher}"
 
-# Full linkage on disk; one line on stdout.  That one line is the whole point of
-# the overlay -- if libmpi resolves inside /container, every rank singleton-
-# initialises and the job is N serial programs that look like a running job.
-${launcher} ldd "${REPORT_EXE}" > ldd_report_placement.txt 2>&1
-if grep -i 'libmpi' ldd_report_placement.txt | grep -qv '/container/'; then
-    echo "host MPI  $(grep -i 'libmpi' ldd_report_placement.txt | head -1 | sed 's/^[[:space:]]*//')"
+# Full linkage on disk; one line on stdout.  `_host` because this is the linkage
+# seen THROUGH the launcher, after the host libraries displace the container's;
+# Placement_derecho.pbs writes both views and contrasts them.  If libmpi still
+# resolves inside /container, every rank singleton-initialises and the job is N
+# serial programs that look like a running job.
+${launcher} ldd "${REPORT_EXE}" > ldd_report_placement_host.txt 2>&1
+if grep -i 'libmpi' ldd_report_placement_host.txt | grep -qv '/container/'; then
+    echo "host MPI  $(grep -i 'libmpi' ldd_report_placement_host.txt | head -1 | sed 's/^[[:space:]]*//')"
 else
-    echo "*** the host MPI overlay did NOT take -- see ldd_report_placement.txt ***"
-    sed 's/^/    /' ldd_report_placement.txt
+    echo "*** still linking the container's MPI -- see ldd_report_placement_host.txt ***"
+    sed 's/^/    /' ldd_report_placement_host.txt
     exit 1
 fi
-vshow ldd_report_placement.txt "ldd ${REPORT_EXE}"
+vshow ldd_report_placement_host.txt "ldd ${REPORT_EXE}"
 
 # The digest the .sif was built from.  Empty for an image built before
 # libexec/Makefile started stamping it (see pin_image_digest.sh), which is
@@ -235,9 +266,9 @@ fi
 # The app's own linkage, once per job rather than once per cell -- it cannot
 # change between cells, and the full ldd is a file, not forty lines of log.
 if [ -n "${APP}" ]; then
-    ${launcher} ldd "${APP}" > "ldd_$(basename ${APP}).txt" 2>&1 \
+    ${launcher} ldd "${APP}" > "ldd_$(basename ${APP})_host.txt" 2>&1 \
         || echo "note: cannot ldd ${APP} (static, or not present)"
-    vshow "ldd_$(basename ${APP}).txt" "ldd ${APP}"
+    vshow "ldd_$(basename ${APP})_host.txt" "ldd ${APP}"
 fi
 
 # Job-level provenance.  Per-cell facts go into each placement_<cfg>.out header.
@@ -353,8 +384,9 @@ for cfg in "${CONFIGS[@]}"; do
         elif grep -qh 'result is INVALID' HPCG-Benchmark*.txt 2>/dev/null; then
             echo "valid=false" >> metrics.kv
         fi
-        app_version="$(grep -hoE 'HPCG-Benchmark version=[0-9.]+' HPCG-Benchmark*.txt 2>/dev/null \
-                       | tail -1 | cut -d= -f2)"
+        # HPCG writes a bare `version=3.1` on the second line of its report --
+        # not a prefixed one, which is why this used to come out empty.
+        app_version="$(sed -n 's/^version=//p' HPCG-Benchmark*.txt 2>/dev/null | tail -1)"
     fi
     cd .. || exit 1
 
