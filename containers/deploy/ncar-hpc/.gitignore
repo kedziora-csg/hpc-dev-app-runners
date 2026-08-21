@@ -4,3 +4,18 @@
 bin/
 *-launch-*.sh
 INSTALL/
+
+# Job artifacts.  Anchored to this directory on purpose: a bare `topology.json`
+# would also swallow libexec/fixtures/topology.json, which IS committed and is
+# what makes the placement tests runnable off-cluster.
+/results/
+/results.jsonl
+/run.meta
+/timings.txt
+/topology.json
+/modules.txt
+/env.txt
+/launcher.sh
+/ldd_*.txt
+/placement_*.out
+/run_*/

@@ -96,6 +96,41 @@ Ensure that your target file in [containers/deploy/ncar-hpc/PBS/OSU_casper.pbs](
 qsub PBS/OSU_casper.pbs
 ```
 
+### Step 4.2b: What a Benchmark Job Leaves Behind
+
+A results directory is self-contained: reading it never requires the PBS script,
+the job log, or knowing what was submitted.
+
+| File | Contents |
+|---|---|
+| `results.jsonl` | one JSON object per measured cell — the machine-readable record |
+| `run.meta` | the job-level `# key value` header: image, digest, geometry, launcher, job id, harness SHA |
+| `topology.json` | the node topology this job probed; every placement threshold is derived from it |
+| `modules.txt`, `env.txt` | the environment the run actually had |
+| `launcher.sh` | the generated Apptainer launcher, verbatim |
+| `ldd_*.txt` | full linkage of the report binary and the app |
+| `placement_<cfg>.out` | `report_placement` output, provenance header first |
+| `run_<cfg>/` | the app's own working directory: inputs, `app.out`, `metrics.kv` |
+
+Tabulate one or many jobs:
+
+```bash
+containers/deploy/bench/collect <results-root>          # table
+containers/deploy/bench/collect <results-root> --best   # the winning cell per app
+containers/deploy/bench/collect <results-root> --format csv
+```
+
+`collect` never lets a row win if its placement verdict is `fail`, if the app
+reported itself invalid, or if it exited non-zero — a mis-bound run measures its
+binding, not the code.
+
+The job log itself carries only the narrative: each cell's geometry, its
+placement verdict, its figure of merit, and anything that aborted it. Set
+`BENCH_VERBOSE=1` to also echo the captured files as they are written — useful
+when bringing up a new machine or a new app, where you are watching the job
+rather than reading it afterwards. It changes what is displayed, never what is
+recorded.
+
 ### Step 4.3: Understanding the GPU Setup Wrapper
 To map multiple MPI ranks smoothly to available hardware accelerators, the job uses the custom helper script [containers/deploy/ncar-hpc/set_gpu_rank](containers/deploy/ncar-hpc/set_gpu_rank). It extracts local/global rank variables automatically mapping each rank to a physical GPU, validating operations such as:
 ```bash

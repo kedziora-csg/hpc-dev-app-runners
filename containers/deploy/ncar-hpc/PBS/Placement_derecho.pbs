@@ -31,22 +31,16 @@
            module load ncarenv/25.10 && \
            module reset && \
            module load apptainer
-module list
 
-### Interrogate Environment
-echo && echo "--- PBS, MPI, and Threads environment ---"
-env | egrep "PBS|MPI|THREADS|CRAY_MPICH" | sort
-nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
+nodes_list="$(sort -u $PBS_NODEFILE | tr '\n' ' ' | sed 's/ *$//')"
 nodes_list=${nodes_list//.hpc.ucar.edu/}
-echo 
-echo "NODES=\""${nodes_list}"\""
-NUM_NODES="$(sort -u $PBS_NODEFILE | wc -l)"
-TOTAL_MPI_RANKS=$(wc -l < $PBS_NODEFILE)
+NUM_NODES="$(sort -u $PBS_NODEFILE | wc -l | tr -d '[:space:]')"
+TOTAL_MPI_RANKS=$(wc -l < $PBS_NODEFILE | tr -d '[:space:]')
 MPIPROCS_PER_CHUNK=$(grep -c "^$(head -n 1 $PBS_NODEFILE)$" $PBS_NODEFILE)
 
-echo "OpenMP Threads per rank: $OMP_NUM_THREADS"
-echo "Total MPI Ranks: $TOTAL_MPI_RANKS"
-echo "MPI Ranks per chunk: $MPIPROCS_PER_CHUNK"
+echo
+echo "nodes     ${NUM_NODES}  (${nodes_list})"
+echo "geometry  ${MPIPROCS_PER_CHUNK} ranks/node x ${OMP_NUM_THREADS} threads (${TOTAL_MPI_RANKS} ranks)"
 
 #-------------------------------------------------------------------------------
 # Integration test over the blessed Derecho image set.  For each image: build the
@@ -60,6 +54,7 @@ NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-$(pwd)}"
 
 . "${NCAR_HPC_ROOT}/libexec/make_apptainer_launcher.sh"
 . "${NCAR_HPC_ROOT}/libexec/check_placement.sh"
+. "${NCAR_HPC_ROOT}/libexec/provenance.sh"
 
 if [ -n "${container_img:-}" ]; then
     IMAGES="${container_img}"
@@ -79,8 +74,13 @@ results=""
 # picks the file up from the directory the reports are written into.  It is also
 # the only record of what hardware certified these images.
 probe_topology "$(pwd)/topology.json" \
-    && { echo && echo "--- node topology ---" && cat topology.json; } \
     || echo "topology probe failed; falling back to built-in Derecho constants"
+vshow topology.json "node topology"
+
+# The environment this certification ran under, as files rather than 86 lines of
+# job log.  BENCH_VERBOSE=1 echoes them too -- which is what you want the first
+# time an image is tried on a new machine.
+capture_run_context "$(pwd)"
 
 # This gives one physical core per thread
 #export OMP_PROC_BIND=spread
@@ -103,17 +103,19 @@ run_placement () {
     shift 5
     local flags="$*"
 
-    {
-        echo "# image        ${img}"
-        echo "# tag          ${tag}"
-        echo "# compiler     ${comp_family}"
-        echo "# mpi_family   ${mpi_family}"
-        echo "# num nodes    ${NUM_NODES}"
-        echo "# ranks        ${nranks}  (${nthreads} threads each)"
-        echo "# mpiexec_flags ${flags:-(none)}"
-        echo "# launch       OMP_NUM_THREADS=${nthreads} mpiexec -n ${nranks} ${flags} ${run_launcher} ${run_exe}"
-        echo "# omp          OMP_PROC_BIND=${OMP_PROC_BIND:-unset} OMP_PLACES=${OMP_PLACES:-unset}"
-    } > "${out}"
+    emit_provenance "${out}" \
+        image        "${img}" \
+        image_digest "$(sif_digest "${img}")" \
+        tag          "${tag}" \
+        compiler     "${comp_family}" \
+        mpi_family   "${mpi_family}" \
+        nodes        "${NUM_NODES}" \
+        ranks        "${nranks}" \
+        threads      "${nthreads}" \
+        mpiexec_flags "${flags:-(none)}" \
+        omp          "OMP_PROC_BIND=${OMP_PROC_BIND:-unset} OMP_PLACES=${OMP_PLACES:-unset}" \
+        launcher     "${run_launcher}" \
+        launch       "OMP_NUM_THREADS=${nthreads} mpiexec -n ${nranks} ${flags} ${run_launcher} ${run_exe}"
 
     OMP_NUM_THREADS="${nthreads}" mpiexec -n "${nranks}" ${flags} \
         "${run_launcher}" "${run_exe}" >> "${out}" 2>&1
@@ -142,7 +144,7 @@ for img in ${IMAGES}; do
     #---------------------------------------------------------------------------
     comp_family="$(_launcher_sniff_compiler "${img}")"
     mpi_family="${container_mpi:-$(_launcher_sniff_family "${img}")}"
-    echo "toolchain: compiler=${comp_family}  mpi=${mpi_family}"
+    echo "  toolchain compiler=${comp_family} mpi=${mpi_family}"
     if ! load_host_modules "${comp_family}" "${mpi_family}"; then
         results="${results}\n${tag} FAIL FAIL modules"
         continue
@@ -159,16 +161,17 @@ for img in ${IMAGES}; do
     # resolves under /container the run below would produce N singletons and
     # look almost plausible, so stop here rather than mislead.
     #---------------------------------------------------------------------------
-    echo ""
-    echo "## Examining MPI linkage"
-    echo "  --- ldd: container native ---"
-    apptainer --quiet exec ${img} ldd ${exe} 2>/dev/null | grep -i "libmpi" | sed 's/^/    /'
-    echo "  --- ldd: through the launcher (must be a HOST path) ---"
-    host_mpi="$(${launcher} ldd ${exe} 2>/dev/null | grep -i 'libmpi\.so')"
-    echo "${host_mpi}" | sed 's/^/    /'
+    # Full linkage to a file; the one line that matters to stdout.
+    apptainer --quiet exec ${img} ldd ${exe} > "ldd_${tag}_native.txt" 2>&1
+    ${launcher}                    ldd ${exe} > "ldd_${tag}_overlay.txt" 2>&1
+    vshow "ldd_${tag}_native.txt"  "ldd (container native): ${tag}"
+    vshow "ldd_${tag}_overlay.txt" "ldd (through the launcher): ${tag}"
+
+    host_mpi="$(grep -i 'libmpi\.so' "ldd_${tag}_overlay.txt" 2>/dev/null)"
+    echo "  libmpi -> $(echo "${host_mpi}" | head -1 | sed 's/^[[:space:]]*//')"
     case "${host_mpi}" in
         *"/container/"*|"")
-            echo "    *** overlay did NOT take -- skipping runs for ${tag} ***"
+            echo "    *** overlay did NOT take -- see ldd_${tag}_overlay.txt ***"
             results="${results}\n${tag} FAIL FAIL no-overlay"
             continue
             ;;
@@ -181,14 +184,9 @@ for img in ${IMAGES}; do
     #---------------------------------------------------------------------------
     bound_flags="$(mpi_launch_flags "${mpi_family}" $MPIPROCS_PER_CHUNK $OMP_NUM_THREADS bound)"
 
-    echo
-    echo "## Running placement test"
-    echo
-
-    echo "  --- $MPIPROCS_PER_CHUNK ranks/node x $OMP_NUM_THREADS threads, bound (${bound_flags}) ---"
     run_placement "placement_${tag}_bound.out" $(( NUM_NODES * MPIPROCS_PER_CHUNK )) $OMP_NUM_THREADS \
         "${launcher}" "${exe}" ${bound_flags}
-    grep -m1 "^# mpi " "placement_${tag}_bound.out" | sed 's/^/    /'
+
     # PASS/FAIL certifies the IMAGE, so it keys on `fail` only: a warn names a
     # suboptimal placement, which is a property of how this job asked for the
     # binding, not of whether the container's MPI overlay works.  The pathology

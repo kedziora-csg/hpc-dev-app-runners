@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""collect -- turn results.jsonl files into something you can read.
+
+    collect [ROOT ...] [--format table|csv|json] [--best] [--include-failed]
+
+ROOT defaults to containers/deploy/ncar-hpc/results.  Every results.jsonl at or
+below each ROOT is read; rows are tagged with the directory they came from, so
+one invocation summarises a whole matrix of jobs.
+
+WHY THIS IS A READ-TIME TOOL
+------------------------------------------------------------------------------
+The job writes JSONL and never a table.  Metric sets differ per app, so the set
+of columns is not knowable when the first row is written -- but it is trivially
+knowable once the rows are in hand.  Deciding the schema up front would mean
+either a union header rewritten every time an app is added, or dropping metrics
+that no one anticipated.
+
+Appending is also crash-safe: a job killed at walltime leaves every completed
+cell intact and loses only the one that was running.
+
+WHICH ROWS MAY WIN
+------------------------------------------------------------------------------
+A row is COMPARABLE unless one of the following holds, in which case it is
+printed with its reason and excluded from --best:
+
+    placement.verdict == "fail"   the run measured its binding, not the code
+    valid == false                the app said its own result was not valid
+    exit != 0                     it did not finish
+
+`warn` is comparable: the placement is suboptimal, but it is the placement that
+was measured, and the rule that fired is named in the row.
+
+The first cell of each job carries warm=false -- it paid the cold read of the
+.sif off GPFS and the first per-rank Apptainer startup.  It is comparable, but
+--best notes when the winner is one, because that cost is an artifact of
+ordering rather than of the configuration.
+
+NOTE ON LOCATION
+------------------------------------------------------------------------------
+BenchmarkRunnerPlan.md section 8 puts this under containers/deploy/bench/, and
+section 11 open question 1 asks whether it belongs there at all -- it is neither
+a container nor a deployment.  Moving it is one `git mv`; nothing here depends
+on the path.
+"""
+
+import argparse
+import csv
+import json
+import os
+import sys
+
+DEFAULT_ROOT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "ncar-hpc", "results"
+)
+
+
+def find_result_files(roots):
+    """Every results.jsonl at or below each root, plus roots named directly."""
+    found = []
+    for root in roots:
+        if os.path.isfile(root):
+            found.append(root)
+            continue
+        for dirpath, _dirnames, filenames in os.walk(root):
+            if "results.jsonl" in filenames:
+                found.append(os.path.join(dirpath, "results.jsonl"))
+    return sorted(set(found))
+
+
+def load_rows(paths):
+    """Parse every row, keeping going past a truncated final line.
+
+    A job killed mid-write leaves a partial last line.  That is one lost cell,
+    not a lost job, so say so and read the rest rather than refusing the file.
+    """
+    rows, damaged = [], []
+    for path in paths:
+        job = os.path.basename(os.path.dirname(path))
+        with open(path) as fh:
+            for lineno, line in enumerate(fh, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    damaged.append("%s:%d" % (path, lineno))
+                    continue
+                row["_job"] = job
+                row["_path"] = path
+                rows.append(row)
+    return rows, damaged
+
+
+def get(row, path, default=""):
+    """Fetch a dotted path, tolerating absent intermediate objects."""
+    cur = row
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur[part]
+    return default if cur is None else cur
+
+
+def excluded_because(row):
+    """Why this row may not win, or None."""
+    if get(row, "exit", 0) not in (0, ""):
+        return "exit=%s" % get(row, "exit")
+    if get(row, "valid", True) is False:
+        return "app reported invalid"
+    if get(row, "placement.verdict") == "fail":
+        rules = get(row, "placement.rules", []) or []
+        return "placement fail" + (" (%s)" % ", ".join(rules) if rules else "")
+    return None
+
+
+def metric_names(rows):
+    names = []
+    for row in rows:
+        for name in row.get("metrics", {}) or {}:
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def fmt(value):
+    return "-" if value == "" or value is None else str(value)
+
+
+def print_table(rows, metrics, show_all):
+    cols = [
+        ("IMAGE", lambda r: get(r, "image.sif", r["_job"])),
+        ("APP", lambda r: get(r, "app.name")),
+        ("PLACEMENT", lambda r: get(r, "placement.name")),
+        ("R/NODE", lambda r: get(r, "placement.ranks_per_node")),
+        ("THREADS", lambda r: get(r, "placement.threads")),
+        ("WALL_S", lambda r: get(r, "wall_s")),
+    ]
+    cols += [(m.upper(), (lambda m: lambda r: get(r, "metrics." + m))(m)) for m in metrics]
+    def note(row):
+        # Why a row is out, or -- for a row that is still in -- which pathology
+        # was tolerated.  A `warn` with nothing shown here would look identical
+        # to a clean row.
+        why = excluded_because(row)
+        if why:
+            return "EXCLUDED: " + why
+        return ", ".join(get(row, "placement.rules", []) or [])
+
+    cols += [
+        ("BIND", lambda r: get(r, "placement.verdict")),
+        ("NOTE", note),
+    ]
+
+    table = [[c[0] for c in cols]]
+    for row in rows:
+        table.append([fmt(getter(row)) for _name, getter in cols])
+
+    widths = [max(len(r[i]) for r in table) for i in range(len(cols))]
+    for i, line in enumerate(table):
+        print("  ".join(cell.ljust(widths[j]) for j, cell in enumerate(line)).rstrip())
+        if i == 0:
+            print("  ".join("-" * w for w in widths).rstrip())
+
+    if not show_all:
+        return
+    n_out = sum(1 for r in rows if excluded_because(r))
+    cold = [r for r in rows if get(r, "warm", True) is False]
+    if n_out or cold:
+        print()
+    if n_out:
+        print("%d row(s) EXCLUDED: never let one win a comparison -- a mis-bound run"
+              % n_out)
+        print("measures its binding, and an invalid or non-zero-exit run measures nothing.")
+    if cold:
+        print("%d row(s) warm=false: first cell of a job, so wall_s includes the cold"
+              % len(cold))
+        print("read of the .sif off GPFS.  Prefer the app's own timer there.")
+
+
+def print_csv(rows, metrics):
+    fields = ["job", "timestamp", "site", "job_id", "nodes",
+              "image.sif", "image.digest", "image.compiler", "image.mpi",
+              "app.name", "app.version",
+              "placement.name", "placement.ranks_per_node", "placement.threads",
+              "placement.verdict", "placement.rules",
+              "placement.omp.OMP_PROC_BIND", "placement.omp.OMP_PLACES",
+              "repeat", "warm", "wall_s", "exit", "valid"]
+    fields += ["metrics." + m for m in metrics]
+    fields += ["comparable", "excluded_because"]
+
+    writer = csv.writer(sys.stdout)
+    writer.writerow(fields)
+    for row in rows:
+        why = excluded_because(row)
+        out = []
+        for field in fields:
+            if field == "job":
+                out.append(row["_job"])
+            elif field == "comparable":
+                out.append(why is None)
+            elif field == "excluded_because":
+                out.append(why or "")
+            elif field == "placement.rules":
+                out.append(";".join(get(row, field, []) or []))
+            else:
+                out.append(get(row, field))
+        writer.writerow(out)
+
+
+def print_best(rows, metrics, include_failed=False):
+    """The winning cell per (app, metric), over comparable rows only."""
+    usable = rows if include_failed else [r for r in rows if excluded_because(r) is None]
+    if not usable:
+        print("no comparable rows: every row was excluded (see --include-failed)")
+        return
+
+    # Higher is better for a throughput figure; for wall time, lower.  Phase 2's
+    # app.yaml declares this per metric (`better: higher|lower`); until then the
+    # only metric in play is a rate, and wall_s is handled explicitly.
+    for app in sorted({get(r, "app.name", "?") for r in usable}):
+        pool = [r for r in usable if get(r, "app.name", "?") == app]
+        print("app %s -- %d comparable row(s)" % (app or "(none)", len(pool)))
+        for metric in metrics:
+            have = [r for r in pool if isinstance(get(r, "metrics." + metric, None), (int, float))]
+            if not have:
+                continue
+            win = max(have, key=lambda r: get(r, "metrics." + metric))
+            print("  best %-10s %-12s %-24s %s=%s%s" % (
+                metric, get(win, "placement.name"), get(win, "image.sif", win["_job"]),
+                metric, get(win, "metrics." + metric),
+                "   [warm=false: includes cold .sif read]"
+                if get(win, "warm", True) is False else ""))
+        have = [r for r in pool if isinstance(get(r, "wall_s", None), (int, float))]
+        if have:
+            win = min(have, key=lambda r: get(r, "wall_s"))
+            print("  best %-10s %-12s %-24s wall_s=%s%s" % (
+                "wall_s", get(win, "placement.name"), get(win, "image.sif", win["_job"]),
+                get(win, "wall_s"),
+                "   [warm=false: includes cold .sif read]"
+                if get(win, "warm", True) is False else ""))
+        print()
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Summarise results.jsonl written by the benchmark runner.")
+    ap.add_argument("roots", nargs="*", default=[DEFAULT_ROOT],
+                    help="results directories or results.jsonl files "
+                         "(default: %s)" % DEFAULT_ROOT)
+    ap.add_argument("--format", choices=("table", "csv", "json"), default="table")
+    ap.add_argument("--best", action="store_true",
+                    help="report the winning cell per app, comparable rows only")
+    ap.add_argument("--include-failed", action="store_true",
+                    help="let excluded rows win in --best; they are always shown "
+                         "in the table either way")
+    args = ap.parse_args()
+
+    roots = args.roots or [DEFAULT_ROOT]
+    paths = find_result_files(roots)
+    if not paths:
+        print("no results.jsonl under: %s" % ", ".join(roots), file=sys.stderr)
+        print("  (jobs write one per results directory; have they finished?)",
+              file=sys.stderr)
+        return 1
+
+    rows, damaged = load_rows(paths)
+    if damaged:
+        print("skipped %d unparseable line(s) -- a job killed mid-write leaves a "
+              "partial last row:" % len(damaged), file=sys.stderr)
+        for where in damaged:
+            print("  %s" % where, file=sys.stderr)
+    if not rows:
+        print("no rows in: %s" % ", ".join(paths), file=sys.stderr)
+        return 1
+
+    rows.sort(key=lambda r: (get(r, "app.name"), r["_job"],
+                             get(r, "placement.name"), get(r, "repeat", 0)))
+    metrics = metric_names(rows)
+
+    if args.format == "json":
+        json.dump(rows, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    elif args.format == "csv":
+        print_csv(rows, metrics)
+    else:
+        print_table(rows, metrics, show_all=True)
+
+    if args.best:
+        print()
+        print_best(rows, metrics, include_failed=args.include_failed)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

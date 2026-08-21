@@ -14,6 +14,18 @@ EOF
     echo "source /container/config_env.sh" >>${SINGULARITY_ENVIRONMENT}
     echo 'export PS1="<PLACEHOLDER_IMG_TAG>> "' >>${SINGULARITY_ENVIRONMENT}
 
+# Stamped by libexec/Makefile via pin_image_digest.sh.  A .sif is a flattened
+# SquashFS with no layer identity, so these labels are the only way a finished
+# image can name the build it came from -- and therefore the only way a
+# benchmark result can name an artifact rather than a mutable tag.
+# base.digest reads `unknown` when it could not be resolved at build time.
+# Comments must stay OUTSIDE this section: every non-empty line inside %labels
+# is parsed as `KEY VALUE`.
+%labels
+    org.opencontainers.image.base.name ghcr.io/kedziora-csg/hpcdev-apps-x86_64:<PLACEHOLDER_IMG_TAG>-latest
+    org.opencontainers.image.base.digest <PLACEHOLDER_BASE_DIGEST>
+    io.ncar.hpcdev.image_tag <PLACEHOLDER_IMG_TAG>
+
 %runscript
     cat <<EOF
 Welcome to "$(basename ${SINGULARITY_NAME} .sif)"

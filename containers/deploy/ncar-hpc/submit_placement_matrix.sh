@@ -23,6 +23,12 @@
 #     --dry-run          print the qsub commands, submit nothing
 #     --collate          do not submit; summarise results already on disk
 #
+# --collate reads the flat timings.txt each job appends.  For anything beyond a
+# PASS/FAIL glance use containers/deploy/bench/collect, which reads the
+# results.jsonl records instead: it carries the image digest, the OMP settings,
+# the rules that fired, and every app metric, and it knows which rows may not
+# win a comparison.  Both this flag and timings.txt go away in phase 3.
+#
 # TYPICAL SEQUENCE
 #     cd libexec && make derecho-hpcg && cd ..   # build the six app .sif images
 #     ./submit_placement_matrix.sh --account SCSG0001
@@ -119,6 +125,9 @@ if [ "${COLLATE}" = "1" ]; then
     echo "counts; run the job's placement_*.out through libexec/check_placement.sh"
     echo "(placement_summary) to see which pathology fired."
     echo "GFLOPS is HPCG's own rating; blank for non-HPCG workloads."
+    echo
+    echo "For the full record -- digest, OMP settings, fired rules, all metrics:"
+    echo "    ${HERE}/../bench/collect ${RESULTS_DIR} --best"
     exit 0
 fi
 

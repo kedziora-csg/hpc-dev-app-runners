@@ -1,3 +1,8 @@
+# The registry the Deffiles bootstrap from.  Stated once here so the digest
+# pinning below and the `From:` lines in Deffile/Deffile.apps cannot drift apart.
+GHCR_BASE_REF := ghcr.io/kedziora-csg/hpcdev-x86_64
+GHCR_APPS_REF := ghcr.io/kedziora-csg/hpcdev-apps-x86_64
+
 openmpi_images := almalinux9-gcc-openmpi.sif \
                   almalinux9-gcc14-openmpi.sif \
                   almalinux9-aocc-openmpi.sif \
@@ -42,6 +47,8 @@ echo:
 # any edit to check_placement.sh, placement_rules.sh or probe_topology.sh.
 test:
 	@./self_test.sh
+	@echo
+	@./test_results.sh
 
 clean:
 	rm -f *~
@@ -49,19 +56,30 @@ clean:
 pristine:
 	git clean -xdf -e "*.sif"
 
+# Each .def is pinned to the DIGEST its `-latest` tag resolves to, so the build
+# is immutable and the resulting .sif can name the image it came from.  See
+# pin_image_digest.sh -- if resolution fails the build still proceeds from the
+# tag, with the digest recorded as `unknown`.
+#
+# Note the digest is resolved when the .def is GENERATED, not on every build:
+# make will not notice the upstream tag moving.  `rm -f *.def` (or `make
+# pristine`) to pick up a new upstream image.
+#
 # '$*' matches the '%' part, see https://www.gnu.org/software/make/manual/html_node/Automatic-Variables.html
-%-hpcg.def: Deffile.apps
+%-hpcg.def: Deffile.apps pin_image_digest.sh
 	@echo "Constructing $@ from $<"
 	@rm -f $@
 	@cp $< $@.tmp
 	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*-hpcg/g' $@.tmp
+	@./pin_image_digest.sh --pin $@.tmp $(GHCR_APPS_REF):$*-hpcg-latest
 	@mv $@{.tmp,}
 
-%.def: Deffile
+%.def: Deffile pin_image_digest.sh
 	@echo "Constructing $@ from $<"
 	@rm -f $@
 	@cp $< $@.tmp
 	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*/g' $@.tmp
+	@./pin_image_digest.sh --pin $@.tmp $(GHCR_BASE_REF):$*-latest
 	@mv $@{.tmp,}
 
 %.sif: %.def Makefile ../config_env.sh
