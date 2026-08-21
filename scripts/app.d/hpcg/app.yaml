@@ -1,0 +1,37 @@
+# HPCG -- High Performance Conjugate Gradient.
+#
+# Only the top-level scalars are read inside the job (by libexec/app_contract.sh,
+# with a deliberately small reader).  Everything nested is for host-side tools --
+# bench/collect reads primary_fom and the `better:` directions to decide which
+# row wins.
+app: hpcg
+version: "3.1"
+binary: /container/bin/xhpcg
+primary_fom: gflops
+
+requires:
+  mpi: true
+  openmp: true
+  min_ranks: 1
+
+figures_of_merit:
+  gflops: {units: GFLOP/s, better: higher}
+  wall_s: {units: s, better: lower, provided_by: runner}
+
+success_criteria:
+  app_self_validates: true
+
+notes: |
+  HPCG reads ./hpcg.dat from the current directory, so prepare writes one per
+  cell.  nx/ny/nz are the LOCAL problem per rank and must each be a multiple of
+  8; prepare sizes them from the probed cache geometry so the working set lands
+  past last-level cache, which is what makes this a memory-bandwidth measurement
+  rather than a cache benchmark.
+
+  An official HPCG submission requires a run of at least 1800 seconds.  Anything
+  shorter is fine for comparing toolchains against each other and must not be
+  reported as an HPCG result.
+
+  The threaded configurations measure HPCG's *reference* multigrid, which is not
+  thread-optimised -- HPCG says so itself in its report, and extract surfaces it
+  as reference_kernels.  A drop going from 128x1 to 8x16 is that, not placement.

@@ -67,6 +67,40 @@ def find_result_files(roots):
     return sorted(set(found))
 
 
+def load_app_yaml(path):
+    """Read primary_fom and each metric's direction from an app.yaml.
+
+    app_resolve copies app.yaml into the results directory beside the rows it
+    describes, so a results directory carries its own answer to "which number
+    decides" -- no image, no config file, no knowledge of the app here.
+
+    Deliberately a small reader, not a YAML parser: it wants two shapes, the
+    top-level `primary_fom: name` and the `better: higher|lower` inside
+    figures_of_merit. Anything it does not understand is simply not used.
+    """
+    fom, better = None, {}
+    try:
+        with open(path) as fh:
+            in_foms = False
+            for line in fh:
+                stripped = line.strip()
+                if stripped.startswith("primary_fom:"):
+                    fom = stripped.split(":", 1)[1].strip().strip("\"'")
+                elif line.startswith("figures_of_merit:"):
+                    in_foms = True
+                elif in_foms and line[:1] not in (" ", "\t"):
+                    in_foms = False
+                elif in_foms and ":" in stripped:
+                    name = stripped.split(":", 1)[0].strip()
+                    if "better: lower" in stripped:
+                        better[name] = "lower"
+                    elif "better: higher" in stripped:
+                        better[name] = "higher"
+    except OSError:
+        pass
+    return fom, better
+
+
 def load_rows(paths):
     """Parse every row, keeping going past a truncated final line.
 
@@ -76,6 +110,7 @@ def load_rows(paths):
     rows, damaged = [], []
     for path in paths:
         job = os.path.basename(os.path.dirname(path))
+        fom, better = load_app_yaml(os.path.join(os.path.dirname(path), "app.yaml"))
         with open(path) as fh:
             for lineno, line in enumerate(fh, 1):
                 line = line.strip()
@@ -88,6 +123,7 @@ def load_rows(paths):
                     continue
                 row["_job"] = job
                 row["_path"] = path
+                row["_fom"], row["_better"] = fom, better
                 rows.append(row)
     return rows, damaged
 
@@ -104,6 +140,8 @@ def get(row, path, default=""):
 
 def excluded_because(row):
     """Why this row may not win, or None."""
+    if get(row, "skipped", False) is True:
+        return "skipped: " + str(get(row, "skip_reason", "the app declined this geometry"))
     if get(row, "exit", 0) not in (0, ""):
         return "exit=%s" % get(row, "exit")
     if get(row, "valid", True) is False:
@@ -208,49 +246,60 @@ def print_csv(rows, metrics):
 
 
 def print_best(rows, metrics, include_failed=False):
-    """The winning cell per (app, metric), over comparable rows only."""
+    """The winning cell per app, ranked by what the app said its metric was."""
     usable = rows if include_failed else [r for r in rows if excluded_because(r) is None]
     if not usable:
-        print("no comparable rows: every row was excluded (see --include-failed)")
+        print("no comparable rows: every row was excluded (see the table above)")
         return
 
-    # Higher is better for a throughput figure; for wall time, lower.  Phase 2's
-    # app.yaml declares this per metric (`better: higher|lower`); until then the
-    # only metric in play is a rate, and wall_s is handled explicitly.
     for app in sorted({get(r, "app.name", "?") for r in usable}):
         pool = [r for r in usable if get(r, "app.name", "?") == app]
         app_metrics = metric_names(pool)
-        print("app %s -- %d comparable row(s)" % (app or "(none)", len(pool)))
-        for metric in metrics:
-            have = [r for r in pool if isinstance(get(r, "metrics." + metric, None), (int, float))]
+        primary = next((r["_fom"] for r in pool if r.get("_fom")), None)
+        better = {}
+        for r in pool:
+            better.update(r.get("_better") or {})
+
+        print("app %s -- %d comparable row(s)%s" % (
+            app or "(none)", len(pool),
+            "" if primary else "   [no app.yaml alongside: ranking every metric]"))
+
+        # The declared primary first, then any other metric the app reported,
+        # then wall_s -- which is the runner's fallback clock and belongs last.
+        ordered = ([primary] if primary in app_metrics else []) \
+                  + [m for m in app_metrics if m != primary]
+
+        for metric in ordered:
+            have = [r for r in pool
+                    if isinstance(get(r, "metrics." + metric, None), (int, float))]
             if not have:
                 continue
-            win = max(have, key=lambda r: get(r, "metrics." + metric))
-            print("  best %-10s %-12s %-24s %s=%s%s" % (
-                metric, get(win, "placement.name"), get(win, "image.sif", win["_job"]),
+            direction = better.get(metric, "higher")
+            pick = min if direction == "lower" else max
+            win = pick(have, key=lambda r: get(r, "metrics." + metric))
+            # With no declared primary there is nothing to rank the metrics
+            # against each other, so each is simply the best of its own.
+            print("  %-5s %-10s %-12s %-28s %s=%s%s" % (
+                "best" if (primary is None or metric == primary) else "     ",
+                metric, get(win, "placement.name"),
+                get(win, "image.sif", win["_job"]),
                 metric, get(win, "metrics." + metric),
                 "   [warm=false: includes cold .sif read]"
                 if get(win, "warm", True) is False else ""))
-        # wall_s last, and labelled, because it is the runner's fallback timer
-        # and not every app's figure of merit.  A fixed-duration benchmark --
-        # HPCG runs to a target time and reports a RATE -- makes wall_s
-        # meaningless across configurations: the slowest cell can be the best
-        # one.  Phase 2's app.yaml declares `primary_fom` and `better:
-        # higher|lower` per metric; until it does, say which number is load
-        # bearing rather than presenting two winners as equals.
+
         have = [r for r in pool if isinstance(get(r, "wall_s", None), (int, float))]
         if have:
             win = min(have, key=lambda r: get(r, "wall_s"))
-            label = "wall_s" if not app_metrics else "wall_s*"
-            print("  best %-10s %-12s %-24s wall_s=%s%s" % (
-                label, get(win, "placement.name"), get(win, "image.sif", win["_job"]),
+            print("  %-5s %-10s %-12s %-28s wall_s=%s%s" % (
+                "" if app_metrics else "best", "wall_s*",
+                get(win, "placement.name"), get(win, "image.sif", win["_job"]),
                 get(win, "wall_s"),
                 "   [warm=false: includes cold .sif read]"
                 if get(win, "warm", True) is False else ""))
             if app_metrics:
-                print("       * runner fallback timer, not %s's figure of merit -- only"
+                print("        * the runner's clock, not %s's figure of merit: it includes"
                       % (app or "this app"))
-                print("         comparable between cells that did the same amount of work")
+                print("          container startup and the app's own setup phase")
         print()
 
 

@@ -1,0 +1,33 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# hpcg/prepare <rundir> -- write hpcg.dat for this cell.
+#
+# HPCG reads ./hpcg.dat from the current directory and takes no command-line
+# arguments, so this is the only way to set the problem size and duration.
+#
+# nx/ny/nz are the LOCAL problem PER RANK and must each be a multiple of 8.  The
+# size is chosen so one rank's working set lands well past the last-level cache:
+# below that HPCG measures cache bandwidth, which is not what it is for.  The
+# default of 104^3 is roughly 8x Milan's 32 MB L3 per rank, and BENCH_CORES_PER_L3
+# is here so the same rule holds on a machine with a different cache geometry.
+#-------------------------------------------------------------------------------
+set -e
+rundir="${1:-${BENCH_RUNDIR:-.}}"
+cd "${rundir}"
+
+case "${BENCH_SCALE:-node}" in
+    smoke) nx=32  ; secs=5 ;;                       # CI: proves it runs, nothing more
+    *)     nx="${HPCG_NX:-104}"
+           secs="${BENCH_TARGET_SECONDS:-60}" ;;
+esac
+
+# Multiple of 8 is a hard requirement of HPCG's problem generator; round rather
+# than reject, so a target derived from cache size never has to be exact.
+nx=$(( (nx / 8) * 8 )); [ "${nx}" -ge 16 ] || nx=16
+
+cat > hpcg.dat <<DAT
+HPCG benchmark input file
+${BENCH_PLACEMENT:-run} ${secs}s -- comparison only, not a valid submission
+${nx} ${nx} ${nx}
+${secs}
+DAT

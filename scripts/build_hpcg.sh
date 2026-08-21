@@ -126,8 +126,14 @@ echo "patched: ComputeResidual.cpp default(none) shared clause"
 # Patch: use explicit OpenMP reductions for HPCG's nonzero counters instead of the
 # 3.1 source's unnamed critical sections.  GenerateProblem_ref records the matrix
 # metadata and CheckProblem validates it; both accumulate the same count inside a
-# parallel loop.  Defensive only -- no failure is known to require it, and removing
-# it is untested (BenchmarkRunnerPlan.md, open questions).
+# parallel loop.
+#
+# A reduction is identical to a critical section for a sum, and removes a
+# serialization point every row of the local problem passes through -- about 1.1M
+# entries per rank at the 104^3 default.  Problem generation is a measurable part
+# of a cell (19-23 s of an 83 s threaded run on Derecho), so this is not
+# hypothetical.  The greps below fail the build if upstream moves this code, which
+# is the only real risk in carrying it.
 #-------------------------------------------------------------------------------
 for file in ${HPCG_SRC}/src/GenerateProblem_ref.cpp ${HPCG_SRC}/src/CheckProblem.cpp; do
     perl -0pi -e 's/(local_int_t localNumberOfNonzeros = 0;\n\s*\/\/ TODO:.*?\n#ifndef HPCG_NO_OPENMP\n\s*)#pragma omp parallel for/${1}#pragma omp parallel for reduction(+:localNumberOfNonzeros)/s' \
@@ -201,6 +207,27 @@ EOF
 # Also expose it on PATH alongside report_placement.
 mkdir -p ${INSTALL_ROOT}/bin
 ln -sf ${HPCG_INSTALL_DIR}/bin/xhpcg ${INSTALL_ROOT}/bin/xhpcg
+
+#-------------------------------------------------------------------------------
+# The app contract: how a benchmark runner drives HPCG without knowing what HPCG
+# is.  It rides in the image with the binary on purpose -- the extractor then
+# travels with the app VERSION it was written against, and a recorded result can
+# name an image digest and mean it.
+#
+# See scripts/app.d/README.md.  BENCH_APP_DIR overrides this at run time for
+# development, without a rebuild.
+#-------------------------------------------------------------------------------
+app_src="${SCRIPTDIR}/app.d/hpcg"
+[ -d "${app_src}" ] || app_src="/container/extras/app.d/hpcg"
+if [ -d "${app_src}" ]; then
+    mkdir -p ${INSTALL_ROOT}/app.d
+    cp -R "${app_src}" ${INSTALL_ROOT}/app.d/
+    chmod +x ${INSTALL_ROOT}/app.d/hpcg/prepare ${INSTALL_ROOT}/app.d/hpcg/extract
+    echo "installed app contract: ${INSTALL_ROOT}/app.d/hpcg"
+else
+    echo "WARNING: no app.d/hpcg contract found; the image will carry xhpcg but"
+    echo "         a runner will not know how to size or read it"
+fi
 
 echo && echo "installed:" && ls -l ${HPCG_INSTALL_DIR}/bin/
 report_cpu_features ${HPCG_INSTALL_DIR}/bin/xhpcg 2>/dev/null || ldd ${HPCG_INSTALL_DIR}/bin/xhpcg || true

@@ -1,0 +1,37 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# hpcg/extract <rundir> -- print `key=value` for this cell.
+#
+# Missing output is a MISSING METRIC, not a failed run: exit 0 having printed
+# nothing rather than fail, so a cell that produced no report is recorded as a
+# cell with no metrics.
+#-------------------------------------------------------------------------------
+rundir="${1:-${BENCH_RUNDIR:-.}}"
+cd "${rundir}" 2>/dev/null || exit 0
+
+ls HPCG-Benchmark*.txt >/dev/null 2>&1 || exit 0
+
+gflops="$(grep -hoE 'GFLOP/s rating of=[0-9.]+' HPCG-Benchmark*.txt 2>/dev/null \
+          | tail -1 | cut -d= -f2)"
+[ -n "${gflops}" ] && echo "gflops=${gflops}"
+
+# HPCG judges its own result.  'is VALID' does not match 'is INVALID' -- the
+# space is load bearing.
+if   grep -qh 'result is VALID'   HPCG-Benchmark*.txt 2>/dev/null; then echo "valid=true"
+elif grep -qh 'result is INVALID' HPCG-Benchmark*.txt 2>/dev/null; then echo "valid=false"
+fi
+
+# HPCG reports when its own reference kernels were used instead of optimised
+# ones, and says the threaded case is "severely suboptimal".  That is a property
+# of the benchmark, not of the binding, and without it a drop from 128x1 to 8x16
+# reads as a placement result.
+if grep -qh 'ComputeMG used and number of threads greater than 1' \
+        HPCG-Benchmark*.txt 2>/dev/null; then
+    echo "reference_kernels=threaded"
+elif grep -qh 'Reference version of ComputeMG used' HPCG-Benchmark*.txt 2>/dev/null; then
+    echo "reference_kernels=serial"
+fi
+
+secs="$(sed -n 's/^Benchmark Time Summary::Total=//p' HPCG-Benchmark*.txt 2>/dev/null | tail -1)"
+[ -n "${secs}" ] && echo "app_time_s=${secs}"
+exit 0

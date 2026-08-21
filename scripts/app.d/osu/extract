@@ -1,0 +1,28 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# osu/extract <rundir> -- print `key=value` for this cell.
+#
+# OSU prints a table to stdout, which the runner captures as app.out:
+#
+#     # OSU MPI Alltoall Latency Test v7.5
+#     # Size       Avg Latency(us)
+#     4                      15.23
+#     ...
+#     1048576              5023.11
+#
+# The last row is the largest message size, which is the one that measures the
+# fabric rather than the software stack.
+#-------------------------------------------------------------------------------
+rundir="${1:-${BENCH_RUNDIR:-.}}"
+cd "${rundir}" 2>/dev/null || exit 0
+[ -f app.out ] || exit 0
+
+last="$(grep -E '^[0-9]+[[:space:]]+[0-9.]+' app.out 2>/dev/null | tail -1)"
+[ -n "${last}" ] || exit 0        # no table: a missing metric, not a failed run
+
+echo "msg_bytes=$(printf '%s\n' "${last}" | awk '{print $1}')"
+echo "latency_us=$(printf '%s\n' "${last}" | awk '{print $2}')"
+
+name="$(sed -n 's/^# OSU MPI \(.*\) Test.*/\1/p' app.out 2>/dev/null | head -1)"
+[ -n "${name}" ] && echo "benchmark=$(printf '%s' "${name}" | tr ' ' '_')"
+exit 0

@@ -146,7 +146,38 @@ edit at all:
 qsub -v BENCH_RESULTS_ROOT=$SCRATCH/hpcdev-bench Placement_derecho.pbs
 ```
 
-### Step 4.2b: What a Benchmark Job Leaves Behind
+### Step 4.2b: Choosing What to Benchmark
+
+`APP` names an application whose contract ships in the image:
+
+```bash
+qsub -v APP=hpcg Placement_derecho_opt.pbs
+qsub -v APP=osu,OSU_BENCHMARK=osu_allreduce Placement_derecho_opt.pbs
+```
+
+The runner knows nothing about either. What to write before the run, how to
+launch it, and how to read its output all come from `/container/app.d/<app>/` —
+see [`scripts/app.d/README.md`](../../../scripts/app.d/README.md). Adding a third
+application is a directory there and a line in its `build_<app>.sh`; it is not a
+change to the runner.
+
+A bare executable also works, and gets you wall time and a placement verdict:
+
+```bash
+qsub -v APP=/glade/work/$USER/bin/wrf.exe Placement_derecho_opt.pbs
+```
+
+To fix an extractor without rebuilding an image, point `BENCH_APP_DIR` at a copy
+of the contract on a filesystem the container binds (on Derecho, `/glade`):
+
+```bash
+qsub -v APP=hpcg,BENCH_APP_DIR=/glade/work/$USER/app.d ...
+```
+
+Rows produced that way carry `app_dir_override: true`, so they are never mistaken
+for reproducible ones.
+
+### Step 4.2c: What a Benchmark Job Leaves Behind
 
 A results directory is self-contained: reading it never requires the PBS script,
 the job log, or knowing what was submitted.
@@ -160,7 +191,8 @@ the job log, or knowing what was submitted.
 | `launcher.sh` | the generated Apptainer launcher, verbatim |
 | `ldd_*_host.txt` | linkage through the launcher, i.e. after the host libraries displace the container's |
 | `placement_<cfg>.out` | `report_placement` output, provenance header first |
-| `run_<cfg>/` | the app's own working directory: inputs, `app.out`, `metrics.kv` |
+| `app.yaml` | the contract that was in force: what declared each metric, and which one decides |
+| `run_<cfg>/` | the app's own working directory (`$BENCH_RUNDIR`): inputs, `app.out`, `metrics.kv`, `prepare.log` |
 
 Tabulate one or many jobs:
 

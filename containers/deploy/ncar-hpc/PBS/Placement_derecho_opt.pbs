@@ -37,10 +37,15 @@
 #   Placement only (verify the layouts, no workload):
 #       qsub Placement_derecho_opt.pbs
 #
-#   Benchmark a real application:
-#       qsub -v APP=/glade/work/$USER/bin/wrf.exe Placement_derecho_opt.pbs
-#       qsub -v APP=/container/osu-micro-benchmarks/7.5/libexec/\
-#osu-micro-benchmarks/mpi/collective/osu_alltoall,APP_ARGS="-m 4:8192" ...
+#   Benchmark an application that ships a contract in the image:
+#       qsub -v APP=hpcg Placement_derecho_opt.pbs
+#       qsub -v APP=osu,OSU_BENCHMARK=osu_allreduce ...
+#
+#   Benchmark a bare executable (no contract; you get wall time and placement):
+#       qsub -v APP=/glade/work/$USER/bin/wrf.exe ...
+#
+#   Iterate on a contract without rebuilding the image (results are marked):
+#       qsub -v APP=hpcg,BENCH_APP_DIR=/glade/work/$USER/app.d ...
 #
 # Each configuration prints a placement report first, then names any pathology
 # found in it, then the timed workload.  Placement is therefore never a
@@ -131,8 +136,18 @@ bench_site_modules || { echo "site module bootstrap failed" >&2; exit 1; }
 #-------------------------------------------------------------------------------
 # Knobs
 #-------------------------------------------------------------------------------
-APP="${APP:-}"                       # '', or hpcg, or a path to your executable
-APP_ARGS="${APP_ARGS:-}"
+# APP is an application NAME resolved under /container/app.d/, or a path to a
+# bare executable.  This script knows nothing else about it -- what to write
+# before the run, how to launch it and how to read its output all come from the
+# app's own contract.  See scripts/app.d/README.md.
+APP="${APP:-}"
+APP_ARGS="${APP_ARGS:-}"             # appended to the argv; the launch hook is preferred
+
+# Handed to every hook.  BENCH_SCALE names an app-defined size class and
+# BENCH_TARGET_SECONDS how long a cell should aim to take; an app that cannot
+# honour either is free to ignore them.
+BENCH_SCALE="${BENCH_SCALE:-node}"
+BENCH_TARGET_SECONDS="${BENCH_TARGET_SECONDS:-60}"
 NNODES="$(sort -u $PBS_NODEFILE | wc -l | tr -d '[:space:]')"
 
 
@@ -142,7 +157,7 @@ RESULTS_DIR="${RESULTS_DIR:-${BENCH_RESULTS_ROOT}}"
 
 nodes_list="$(sort -u $PBS_NODEFILE | tr '\n' ' ' | sed 's/ *$//')"
 echo
-echo "app       ${APP:-<none: placement verification only>}${APP_ARGS:+ ${APP_ARGS}}"
+[ -n "${APP}" ] || echo "app       <none: placement verification only>"
 echo "nodes     ${NNODES}  (${nodes_list//.hpc.ucar.edu/})"
 echo "results   ${RESULTS_DIR}"
 
@@ -170,7 +185,8 @@ mkdir -p "${RESULTS_DIR}" \
 #   results.sh                  the results.jsonl record; pulls in provenance.sh
 #                               for emit_provenance, capture_run_context, the
 #                               sub-second clock and the BENCH_VERBOSE helpers
-for lib in make_apptainer_launcher.sh check_placement.sh results.sh; do
+#   app_contract.sh             app.yaml + the prepare/launch/extract hooks
+for lib in make_apptainer_launcher.sh check_placement.sh results.sh app_contract.sh; do
     . "${NCAR_HPC_ROOT}/libexec/${lib}" \
         || { echo "cannot source ${NCAR_HPC_ROOT}/libexec/${lib}" >&2; exit 1; }
 done
@@ -255,39 +271,31 @@ CONFIGS=(
     #export OMP_PLACES=cores
 
 #-------------------------------------------------------------------------------
-# APP=hpcg is a shorthand for a preinstalled /container/bin/xhpcg.  Anything
-# else in APP is taken as a path to run as-is.
-#
-# HPCG reads ./hpcg.dat from the CURRENT DIRECTORY, so each configuration gets
-# its own directory below and writes its own hpcg.dat.  nx/ny/nz are the LOCAL
-# problem per rank and must be multiples of 8; 104^3 puts the working set well
-# past Milan's 32 MB L3, which is what makes this a memory-bandwidth measurement
-# rather than a cache benchmark.
+# Resolve the application's contract.  Everything this script knows about the
+# app comes from here; there is no branch on its name anywhere below.
 #-------------------------------------------------------------------------------
-HPCG_NX="${HPCG_NX:-104}"
-HPCG_SECONDS="${HPCG_SECONDS:-60}"
+app_name="" app_version="" app_override=false
+if [ -n "${APP}" ]; then
+    app_resolve "${APP}" "${launcher}" "${RESULTS_DIR}" || exit 1
+    app_name="${APP_NAME}" app_version="${APP_VERSION}" app_override="${APP_DIR_OVERRIDE}"
 
-app_name=""
-if [ "${APP}" = "hpcg" ]; then
-    APP="/container/bin/xhpcg"
-    app_name=hpcg
-    if ! ${launcher} test -x ${APP} 2>/dev/null; then
-        echo "APP=hpcg requires an HPCG app image with ${APP} preinstalled."
-        echo "Build/pull the *-hpcg.sif matrix, for example: cd libexec && make derecho-hpcg"
+    if ! ${launcher} test -x "${APP_BINARY}" 2>/dev/null; then
+        echo "app       ${app_name}: ${APP_BINARY} is not executable in this image"
+        echo "          build or pull an image that carries it (cd libexec && make derecho-<app>),"
+        echo "          or point BENCH_APP_DIR at a contract on a bound filesystem"
         exit 1
     fi
-    echo "hpcg      ${HPCG_NX}^3 per rank, ${HPCG_SECONDS}s"
-    echo "          (runs under 1800s are NOT valid HPCG submissions -- comparison only)"
-elif [ -n "${APP}" ]; then
-    app_name="$(basename "${APP}")"
-fi
 
-# The app's own linkage, once per job rather than once per cell -- it cannot
-# change between cells, and the full ldd is a file, not forty lines of log.
-if [ -n "${APP}" ]; then
-    ${launcher} ldd "${APP}" > "ldd_$(basename ${APP})_host.txt" 2>&1 \
-        || echo "note: cannot ldd ${APP} (static, or not present)"
-    vshow "ldd_$(basename ${APP})_host.txt" "ldd ${APP}"
+    echo "app       ${app_name}${app_version:+ ${app_version}}  ${APP_BINARY}"
+    [ "${app_override}" = true ] && \
+        echo "          contract from ${APP_DIR} (override -- results are marked as such)"
+    vshow "${RESULTS_DIR}/app.yaml" "app.yaml"
+
+    # The app's own linkage, once per job rather than once per cell -- it cannot
+    # change between cells, and the full ldd is a file, not forty lines of log.
+    ${launcher} ldd "${APP_BINARY}" > "ldd_$(basename ${APP_BINARY})_host.txt" 2>&1 \
+        || echo "note: cannot ldd ${APP_BINARY} (static, or not present)"
+    vshow "ldd_$(basename ${APP_BINARY})_host.txt" "ldd ${APP_BINARY}"
 fi
 
 # Job-level provenance.  Per-cell facts go into each placement_<cfg>.out header.
@@ -352,28 +360,51 @@ for cfg in "${CONFIGS[@]}"; do
     [ -n "${APP}" ] || { warm=true; continue; }
 
     #---------------------------------------------------------------------------
-    # The timed run.  Each configuration gets its own directory: HPCG reads
-    # hpcg.dat and writes HPCG-Benchmark_*.txt relative to the cwd, so sharing
-    # one directory across configurations would have them overwrite each other.
+    # The timed run.  Each configuration gets its own private, empty directory:
+    # an app may read and write relative to the cwd, so sharing one across cells
+    # would have them overwrite each other.  That directory is $BENCH_RUNDIR,
+    # and it is the only place a hook may write.
     #---------------------------------------------------------------------------
     rundir="run_${name}"
-    mkdir -p "${rundir}" && cd "${rundir}" || exit 1
+    rm -rf "${rundir}" && mkdir -p "${rundir}" || exit 1
 
-    case "${APP}" in
-        */xhpcg)
-            printf 'HPCG benchmark input file\n%s %ss -- comparison only, not a valid submission\n%s %s %s\n%s\n' \
-                "${name}" "${HPCG_SECONDS}" \
-                "${HPCG_NX}" "${HPCG_NX}" "${HPCG_NX}" "${HPCG_SECONDS}" > hpcg.dat
-            ;;
-    esac
+    app_export_geometry "$(cd "${rundir}" && pwd)" \
+        "${name}" "${NNODES}" "${nranks}" "${ppn}" "${nthreads}"
+
+    # The app may DECLINE a geometry it cannot run -- eight ranks when it needs a
+    # square number, say.  That is recorded and skipped, not fatal: one refused
+    # cell must not cost the other cells their node hours.
+    if ! app_prepare "${BENCH_RUNDIR}"; then
+        skip="$(tail -3 "${rundir}/prepare.log" 2>/dev/null | tr '\n' ' ')"
+        echo "    skipped: ${app_name} declined this geometry${skip:+ -- ${skip}}"
+        result_reset
+        result_set  site   "${BENCH_SITE}"
+        result_set  job_id "${PBS_JOBID:-none}"
+        result_set  nodes  "${NNODES}"
+        result_str  image.sif "$(basename "${container_img}")"
+        result_set  app.name "${app_name}"
+        result_str  placement.name "${name}"
+        result_set  placement.ranks_per_node "${ppn}"
+        result_set  placement.threads "${nthreads}"
+        result_set  placement.verdict "${place}"
+        result_set  skipped true
+        result_str  skip_reason "${skip:-prepare declined this geometry}"
+        result_emit results.jsonl
+        continue
+    fi
+
+    argv="$(app_argv)"
+
+    cd "${rundir}" || exit 1
 
     # date +%s.%N, not ${SECONDS}: one-second granularity quantises every
     # comparison between short cells.  wall_s is launch-to-exit and INCLUDES
-    # per-rank Apptainer startup, so prefer the app's own timer where it has
-    # one and treat this as the fallback.
+    # per-rank Apptainer startup and the app's own setup phase, which for some
+    # apps dwarfs the measured part -- prefer a figure of merit the app reports
+    # itself, and treat this as the fallback.
     t0="$(wall_now)"
     mpiexec -n ${nranks} ${bound_flags} \
-        ${launcher} ${APP} ${APP_ARGS} > app.out 2>&1
+        ${launcher} ${argv} ${APP_ARGS} > app.out 2>&1
     rc=$?
     wall="$(wall_elapsed "${t0}")"
 
@@ -384,30 +415,12 @@ for cfg in "${CONFIGS[@]}"; do
         tail -20 app.out | sed 's/^/      /'
     fi
     vshow app.out "${rundir}/app.out"
-
-    #---------------------------------------------------------------------------
-    # Figures of merit, as `key=value`.  This block is the app-specific part and
-    # the only one left in this script: phase 2 replaces it with a call to
-    # /container/app.d/<app>/extract, which prints exactly this format, and
-    # nothing downstream changes.
-    #---------------------------------------------------------------------------
-    : > metrics.kv
-    app_version=""
-    if ls HPCG-Benchmark*.txt >/dev/null 2>&1; then
-        score="$(grep -hoE 'GFLOP/s rating of=[0-9.]+' HPCG-Benchmark*.txt 2>/dev/null \
-                 | tail -1 | cut -d= -f2)"
-        [ -n "${score}" ] && echo "gflops=${score}" >> metrics.kv
-        # 'is VALID' does not match 'is INVALID' -- the space is load-bearing.
-        if   grep -qh 'result is VALID'   HPCG-Benchmark*.txt 2>/dev/null; then
-            echo "valid=true"  >> metrics.kv
-        elif grep -qh 'result is INVALID' HPCG-Benchmark*.txt 2>/dev/null; then
-            echo "valid=false" >> metrics.kv
-        fi
-        # HPCG writes a bare `version=3.1` on the second line of its report --
-        # not a prefixed one, which is why this used to come out empty.
-        app_version="$(sed -n 's/^version=//p' HPCG-Benchmark*.txt 2>/dev/null | tail -1)"
-    fi
     cd .. || exit 1
+
+    # Figures of merit, as `key=value`, from the app's own extractor.  This
+    # script does not know what any of them mean.
+    app_extract "${BENCH_RUNDIR}" "${rundir}/metrics.kv"
+    vshow "${rundir}/metrics.kv" "${rundir}/metrics.kv"
 
     #---------------------------------------------------------------------------
     # The record.  One line, appended -- a job killed at walltime keeps every
@@ -423,6 +436,8 @@ for cfg in "${CONFIGS[@]}"; do
     result_set  image.mpi      "${mpi_family}"
     result_set  app.name       "${app_name}"
     result_str  app.version    "${app_version}"
+    result_str  app.scale      "${BENCH_SCALE}"
+    result_set  app.app_dir_override "${app_override}"
     result_str  placement.name           "${name}"
     result_set  placement.ranks_per_node "${ppn}"
     result_set  placement.threads        "${nthreads}"
@@ -438,8 +453,13 @@ for cfg in "${CONFIGS[@]}"; do
     result_metrics_from_file "${rundir}/metrics.kv"
     result_emit results.jsonl
 
-    score="$(sed -n 's/^gflops=//p' "${rundir}/metrics.kv" | tail -1)"
-    echo "    wall=${wall}s  exit=${rc}  gflops=${score:--}  placement=${place}"
+    # One line of narrative: the app's headline number if it declared one, else
+    # wall time.  primary_fom is read from the copy of app.yaml that app_resolve
+    # left in the results directory.
+    fom="$(sed -n 's/^primary_fom:[[:space:]]*//p' app.yaml 2>/dev/null | head -1)"
+    score=""
+    [ -n "${fom}" ] && score="$(sed -n "s/^${fom}=//p" "${rundir}/metrics.kv" | tail -1)"
+    echo "    wall=${wall}s  exit=${rc}${score:+  ${fom}=${score}}  placement=${place}"
 
     # timings.txt is the old flat format, kept only because
     # submit_placement_matrix.sh --collate still reads it.  Both go away in
@@ -452,17 +472,19 @@ done
 if [ -n "${APP}" ] && [ -f timings.txt ]; then
     echo
     echo "======================================================================="
-    echo "SUMMARY  (${APP})"
+    echo "SUMMARY  (${app_name:-${APP}})"
     echo "======================================================================="
-    printf "  %-10s %8s %6s %10s %10s\n" config wall_s exit gflops placement
+    printf "  %-10s %8s %6s %12s %10s\n" config wall_s exit "${fom:-metric}" placement
     while read -r n t r g p; do
-        printf "  %-10s %8s %6s %10s %10s\n" "$n" "$t" "$r" "${g:--}" "${p:--}"
+        printf "  %-10s %8s %6s %12s %10s\n" "$n" "$t" "$r" "${g:--}" "${p:--}"
     done < timings.txt
     echo
-    echo "  Lowest wall time (or highest GFLOP/s) wins, but placement=fail rows"
-    echo "  never win -- a mis-bound run is measuring the binding, not the code."
-    echo "  placement=warn is comparable: the binding is suboptimal but it is the"
-    echo "  binding that was measured, and the pathology is named above."
+    echo "  The app's own figure of merit decides, not wall time: wall_s includes"
+    echo "  container startup and the app's setup phase, which for some apps is"
+    echo "  most of it.  placement=fail rows never win either way -- a mis-bound"
+    echo "  run measures its binding, not the code.  placement=warn is comparable:"
+    echo "  the binding is suboptimal but it is the binding that was measured, and"
+    echo "  the pathology is named above."
 fi
 
 echo

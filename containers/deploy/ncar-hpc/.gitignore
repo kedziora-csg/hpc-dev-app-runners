@@ -11,6 +11,7 @@ INSTALL/
 /results/
 /results.jsonl
 /run.meta
+/app.yaml
 /timings.txt
 /topology.json
 /modules.txt

@@ -49,6 +49,8 @@ test:
 	@./self_test.sh
 	@echo
 	@./test_results.sh
+	@echo
+	@./test_app_contract.sh
 
 clean:
 	rm -f *~

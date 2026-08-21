@@ -1,0 +1,26 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# osu/launch -- print the argv for this cell, one line.
+#
+# OSU takes its problem on the command line rather than from an input file, so
+# there is nothing for a prepare hook to write and this app does not have one.
+# That asymmetry with HPCG is the point: hooks are individually optional.
+#-------------------------------------------------------------------------------
+bench="${OSU_BENCHMARK:-osu_alltoall}"
+range="${OSU_MSG_RANGE:-4:1048576}"
+
+# OSU_ROOT so a tree installed somewhere other than the image default still
+# works without editing this file -- and so the hook can be exercised off-cluster.
+root="${OSU_ROOT:-/container/osu-micro-benchmarks/@OMB_VERSION@}"
+base="${root}/libexec/osu-micro-benchmarks/mpi"
+for sub in collective pt2pt one-sided startup; do
+    if [ -x "${base}/${sub}/${bench}" ]; then
+        echo "${base}/${sub}/${bench} -m ${range}"
+        exit 0
+    fi
+done
+
+# Nothing found: say so on stderr and print nothing, so the runner falls back to
+# `binary` from app.yaml rather than launching an empty command line.
+echo "osu/launch: no executable named '${bench}' under ${base}" >&2
+exit 1

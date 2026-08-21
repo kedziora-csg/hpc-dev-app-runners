@@ -882,7 +882,7 @@ Each phase is independently useful and independently revertible.
 |---|---|---|
 | **0** | Split measurement from judgment in `check_placement.sh`; rule table with severities; probe topology into `topology.json`; make `want_smt` follow `OMP_PLACES`; derive the NUMA/socket thresholds; turn `fixtures/` into a test | Fixes the FAIL-everything bug in §5, and nothing else can be trusted until the checker is. No renames, no new files outside `libexec/`. |
 | **1** | `emit_provenance`, `run.meta`, `results.jsonl`, `bench/collect`; **stamp the source image digest into SIF `%labels`** (§3); **quiet the job log by relocating the diagnostics into the sibling files, with `BENCH_VERBOSE=1` to echo them** (§7); **`sites/derecho/site.sh` so a job can be submitted from anywhere** (§4) | Results become self-contained and machine-readable. Still HPCG-specific. Without the digest stamp, `image.digest` cannot be filled. The stdout cleanup is the same edit as writing the sibling files, so it costs nothing here and would be duplicated work done separately. |
-| **2** | App contract: `/container/app.d/hpcg/{app.yaml,prepare,extract}` from `build_hpcg.sh`; runner stops knowing about `hpcg.dat` | The structural change. Deletes every HPCG string from the PBS script. Prove it by adding OSU as the second app — if that needs no runner edit, the contract works. |
+| **2** | App contract: `/container/app.d/<app>/{app.yaml,prepare,launch,extract}` installed by `build_<app>.sh`; `libexec/app_contract.sh` drives it; runner stops knowing about `hpcg.dat`; `bench/collect` ranks by the app's declared `primary_fom` and `better:` | The structural change. Every HPCG string is gone from the PBS script. Proven by adding OSU as the second app with no runner edit — deliberately unlike HPCG (no input file, flags via `launch`, results on stdout), and `libexec/test_app_contract.sh` exercises both off-cluster. |
 | **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
 | **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9) | CI now validates the contract on every app build. |
@@ -913,12 +913,20 @@ All four DECISIONs are answered — see §12. What remains open:
 4. **Multi-node scaling.** `nodes` is currently a single value per job. Weak/strong scaling
    studies need it as a swept axis, which changes what "the same problem" means across
    cells — an app concern (`BENCH_SCALE`) as much as a runner one.
-5. **Does the HPCG OpenMP reduction patch survive phase 2?** `scripts/build_hpcg.sh` rewrites
-   HPCG's nonzero counters to use OpenMP reductions. It is defensive only: the assertion it
-   was believed to fix was an oneAPI 2026.0.0 codegen bug (see `UpstreamPRPlan.md` §3), and
-   the patch was already applied when that failure was observed, so it is not what made HPCG
-   pass. Phase 2 moves this script's knowledge into `/container/app.d/hpcg/` — decide there
-   whether the patch is dropped or kept. `build_hpcg.sh` points at this item by number.
+5. ~~**Does the HPCG OpenMP reduction patch survive phase 2?**~~ **Answered: kept, on its
+   own merits rather than as a defence.** It was carried as insurance against an assertion
+   later traced to an oneAPI 2026.0.0 codegen bug, which it did not in fact fix. But the
+   change stands independently: replacing an unnamed `#pragma omp critical` with
+   `reduction(+:...)` is semantically identical for a sum and removes a serialization point
+   that every row of the local problem passes through during problem generation — roughly
+   1.1M entries per rank at the 104³ default. Phase 1's measurements show setup is a real
+   cost (19–23 s of an 83 s threaded cell), so this is not a hypothetical.
+
+   Removing it would be a change with no evidence behind it and a six-image rebuild plus
+   re-run to verify, so it stays. The build already fails loudly if upstream moves the code
+   out from under the patch, which is the risk worth guarding. If anyone wants it settled:
+   build one image with and without, and compare HPCG's own `Benchmark Time Summary` setup
+   figures at 8 and 16 threads.
 
 ---
 

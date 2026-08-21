@@ -1,0 +1,35 @@
+# OSU Micro-Benchmarks -- one MPI collective, swept over message size.
+#
+# Here as the SECOND app, to prove the contract: adding it must require no edit
+# to the runner.  It is deliberately unlike HPCG -- no input file, so no prepare
+# hook; flags instead, so it uses launch; and its result is a table on stdout
+# rather than a report file, so extract reads app.out.
+app: osu
+version: "@OMB_VERSION@"
+binary: /container/osu-micro-benchmarks/@OMB_VERSION@/libexec/osu-micro-benchmarks/mpi/collective/osu_alltoall
+primary_fom: latency_us
+
+requires:
+  mpi: true
+  openmp: false
+  min_ranks: 2
+
+figures_of_merit:
+  latency_us: {units: us, better: lower}
+  msg_bytes:  {units: B, better: higher, note: "the size latency_us was measured at"}
+  wall_s:     {units: s, better: lower, provided_by: runner}
+
+success_criteria:
+  app_self_validates: false
+
+notes: |
+  Which benchmark runs is OSU_BENCHMARK -- any executable name under the
+  collective/ or pt2pt/ trees, default osu_alltoall.  Message range is
+  OSU_MSG_RANGE, default 4:1048576.  OSU_ROOT relocates the whole tree.
+
+  latency_us is reported at the LARGEST message size in the sweep, which is
+  where fabric bandwidth dominates and where the container-versus-host MPI
+  question actually bites.  The smaller sizes are in app.out.
+
+  This is a pure-MPI benchmark: it ignores OMP_NUM_THREADS, so a thread sweep
+  measures nothing here.  Rank count is the axis that matters.
