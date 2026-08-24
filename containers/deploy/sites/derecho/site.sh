@@ -13,8 +13,9 @@
 #   from where this file itself lives.
 #
 #   Want to submit from anywhere on the machine?  Copy this file to
-#   ~/.config/hpcdev/site.sh and set NCAR_HPC_ROOT below to your clone.  That is
-#   the only line that must change.
+#   ~/.config/hpcdev/site.sh and set NCAR_HPC_ROOT below to your clone.  
+#   NCAR_HPC_ROOT = /path/to/demo_github_actions/containers/deploy/ncar-hpc
+#   or /path/to/demo_github_actions/containers/deploy/<site_dir>
 #
 #   Want a one-off change?  Every setting honours an existing value, so
 #   `qsub -v BENCH_RESULTS_ROOT=$SCRATCH/runs ...` wins over the file.
