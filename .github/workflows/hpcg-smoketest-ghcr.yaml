@@ -25,16 +25,22 @@ on:
           - noble
 
       docker_repo:
-        description: "Base image repository"
+        description: "Base image repository (hpcdev-derecho = CPU-targeted for Derecho; hpcdev = portable)"
         type: string
         required: false
-        default: "ghcr.io/kedziora-csg/hpcdev"
+        default: "ghcr.io/kedziora-csg/hpcdev-derecho"
 
       apps_repo:
         description: "App image repository"
         type: string
         required: false
         default: "ghcr.io/kedziora-csg/hpcdev-apps"
+
+      app_march_flags:
+        description: "Microarchitecture for the APP build only, e.g. -march=znver3 (nvhpc: -tp=zen3). Empty inherits the base image."
+        type: string
+        required: false
+        default: ""
 
       image_version:
         description: "Base image version tag suffix"
@@ -124,6 +130,7 @@ jobs:
             BASE_IMAGE=${{ steps.image.outputs.base_image }}
             MAKE_J_PROCS=2
             HPCG_RUN=0
+            APP_MARCH_FLAGS=${{ inputs.app_march_flags }}
 
       - name: Smoke-test published HPCG app image
         run: |

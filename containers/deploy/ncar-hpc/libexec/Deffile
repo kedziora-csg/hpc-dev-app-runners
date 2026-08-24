@@ -3,7 +3,7 @@
 # see for example "PLACEHOLDER_IMG_NAME" in Makefile
 
 Bootstrap: docker
-From: ghcr.io/kedziora-csg/hpcdev-x86_64:<PLACEHOLDER_IMG_TAG>-latest
+From: ghcr.io/kedziora-csg/hpcdev-derecho-x86_64:<PLACEHOLDER_IMG_TAG>-latest
 %post
     cat <<'EOF' >> /container/config_env.sh
 export NVCC_PREPEND_FLAGS=${NVCC_PREPEND_FLAGS//all-major/native}
@@ -22,7 +22,7 @@ EOF
 # Comments must stay OUTSIDE this section: every non-empty line inside %labels
 # is parsed as `KEY VALUE`.
 %labels
-    org.opencontainers.image.base.name ghcr.io/kedziora-csg/hpcdev-x86_64:<PLACEHOLDER_IMG_TAG>-latest
+    org.opencontainers.image.base.name ghcr.io/kedziora-csg/hpcdev-derecho-x86_64:<PLACEHOLDER_IMG_TAG>-latest
     org.opencontainers.image.base.digest <PLACEHOLDER_BASE_DIGEST>
     io.ncar.hpcdev.image_tag <PLACEHOLDER_IMG_TAG>
 

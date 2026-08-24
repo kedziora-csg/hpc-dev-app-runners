@@ -226,6 +226,100 @@ and stamp it into the definition file's `%labels` along with the app name and ve
 this, phase 1 records an image name that cannot be resolved to an artifact — which defeats
 the point of recording it.
 
+### The image does not say what it can run on
+
+The same class of gap as the digest, and with the same consequence: a property of
+the artifact that the artifact cannot state.
+
+Nothing in an image records the **microarchitecture its binaries were built for**,
+and nothing in a result records it either — §7's `image` block carries `sif`,
+`digest`, `os`, `compiler` and `mpi`, and stops there. That makes rows
+non-comparable in a way that is invisible:
+
+> `nvhpc-mpich` at 86.10 and `oneapi-mpich` at 86.05 GFLOP/s reads as a compiler
+> comparison. It is not. `MARCH_FLAGS` is set only for nvhpc, so one of those
+> binaries has AVX2 and FMA and the other is baseline `x86-64` — and no field in
+> the record says so. HPCG happens to be DRAM-bound, so the difference does not
+> show; for a compute-bound app it would, and the table would attribute it to the
+> wrong cause.
+
+Two failure modes, and only one of them is loud:
+
+| | symptom | how it is found |
+|---|---|---|
+| target too **wide** | `SIGILL` on every rank, no output | immediately, painfully |
+| target too **narrow** | runs perfectly, gives up half the FLOPs | never, without measuring |
+
+`nvc` defaults to `-tp native` — the *build runner's* CPU — which is the wide
+case, and is why `MARCH_FLAGS` exists at all. gcc and icpx default to generic
+`x86-64`, which is the narrow case, and is why nobody noticed.
+
+What is needed, in four pieces that each fit somewhere that already exists:
+
+1. **An override per app image.** The base image sets one `MARCH_FLAGS` for every
+   library in it, and that value is a compromise across every consumer of that
+   image. An application is built for one machine and can afford to be specific —
+   Derecho is Zen 3, so `-march=znver3` / `-tp=zen3` is available to an app in a
+   way it is not to a general-purpose base. `APP_MARCH_FLAGS` on the app
+   Dockerfile does this; empty inherits, which is the safe default.
+2. **A record of the effective value**, stamped into the installed `app.yaml` as
+   `built_with_march:`. The runner already copies `app.yaml` into every results
+   directory, so this costs nothing and makes a row self-describing.
+3. **`image.target_arch` in the results record** (§7), for the base image's own
+   value, alongside the digest.
+4. **A site-declared expectation** (§4) checked at job start, so an over-wide
+   image is one line of output rather than a `SIGILL` three hours into a queue.
+
+Note the spelling is per compiler family and cannot be translated centrally
+without care: `nvc` rejects `-march=` and silently ignores it, and `-march=x86-64-v3`
+is not merely suboptimal on the `aarch64` axis of `matrix-build-images.yaml` — it
+fails to compile. Any shared mechanism has to be arch-aware, which is the main
+reason this is a build-arg carried by the matrix rather than a constant.
+
+### Three tiers, and the rule that decides which one owns a thing
+
+`SeparationAnalysis.md` proposes a two-way boundary: a container factory and an
+app-runner. Microarchitecture shows the app-runner half is really two, because
+*being site-specific* is not the same as *running at the site*:
+
+| | site-aware? | runs | produces | promise |
+|---|---|---|---|---|
+| **base image factory** | no | GitHub CI | `hpcdev-<arch>` | runs anywhere of this arch |
+| **site image builder** | **yes** | GitHub CI | `hpcdev-derecho-<arch>`, `hpcdev-apps-<arch>` | runs on *this machine*, well |
+| **HPC runner** | **yes** | the cluster | results | measures, never builds |
+
+The middle tier is the one that had no name. `derecho-images-ghcr.yaml` has always
+been it — its header is a list of choices made because Derecho is the target (leap
+matches the host OS, gcc14 matches `gcc/14.3.0` exactly, mpich because only MPICH
+can be displaced by the Cray ABI shim) — but it published into the factory's
+namespace, which was harmless only for as long as its images were interchangeable
+with the factory's.
+
+The rule that settles ownership:
+
+> **A thing belongs to the tier that would have to change if the machine changed.**
+
+Microarchitecture moves with the machine, so it belongs to the site tier — even
+though it is applied by a compiler running in CI. Scheduler dialect, module names
+and bind lists move with the machine too, and they are already in the runner tier
+(§4). Compiler *version*, MPI *family*, and the library set do not move with the
+machine; they are factory concerns, which is why the factory keeps them.
+
+The corollary is a namespace rule, and it bit immediately: both
+`derecho-images-ghcr.yaml` and `matrix-build-images-ghcr.yaml` build
+`leap-<compiler>-<mpi>`, and the latter *defaults* to `os: leap`. Publishing both
+to `.../hpcdev` left one tag meaning either "runs anywhere" or "needs Zen 3",
+whichever ran last. A different promise needs a different repository, not a suffix
+on a shared one — hence `hpcdev-derecho-<arch>`.
+
+Note what this does **not** argue for: building at the site. Where the compiler
+executes is irrelevant, because gcc and icpx target generic `x86-64` no matter what
+they are running on. Only `nvc` defaults to native, and that is the behaviour
+`MARCH_FLAGS` exists to suppress. Site-specific *workflows* are the unit; a
+site-specific *runner* would buy `-march=native` — a flag whose value never appears
+in any log — in exchange for self-hosted runner maintenance and images that cannot
+be reproduced from CI.
+
 ### The geometry ABI
 
 Hooks are handed the run geometry through the environment — the same variables for every
@@ -373,6 +467,25 @@ container/host-MPI recipe — stays at **phase 4**, unchanged. It is a *descript
 rather than a dependency: nothing is blocked without it, and its shape cannot be
 validated until a second site exists to disagree with it. Splitting it out now would be
 guessing at Casper's requirements from Derecho's.
+
+### The site declares the instruction set it can run
+
+`site.sh` already names four paths and a module bootstrap. It should also name
+what the hardware supports:
+
+```bash
+BENCH_TARGET_ARCH=x86-64-v3        # Derecho: 2 x EPYC 7763, Zen 3 -- AVX2, no AVX-512
+```
+
+The runner then checks the app binary against it once, at job start, using
+`report_cpu_features` — which already reports both what a node offers and what an
+executable requires. That converts the loud failure mode from a `SIGILL` on every
+rank three hours into a queue, with no output and an exit code of 132, into one
+line before the first cell runs.
+
+It is deliberately a *check*, not an input to anything: the image was built in CI
+long before the site profile was read, so a site cannot influence what it
+contains — only refuse to measure it.
 
 ### Probe the topology, do not hardcode it
 
@@ -659,11 +772,15 @@ JSONL rather than CSV because metric sets differ per app, appending is crash-saf
   "site": "derecho", "job_id": "7024910.desched1", "nodes": 2,
   "image": {"sif": "leap-oneapi-mpich-hpcg.sif",
             "digest": "sha256:…", "os": "leap",
-            "compiler": "oneapi", "mpi": "mpich"},
+            "compiler": "oneapi", "mpi": "mpich",
+            "target_arch": "-march=x86-64-v3"},
+  // target_arch: what the BASE image was built for.  The app may differ -- see
+  // app.built_with_march below and the discussion in §3.  Without both, two rows
+  // can differ by an instruction set and the table will call it a compiler.
   // digest: requires the SIF-labels fix in §3 -- today's Deffiles bootstrap
   // from a mutable `-latest` tag and record no digest at all.
   "app": {"name": "hpcg", "version": "3.1", "scale": "node",
-          "app_dir_override": false},
+          "app_dir_override": false, "built_with_march": "-tp=zen3"},
   "placement": {"name": "ccd", "ranks_per_node": 16, "threads": 8,
                 "omp": {"OMP_PROC_BIND": "close", "OMP_PLACES": "cores"},
                 "mpiexec_flags": "-ppn 16 --cpu-bind core -d 8",
@@ -816,6 +933,7 @@ on:
     inputs:
       app: {type: choice, options: [hpcg, osu, wrf, kokkos], default: hpcg}
       os: {type: choice, options: [leap, almalinux9, noble], default: leap}
+      app_march_flags: {type: string, default: ""}   # empty inherits the base image; see §3
       compilers: {type: string, default: "oneapi,gcc14,nvhpc"}
       mpis: {type: string, default: "mpich,openmpi"}
       image_version: {type: string, default: "26.08"}
@@ -885,7 +1003,7 @@ Each phase is independently useful and independently revertible.
 | **2** | App contract: `/container/app.d/<app>/{app.yaml,prepare,launch,extract}` installed by `build_<app>.sh`; `libexec/app_contract.sh` drives it; runner stops knowing about `hpcg.dat`; `bench/collect` ranks by the app's declared `primary_fom` and `better:` | The structural change. Every HPCG string is gone from the PBS script. Proven by adding OSU as the second app with no runner edit — deliberately unlike HPCG (no input file, flags via `launch`, results on stdout), and `libexec/test_app_contract.sh` exercises both off-cluster. |
 | **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
 | **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. |
-| **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9) | CI now validates the contract on every app build. |
+| **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9); carry `app_march_flags` through as a per-app build-arg (§3) | CI now validates the contract on every app build. The microarchitecture override belongs here because this is where an app image is built for a *named machine* rather than for everyone. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
 
@@ -896,6 +1014,23 @@ Phases 0–2 are worth doing regardless of whether you accept the rest of this d
 ## 11. Open questions
 
 All four DECISIONs are answered — see §12. What remains open:
+
+0. **What microarchitecture should the BASE images target?** §3 gives apps an
+   override and gives results a place to record what was used, but says nothing
+   about the default the base images are built at — because that is a policy
+   question about who consumes them, not a technical one. Today it is `x86-64-v3`
+   for nvhpc (added to stop `SIGILL`, not to go faster) and the compiler default —
+   baseline `x86-64`, no AVX2 — for everyone else. Raising it to `x86-64-v3`
+   across the board would suit both NCAR machines and cost portability to
+   pre-Haswell hardware. Deliberately left open; the app-level override in §3 is
+   what makes it *not urgent*.
+
+   A second, narrower thing to check while deciding: the nvhpc stage sets
+   `CFLAGS="-fPIC ${MARCH_FLAGS}"` with no `-O`, and `AC_PROG_CC` only supplies
+   its default `-g -O2` when `CFLAGS` is **unset**. If that is what it looks like,
+   the autotools libraries in the nvhpc images are built below `-O2` while the
+   gcc and oneapi ones are not. `h5cc -showconfig | grep -i flags` inside each
+   image settles it in seconds.
 
 1. **Repo boundary.** This plan keeps everything in one repo and makes the boundary visible
    through directories (`bench/`, `sites/`, `containers/apps/`), which is what

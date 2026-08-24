@@ -88,9 +88,15 @@ rm -f ${probe} ${probe}.exe
 [ -n "${openmp_flag}" ] \
     || { echo "no working OpenMP flag found -- HPCG would be MPI-only, refusing"; exit 1; }
 
-# MARCH_FLAGS is exported into the image environment by the devenv Dockerfile and
-# already carries the right spelling for this compiler (nvhpc needs -tp=, not
-# -march=, which it silently ignores).  Do not second-guess it here.
+# APP_MARCH_FLAGS lets an app image target a narrower microarchitecture than the
+# base image it was built from -- the base has to suit every consumer of that
+# image, an app is built for one machine.  Applied here rather than by exporting
+# MARCH_FLAGS in the Dockerfile so that it cannot be clobbered by anything that
+# re-sources config_env.sh later.
+MARCH_FLAGS="${APP_MARCH_FLAGS:-${MARCH_FLAGS}}"
+
+# MARCH_FLAGS carries the right spelling for this compiler (nvhpc needs -tp=,
+# not -march=, which it silently ignores).  Do not second-guess it here.
 echo "OpenMP flag : ${openmp_flag}"
 echo "MARCH_FLAGS : ${MARCH_FLAGS:-<unset, using compiler default>}"
 
@@ -223,7 +229,17 @@ if [ -d "${app_src}" ]; then
     mkdir -p ${INSTALL_ROOT}/app.d
     cp -R "${app_src}" ${INSTALL_ROOT}/app.d/
     chmod +x ${INSTALL_ROOT}/app.d/hpcg/prepare ${INSTALL_ROOT}/app.d/hpcg/extract
-    echo "installed app contract: ${INSTALL_ROOT}/app.d/hpcg"
+
+    # Stamp what this build actually targeted into the contract.  An app image
+    # may be built for a narrower microarchitecture than the base image it came
+    # from (containers/apps/hpcg/Dockerfile, APP_MARCH_FLAGS), so the image's own
+    # compiler/mpi labels no longer describe the app.  The runner copies app.yaml
+    # into every results directory, so this makes each row say what it measured
+    # -- otherwise two rows differing by 30% could be AVX2 versus SSE2 and
+    # nothing would record it.
+    printf 'built_with_march: "%s"\n' "${MARCH_FLAGS:-compiler default}" \
+        >> ${INSTALL_ROOT}/app.d/hpcg/app.yaml
+    echo "installed app contract: ${INSTALL_ROOT}/app.d/hpcg (march: ${MARCH_FLAGS:-compiler default})"
 else
     echo "WARNING: no app.d/hpcg contract found; the image will carry xhpcg but"
     echo "         a runner will not know how to size or read it"

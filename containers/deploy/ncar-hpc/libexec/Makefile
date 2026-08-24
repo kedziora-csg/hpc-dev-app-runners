@@ -1,6 +1,10 @@
 # The registry the Deffiles bootstrap from.  Stated once here so the digest
 # pinning below and the `From:` lines in Deffile/Deffile.apps cannot drift apart.
-GHCR_BASE_REF := ghcr.io/kedziora-csg/hpcdev-x86_64
+#
+# hpcdev-derecho, not hpcdev: these images target this machine's CPU
+# (-march=znver3) and are not the portable factory images.  Same tag names, a
+# different promise, so a different repository -- see derecho-images-ghcr.yaml.
+GHCR_BASE_REF := ghcr.io/kedziora-csg/hpcdev-derecho-x86_64
 GHCR_APPS_REF := ghcr.io/kedziora-csg/hpcdev-apps-x86_64
 
 openmpi_images := almalinux9-gcc-openmpi.sif \
