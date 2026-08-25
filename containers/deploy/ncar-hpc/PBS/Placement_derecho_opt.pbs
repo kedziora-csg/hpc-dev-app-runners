@@ -286,7 +286,11 @@ if [ -n "${APP}" ]; then
         exit 1
     fi
 
-    echo "app       ${app_name}${app_version:+ ${app_version}}  ${APP_BINARY}"
+    # The contract's declared binary.  What actually runs may differ -- a launch
+    # hook can pick a different executable and add flags (osu does, from
+    # OSU_BENCHMARK) -- so this is labelled as the contract rather than the
+    # command, and each cell records its real argv in its provenance header.
+    echo "app       ${app_name}${app_version:+ ${app_version}}  (contract: ${APP_BINARY})"
     [ "${app_override}" = true ] && \
         echo "          contract from ${APP_DIR} (override -- results are marked as such)"
     vshow "${RESULTS_DIR}/app.yaml" "app.yaml"
@@ -394,6 +398,10 @@ for cfg in "${CONFIGS[@]}"; do
     fi
 
     argv="$(app_argv)"
+
+    # Append the resolved command to this cell's placement report, so the .out
+    # says what ran rather than what the contract defaults to.
+    printf '# %-16s %s\n' app_argv "${argv} ${APP_ARGS}" >> "${out}"
 
     cd "${rundir}" || exit 1
 

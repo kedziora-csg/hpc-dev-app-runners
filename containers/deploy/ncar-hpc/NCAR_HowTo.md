@@ -151,8 +151,9 @@ qsub -v BENCH_RESULTS_ROOT=$SCRATCH/hpcdev-bench Placement_derecho.pbs
 `APP` names an application whose contract ships in the image:
 
 ```bash
-qsub -v APP=hpcg Placement_derecho_opt.pbs
-qsub -v APP=osu,OSU_BENCHMARK=osu_allreduce Placement_derecho_opt.pbs
+qsub -A <project> -v APP=hpcg /path/to/Placement_derecho_opt.pbs
+qsub  -A <project> -v APP=osu,OSU_BENCHMARK=osu_allreduce \
+    /path/to/Placement_derecho_opt.pbs
 ```
 
 The runner knows nothing about either. What to write before the run, how to

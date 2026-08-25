@@ -9,3 +9,4 @@ megalinter-reports/
 *.e[0-9]*
 myscripts
 PlacementRuns*
+RunOSU

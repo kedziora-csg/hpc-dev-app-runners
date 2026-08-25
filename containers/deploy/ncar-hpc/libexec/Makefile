@@ -46,6 +46,22 @@ echo-derecho-hpcg:
 echo:
 	@echo "$(all_images)"
 
+# What is on disk, and what the registry says now.  The answer to "is my .sif
+# current?", which `make` alone cannot tell you once a .sif exists.
+check-images:
+	@for i in $(derecho_images); do \
+	    t="$${i%.sif}" ; \
+	    have="$$(apptainer inspect $$i 2>/dev/null \
+	             | sed -n 's/.*image.base.digest[": ]*\([a-z0-9:]*\).*/\1/p' | head -1)" ; \
+	    want="$$(./pin_image_digest.sh --resolve $(GHCR_BASE_REF):$$t-latest 2>/dev/null)" ; \
+	    if   [ ! -f "$$i" ];              then state="no .sif -- run make derecho" ; \
+	    elif [ -z "$$want" ];             then state="cannot reach the registry" ; \
+	    elif [ "$$have" = "$$want" ];     then state="current" ; \
+	    elif [ -z "$$have" ];             then state="STALE? built before digests were stamped" ; \
+	    else                                   state="STALE -- has $${have#sha256:} want $${want#sha256:}" ; fi ; \
+	    printf "  %-34s %s\n" "$$i" "$$state" ; \
+	done
+
 # The placement checker's regression suite.  No node hours, no container, no
 # scheduler -- it runs against the frozen reports in fixtures/, so run it after
 # any edit to check_placement.sh, placement_rules.sh or probe_topology.sh.
@@ -67,26 +83,49 @@ pristine:
 # pin_image_digest.sh -- if resolution fails the build still proceeds from the
 # tag, with the digest recorded as `unknown`.
 #
-# Note the digest is resolved when the .def is GENERATED, not on every build:
-# make will not notice the upstream tag moving.  `rm -f *.def` (or `make
-# pristine`) to pick up a new upstream image.
+# The digest is re-resolved on EVERY make, via FORCE, but the .def is only
+# replaced when the resolved digest actually differs.  That combination is what
+# makes `make derecho` mean "give me the current images":
+#
+#   - resolve every time, or a moved upstream tag is invisible and make reports
+#     everything up to date while the .sif on disk is weeks old;
+#   - replace only on change, or every make would touch the .def and rebuild all
+#     six .sif files whether or not anything moved.
+#
+# .PRECIOUS keeps make from treating .def as an intermediate and deleting it
+# after the build -- without it there is nothing to compare against next time,
+# and the "only on change" half stops working.
 #
 # '$*' matches the '%' part, see https://www.gnu.org/software/make/manual/html_node/Automatic-Variables.html
-%-hpcg.def: Deffile.apps pin_image_digest.sh
-	@echo "Constructing $@ from $<"
-	@rm -f $@
+.PHONY: FORCE
+FORCE:
+
+.PRECIOUS: %.def %-hpcg.def
+
+# repin <deffile> -- keep, replace, or decline to replace the generated .def.
+define repin
+	if ! grep -q '@sha256:' $@.tmp && [ -f $@ ]; then \
+	    echo "  $@: digest lookup failed; keeping the existing pin" ; \
+	    rm -f $@.tmp ; \
+	elif cmp -s $@.tmp $@ 2>/dev/null; then \
+	    rm -f $@.tmp ; \
+	else \
+	    mv $@.tmp $@ ; \
+	    echo "  $@: upstream image changed -- $@ will rebuild" ; \
+	fi
+endef
+
+%-hpcg.def: Deffile.apps pin_image_digest.sh FORCE
 	@cp $< $@.tmp
 	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*-hpcg/g' $@.tmp
 	@./pin_image_digest.sh --pin $@.tmp $(GHCR_APPS_REF):$*-hpcg-latest
-	@mv $@{.tmp,}
+	@$(repin)
 
-%.def: Deffile pin_image_digest.sh
-	@echo "Constructing $@ from $<"
-	@rm -f $@
+%.def: Deffile pin_image_digest.sh FORCE
 	@cp $< $@.tmp
 	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*/g' $@.tmp
 	@./pin_image_digest.sh --pin $@.tmp $(GHCR_BASE_REF):$*-latest
-	@mv $@{.tmp,}
+	@$(repin)
 
 %.sif: %.def Makefile ../config_env.sh
 	@echo "Constructing $@ from $<"
