@@ -25,7 +25,8 @@ all: $(all_images)
 # sources as Derecho's host OS; those three compilers because they are the ones
 # NCAR provides modules for (gcc14 matches gcc/14.3.0 exactly); mpich because
 # only MPICH can be displaced by Cray MPICH's ABI shim, openmpi to test the
-# alternative.  Used by ../submit_placement_matrix.sh.
+# alternative.  Named by `images.from_make:` in bench/experiments/*.yaml, via
+# the echo- rules below, so an experiment cannot drift out of step with it.
 derecho_images := leap-oneapi-mpich.sif \
                   leap-gcc14-mpich.sif \
                   leap-nvhpc-mpich.sif \
@@ -62,15 +63,19 @@ check-images:
 	    printf "  %-34s %s\n" "$$i" "$$state" ; \
 	done
 
-# The placement checker's regression suite.  No node hours, no container, no
-# scheduler -- it runs against the frozen reports in fixtures/, so run it after
-# any edit to check_placement.sh, placement_rules.sh or probe_topology.sh.
+# The whole regression suite.  No node hours, no container, no scheduler: the
+# placement checks run against the frozen reports in fixtures/, and the bench
+# checks against the shipped schemas and experiment files.  Run it after any
+# edit to check_placement.sh, placement_rules.sh, probe_topology.sh, the app
+# contract, or anything under ../../bench/.
 test:
 	@./self_test.sh
 	@echo
 	@./test_results.sh
 	@echo
 	@./test_app_contract.sh
+	@echo
+	@../../bench/test_bench.sh
 
 clean:
 	rm -f *~

@@ -12,7 +12,6 @@ INSTALL/
 /results.jsonl
 /run.meta
 /app.yaml
-/timings.txt
 /topology.json
 /modules.txt
 /env.txt
@@ -20,3 +19,9 @@ INSTALL/
 /ldd_*.txt
 /placement_*.out
 /run_*/
+
+# Generated per job by bench/submit, beside the results they describe.
+/job.env
+/job.json
+/job.pbs
+/job.log

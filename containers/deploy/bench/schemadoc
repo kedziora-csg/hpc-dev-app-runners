@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""schemadoc -- turn bench/schema/*.json into one reference table.
+
+    schemadoc                    print the reference to stdout
+    schemadoc --write            write it to schema/README.md
+    schemadoc --check            fail if schema/README.md is stale
+    schemadoc --missing          list keys with no description
+
+THE SCHEMA IS THE ONLY COPY
+
+Every constraint here is already machine readable, so the reference is generated
+rather than written.  A key added to a schema without a description, or a schema
+edited without regenerating, fails test_bench.sh -- documentation cannot drift
+from the format it describes if nothing is maintained twice.
+
+WHAT IS NOT HERE
+
+Cross-field rules a schema cannot state (exactly one of images.from_make and
+images.list; per_job a subset of matrix; a legal ranks x threads product) live in
+benchlib/experiment.py and are what `bench validate` adds on top.  This file is a
+reference, not a tutorial: the annotated experiment in experiments/ is the place
+to learn the format from.
+"""
+
+import argparse
+import io
+import json
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SCHEMAS = [os.path.join(HERE, "schema", "experiment.json"),
+           os.path.join(HERE, "schema", "app.json")]
+README = os.path.join(HERE, "schema", "README.md")
+UNDOCUMENTED = os.path.join(HERE, "schema", "undocumented.txt")
+
+
+def slug(text):
+    """GitHub's heading anchor: lowercase, punctuation dropped, spaces hyphened."""
+    return re.sub(r"[^a-z0-9 _-]", "", text.lower()).replace(" ", "-")
+
+
+def _plural(count, noun, many=None):
+    return "%d %s" % (count, noun if count == 1 else (many or noun + "s"))
+
+
+def _literal(value):
+    """As it is written in YAML: a string unquoted, everything else as JSON."""
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def kind(node):
+    """The type column: what a value may be."""
+    if "const" in node:
+        return "`%s`" % _literal(node["const"])
+    if "enum" in node:
+        return " \\| ".join("`%s`" % _literal(e) for e in node["enum"])
+    what = node.get("type", "any")
+    if isinstance(what, list):
+        what = ", ".join(what[:-1]) + " or " + what[-1] if len(what) > 1 else what[0]
+    if what == "array":
+        item = node.get("items")
+        return "list of %s" % kind(item) if item else "list"
+    return what
+
+
+def limits(node):
+    """The constraints column: everything a validator would enforce."""
+    out = []
+    if "_key_pattern" in node:
+        out.append("key matches `/%s/`" % node["_key_pattern"])
+    if "default" in node:
+        out.append("default `%s`" % json.dumps(node["default"]))
+    if "pattern" in node:
+        out.append("matches `/%s/`" % node["pattern"])
+    if "minimum" in node:
+        out.append("at least %s" % node["minimum"])
+    if "maximum" in node:
+        out.append("at most %s" % node["maximum"])
+    if "minLength" in node:
+        out.append("at least %s" % _plural(node["minLength"], "character"))
+    if "minItems" in node:
+        out.append("at least %s" % _plural(node["minItems"], "entry", "entries"))
+    if "minProperties" in node:
+        out.append("at least %s" % _plural(node["minProperties"], "key"))
+    if node.get("uniqueItems"):
+        out.append("no duplicates")
+    if node.get("additionalProperties") is False and (
+            node.get("properties") or node.get("patternProperties")):
+        out.append("no other keys")
+    return ", ".join(out)
+
+
+def fields(node):
+    """(name, subnode) one level down, following a list into its entries."""
+    if node.get("type") == "array" and "items" in node:
+        node = node["items"]
+    out = [(k, v) for k, v in sorted((node.get("properties") or {}).items())]
+    patterns = sorted((node.get("patternProperties") or {}).items())
+    for i, (pattern, sub) in enumerate(patterns):
+        sub = dict(sub, _key_pattern=pattern)   # the row shows what a name may be
+        out.append(("<name>" if i == 0 else "<name%d>" % (i + 1), sub))
+    return out, node.get("required") or []
+
+
+def cell(text):
+    return (text or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def section(path, node, depth, out):
+    """One table per object, deepest last, headed by the path that reaches it."""
+    rows, required = fields(node)
+    if not rows:
+        return
+    out.append("")
+    out.append("%s `%s`" % ("#" * min(3 + depth, 6), path))
+    if node.get("description") and depth:
+        out.append("")
+        out.append(cell(node["description"]))
+    out.append("")
+    out.append("| key | type | required | constraints | meaning |")
+    out.append("| --- | --- | --- | --- | --- |")
+    deeper = []
+    for key, sub in rows:
+        child = "%s.%s" % (path, key)
+        if fields(sub)[0]:
+            deeper.append((child, sub))
+            shown = "[`%s`](#%s)" % (key, slug(child))
+        else:
+            shown = "`%s`" % key
+        out.append("| %s | %s | %s | %s | %s |"
+                   % (shown, kind(sub), "yes" if key in required else "",
+                      limits(sub), cell(sub.get("description"))))
+    for child, sub in deeper:
+        section(child, sub, depth + 1, out)
+
+
+def undocumented(path, node, out):
+    """Paths whose meaning the schema does not state.  An enum states its own."""
+    if node.get("type") == "array" and "items" in node:
+        undocumented(path, node["items"], out)
+        return
+    for key, sub in fields(node)[0]:
+        child = "%s.%s" % (path, key)
+        if not sub.get("description") and "enum" not in sub and "const" not in sub:
+            out.append(child)
+        undocumented(child, sub, out)
+
+
+def render(paths):
+    out = ["# Benchmark configuration reference",
+           "",
+           "Generated by `bench/schemadoc` from %s -- do not edit."
+           % ", ".join("`schema/%s`" % os.path.basename(p) for p in paths),
+           "Regenerate with `./schemadoc --write`; `test_bench.sh` fails if this",
+           "file is stale.",
+           "",
+           "A blank meaning is a key the schema does not describe yet; they are",
+           "tracked in `schema/undocumented.txt`.  Cross-field rules a schema",
+           "cannot state live in `benchlib/experiment.py` and are what",
+           "`bench validate` adds on top of what is below."]
+    for path in paths:
+        root = json.load(io.open(path, encoding="utf-8"))
+        name = os.path.basename(path).split(".")[0]
+        out.append("")
+        out.append("## %s" % root.get("title", name))
+        if root.get("description"):
+            out.append("")
+            out.append(cell(root["description"]))
+        section(name, root, 0, out)
+    return "\n".join(out) + "\n"
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Generate the schema reference from bench/schema/*.json.")
+    ap.add_argument("schema", nargs="*", default=SCHEMAS,
+                    help="schema files (default: experiment.json, app.json)")
+    ap.add_argument("--write", action="store_true",
+                    help="write schema/README.md instead of stdout")
+    ap.add_argument("--check", action="store_true",
+                    help="exit 1 if schema/README.md is not what --write would put there")
+    ap.add_argument("--missing", action="store_true",
+                    help="compare keys with no description against schema/undocumented.txt")
+    args = ap.parse_args()
+
+    if args.missing:
+        found = []
+        for path in args.schema:
+            root = json.load(io.open(path, encoding="utf-8"))
+            undocumented(os.path.basename(path).split(".")[0], root, found)
+        try:
+            listed = io.open(UNDOCUMENTED, encoding="utf-8").read().splitlines()
+        except IOError:
+            listed = []                 # no list yet: everything found is new
+        known = [line.strip() for line in listed
+                 if line.strip() and not line.startswith("#")]
+        new = [k for k in found if k not in known]
+        gone = [k for k in known if k not in found]
+        for key in new:
+            print("undescribed: %s" % key)
+        for key in gone:
+            print("now described, drop it from %s: %s"
+                  % (os.path.basename(UNDOCUMENTED), key))
+        print("%d undescribed key(s), %d listed in %s"
+              % (len(found), len(known), os.path.basename(UNDOCUMENTED)))
+        return 1 if (new or gone) else 0
+
+    text = render(args.schema)
+    if args.check:
+        try:
+            current = io.open(README, encoding="utf-8").read()
+        except IOError as exc:
+            print("error: %s" % exc, file=sys.stderr)
+            return 1
+        if current != text:
+            print("schema/README.md is stale -- run ./schemadoc --write",
+                  file=sys.stderr)
+            return 1
+        return 0
+    if args.write:
+        io.open(README, "w", encoding="utf-8").write(text)
+        print("wrote %s (%d lines)" % (README, text.count("\n")))
+        return 0
+    sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

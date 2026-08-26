@@ -1,0 +1,78 @@
+# The Derecho toolchain sweep, as it has actually been run.
+#
+# Six images (leap x {oneapi, gcc14, nvhpc} x {mpich, openmpi}) x three
+# rank/thread decompositions, one job per image. 
+# Examples of how to use this file:
+#
+#     ../validate derecho-hpcg              expand it, check it, submit nothing
+#     ../submit   derecho-hpcg --account <PROJECT>
+#
+# The job never reads this file.  bench/submit expands the matrix and writes a
+# flat job.env into each results directory, which is both what the job sources
+# and the record of what that job was asked to do.
+schema: 1
+site: derecho
+
+# No default account on purpose: this is a billable allocation, and qsub
+# refusing is better than someone else's project being charged.  Pass
+# --account, or uncomment and set it here.
+#account: <my project>
+
+defaults:
+  nodes: 2
+  walltime: "00:30:00"
+  repeats: 3            # reported as min and median, never as a single sample
+  scale: node
+  target_seconds: 60
+
+images:
+  from_make: derecho-hpcg     # ask libexec/Makefile -- one definition of "the six"
+  # or use a list of images to sweep, e.g. if you want to run only one of the six
+  # todo: implement site dependent Makefiles
+  # list: [leap-oneapi-mpich-hpcg.sif, leap-gcc14-mpich-hpcg.sif]
+
+
+apps:
+  - name: hpcg
+
+# ranks_per_node x threads == 128 for all three
+# `--cpu-bind depth` packs consecutively from core 0, so a smaller product does
+# not idle the spare cores, it crowds every rank onto the low chiplets.  Each
+# name says what a rank is meant to align to; whether it GOT that is derived
+# from the topology probed at job start, not asserted here.
+placements:
+  - {name: pureMPI, ranks_per_node: 128, threads: 1}    # one core per rank
+  - {name: ccd,     ranks_per_node: 16,  threads: 8}    # one CCD / L3, 32 MB
+  - {name: numa,    ranks_per_node: 8,   threads: 16}   # one NUMA domain
+
+# `omp_variants` has one by default.  Measured on HPCG (2026-08-19) the difference 
+# between these two was minor at best -- consistent with HPCG being bandwidth-bound, 
+# so expect the magnitude to be app-dependent -- and crossing them doubles every
+# sweep.  Uncomment the second to opt in for an app where it might matter.
+#
+# Note this axis is NOT "SMT on or off": at ranks x threads == 128 neither
+# setting puts work on both SMT siblings.  Engaging SMT for computation takes
+# the 256 product, e.g. a 16 x 16 placement above.
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close,  OMP_PLACES: cores}
+  # - {name: perthr,  OMP_PROC_BIND: spread, OMP_PLACES: threads}
+
+sweep:
+  matrix:  [images, apps, placements, omp_variants]   # the full cross product
+  per_job: [placements, omp_variants]                 # what ONE job iterates
+
+# The best answer a sweep produced, is captured in `profiles:` 
+# It is runnable as itself: 
+#
+# ../submit derecho-hpcg --profile production
+#
+# for measuring regression, or for a production run.  
+#
+# bench/collect --emit-profile writes this block from
+# results.jsonl, so the benchmark's output is the production configuration
+# rather than something transcribed by hand from a table.
+profiles:
+  production:
+    placement: ccd
+    omp: percore
+    images: [leap-oneapi-mpich-hpcg.sif]

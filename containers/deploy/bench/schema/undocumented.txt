@@ -1,0 +1,33 @@
+# Keys whose meaning bench/schema/*.json does not state yet.
+#
+# test_bench.sh fails if a key is added to a schema with no description and no
+# line here, and fails again once a description exists but the line stays.
+# Write the description, delete the line.
+experiment.apps
+experiment.apps.env.<name>
+experiment.apps.scale
+experiment.apps.target_seconds
+experiment.defaults.nodes
+experiment.defaults.queue
+experiment.defaults.target_seconds
+experiment.defaults.walltime
+experiment.images.list
+experiment.omp_variants.name
+experiment.placements.name
+experiment.placements.ranks_per_node
+experiment.placements.threads
+experiment.profiles.<name>
+experiment.profiles.<name>.app
+experiment.profiles.<name>.images
+experiment.profiles.<name>.nodes
+experiment.profiles.<name>.omp
+experiment.profiles.<name>.placement
+experiment.profiles.<name>.repeats
+experiment.sweep
+app.figures_of_merit.<name>
+app.figures_of_merit.<name>.note
+app.figures_of_merit.<name>.units
+app.requires
+app.requires.min_ranks
+app.requires.mpi
+app.success_criteria

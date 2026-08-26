@@ -3,7 +3,6 @@
 #PBS -A PBS_ACCOUNT_UNSET
 # ^ deliberately not a real allocation: pass your own with
 #       qsub -A <PROJECT> ...
-#   (or use ../submit_placement_matrix.sh --account <PROJECT>).
 #   qsub rejects the placeholder rather than silently charging someone else.
 #PBS -j oe
 #PBS -q main

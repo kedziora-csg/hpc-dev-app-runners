@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""submit -- expand an experiment into jobs, generate a script for each, submit.
+
+    submit <experiment> --account <PROJECT> [options]
+    submit <experiment> --dry-run                    generate everything, submit nothing
+
+    --account CODE       scheduler project to charge.  REQUIRED, no default.
+    --profile NAME       run only the cell a profile names -- the sweep's answer
+    --images "a b"       override the image list
+    --nodes N            override defaults.nodes
+    --walltime HH:MM:SS  override defaults.walltime
+    --results-dir DIR    where the per-job directories go
+    --dry-run            write job.pbs/job.env/job.json, print the qsub, stop
+    --force              reuse a results directory that already holds results
+    --site NAME          override the site named in the experiment
+
+WHAT EACH JOB IS GIVEN
+
+A directory per job, holding what it was asked to do BEFORE it runs and what it
+found AFTER:
+
+    job.pbs    the generated script with real directives. This is what will be
+               submitted and preserved.
+    job.env    the flat expansion the runner sources.  The job never parses YAML
+    job.json   the same, structured, for provenance and bench/collect
+
+and then everything runner.sh writes: results.jsonl, run.meta, topology.json,
+placement_*.out, run_<cell>/.
+
+The `-v NCAR_HPC_ROOT=...,container_img=...,RESULTS_DIR=...` channel is gone.
+Nothing is passed on the qsub line except the script.
+
+VALIDATION IS THE SAME CODE PATH AS `validate`
+
+Same load, same expansion, and one call to benchlib.checks.preflight() for the
+checks, the verdict and the exit code.  A green validate followed by a submit
+that refuses would make validate worthless, so a new check goes in preflight,
+never here.  test_bench.sh asserts the two commands return the same code.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from benchlib import (BenchError, EXIT_ERROR, EXIT_NAMES, EXIT_OK,
+                      EXIT_USAGE)
+from benchlib import checks, experiment as exp_mod, jobfile
+
+
+def template_for(site):
+    path = os.path.join(os.path.dirname(site.conf), "job.tmpl")
+    if os.path.isfile(path):
+        return path
+    # A profile copied to ~/.config/hpcdev/ has no job.tmpl beside it; the
+    # template belongs to the checkout, so fall back there rather than making
+    # every operator copy two files.
+    path = os.path.join(os.path.dirname(os.path.dirname(site.bench_root)),
+                        "deploy", "sites", site.name, "job.tmpl")
+    fallback = os.path.join(os.path.dirname(site.bench_root), "sites",
+                            site.name, "job.tmpl")
+    for candidate in (path, fallback):
+        if os.path.isfile(candidate):
+            return candidate
+    raise BenchError("no job template for site %r" % site.name, EXIT_ERROR,
+                     ["expected sites/%s/job.tmpl beside %s" % (site.name, site.conf)])
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Expand an experiment into jobs and submit them.")
+    ap.add_argument("name", help="experiment name or path")
+    ap.add_argument("--account", help="scheduler project to charge (required to submit)")
+    ap.add_argument("--site", help="override the site named in the experiment")
+    ap.add_argument("--profile", help="run only the cell this profile names")
+    ap.add_argument("--images", help="override the image list (space separated)")
+    ap.add_argument("--nodes", type=int, help="override defaults.nodes")
+    ap.add_argument("--walltime", help="override defaults.walltime")
+    ap.add_argument("--results-dir", help="where the per-job directories go")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="generate the job files, print the qsub, submit nothing")
+    ap.add_argument("--force", action="store_true",
+                    help="reuse a results directory that already holds results")
+    args = ap.parse_args()
+
+    exp = exp_mod.load(args.name, args.site)
+    if args.nodes:
+        exp.defaults["nodes"] = args.nodes
+    if args.walltime:
+        exp.defaults["walltime"] = args.walltime
+
+    jobs = exp_mod.expand(exp, args.profile,
+                          args.images.split() if args.images else None)
+
+    account = args.account or exp.account
+    if not account and not args.dry_run:
+        print("error: --account is required (no default; this is a billable "
+              "allocation).", file=sys.stderr)
+        print("       set `account:` in %s, or pass --account." % exp.path,
+              file=sys.stderr)
+        return EXIT_USAGE
+
+    # Check the world before queueing anything.  A missing .sif is a job that
+    # waits in a queue to print one line and exit.
+    pre = checks.preflight(exp, jobs)
+    if pre.code != EXIT_OK:
+        print("error: not ready to submit -- %s (exit %d):"
+              % (EXIT_NAMES[pre.code], pre.code), file=sys.stderr)
+        for problem in pre.problems:
+            print("    %s" % problem, file=sys.stderr)
+        if checks.missing(pre.images):
+            target = (exp.data["images"].get("from_make") or "derecho")
+            print("  build the images with:  cd %s/libexec && make %s"
+                  % (exp.site.root, target), file=sys.stderr)
+        print("  %s/validate %s   prints all of it."
+              % (exp.site.bench_root, args.name), file=sys.stderr)
+        return pre.code
+
+    root = args.results_dir or os.path.join(exp.site.results_root, exp.name)
+    template = template_for(exp.site)
+
+    print("experiment : %s" % exp.path)
+    print("site       : %s   (%s)" % (exp.site.name, exp.site.conf))
+    print("account    : %s" % (account or "<none: dry run>"))
+    print("nodes      : %d    walltime: %s    repeats: %d"
+          % (exp.defaults["nodes"], exp.defaults["walltime"], exp.defaults["repeats"]))
+    print("results    : %s" % root)
+    if args.profile:
+        print("profile    : %s" % args.profile)
+    print("jobs       : %d  (%d cell(s), %d run(s))"
+          % (len(jobs), sum(len(j.cells) for j in jobs),
+             sum(len(j.cells) * j.repeats for j in jobs)))
+    print()
+
+    occupied = []
+    for job in jobs:
+        if os.path.exists(os.path.join(root, job.key, "results.jsonl")):
+            occupied.append(os.path.join(root, job.key))
+    if occupied and not args.force:
+        print("error: these results directories already hold a results.jsonl:",
+              file=sys.stderr)
+        for path in occupied:
+            print("    %s" % path, file=sys.stderr)
+        print("  a second job would append to them, mixing two runs in one file.",
+              file=sys.stderr)
+        print("  move them aside, pass --results-dir, or --force to append anyway.",
+              file=sys.stderr)
+        return EXIT_USAGE
+
+    failed = 0
+    for job in jobs:
+        results_dir = os.path.join(root, job.key)
+        script = jobfile.write(exp, job, results_dir, template,
+                               account or "PBS_ACCOUNT_UNSET", args.profile)
+        if args.dry_run:
+            print("  qsub %s" % script)
+            continue
+        try:
+            out = subprocess.check_output(["qsub", script], cwd=results_dir,
+                                          stderr=subprocess.STDOUT)
+            print("  submitted %-34s %s" % (job.key, out.decode().strip()))
+        except (OSError, subprocess.CalledProcessError) as exc:
+            detail = getattr(exc, "output", b"")
+            print("  FAILED    %-34s %s" % (job.key, (detail or b"").decode().strip()
+                                            or exc))
+            failed += 1
+
+    print()
+    if args.dry_run:
+        print("(dry run -- job.pbs, job.env and job.json written, nothing submitted)")
+    elif failed:
+        print("%d of %d job(s) failed to submit." % (failed, len(jobs)))
+        return EXIT_ERROR
+    else:
+        print("when the jobs finish:")
+        print("    %s/collect %s --best" % (exp.site.bench_root, root))
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except BenchError as exc:
+        print("%s: %s" % (EXIT_NAMES.get(exc.code, "error"), exc), file=sys.stderr)
+        for line in exc.detail:
+            print("  " + line, file=sys.stderr)
+        sys.exit(exc.code)
+    except OSError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        sys.exit(EXIT_ERROR)

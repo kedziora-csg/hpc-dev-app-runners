@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""validate -- expand an experiment, check it, print what would run, submit nothing.
+
+    validate <experiment> [--profile NAME] [--images "a.sif b.sif"] [--format json]
+    validate --app <app.yaml> ...          check a contract against bench/schema/app.json
+
+It answers "did I write this correctly?" in a second, instead of three hours
+into a queue.  Every check it makes is one bench/submit makes too -- both call
+benchlib.checks.preflight() -- so a green validate and a submit that refuses
+cannot disagree.
+
+WHAT IT CHECKS, IN ORDER
+
+    1. the experiment parses                            exit 3
+    2. it satisfies bench/schema/experiment.json        exit 3
+    3. cross-field rules a schema cannot state          exit 3
+       (one of from_make/list; per_job is a subset of matrix and holds no
+        axis a job cannot vary; no axis silently uncrossed; labels unique;
+        every profile names something that exists)
+    4. every placement is a legal ranks x threads        exit 4
+    5. every .sif is on disk                             exit 5
+    6. every app declares a contract in its image        exit 6
+
+and, when a referenced app has an app.yaml in this checkout, that it satisfies
+bench/schema/app.json -- which is what lets a broken contract fail in CI rather
+than on the cluster.
+
+EXIT CODES ARE THE INTERFACE
+
+Numbered in the order above so "the lowest code found" and "the earliest thing
+that is wrong" are the same rule.  A script and an agent both need to know WHICH
+kind of wrong a config is, and prose is the one thing neither can parse
+reliably.  --format json prints the same findings structured.
+"""
+
+import argparse
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from benchlib import (BenchError, EXIT_CONFIG, EXIT_ERROR, EXIT_NAMES,
+                      EXIT_OK)
+from benchlib import checks, experiment as exp_mod, schema as schema_mod
+from benchlib import yamlish
+
+
+def describe(exp, jobs, pre):
+    print("experiment  %s" % exp.path)
+    print("site        %s   (%s)" % (exp.site.name, exp.site.conf))
+    print("node        %d cores, SMT %d   [%s]"
+          % (exp.site.cores_per_node, exp.site.smt, exp.site.node_source))
+    print("reader      %s / %s"
+          % ("PyYAML" if yamlish.HAVE_PYYAML else "built-in YAML subset",
+             "jsonschema" if schema_mod.HAVE_JSONSCHEMA else "built-in validator"))
+    print("sweep       matrix=%s  per_job=%s"
+          % (",".join(exp.matrix), ",".join(exp.per_job) or "(none)"))
+
+    cells = sum(len(j.cells) for j in jobs)
+    runs = sum(len(j.cells) * j.repeats for j in jobs)
+    print("expands to  %d job(s), %d cell(s), %d run(s) at repeats=%d"
+          % (len(jobs), cells, runs, exp.defaults["repeats"]))
+    print()
+
+    print("  %-34s %-6s %-9s %s" % ("JOB", "NODES", "APP", "CELLS"))
+    print("  %-34s %-6s %-9s %s" % ("-" * 34, "-" * 6, "-" * 9, "-" * 34))
+    for job in jobs:
+        cells = ", ".join("%s(%dx%d)" % (c.name, c.placement["ranks_per_node"],
+                                         c.placement["threads"])
+                          for c in job.cells)
+        print("  %-34s %-6d %-9s %s"
+              % (job.key, job.nodes, job.app.get("label") or job.app["name"], cells))
+    print()
+
+    for title, results in (("images", pre.images),
+                           ("app contracts", pre.contracts)):
+        if not results:
+            continue
+        print("%s:" % title)
+        for result in results:
+            print("  " + str(result))
+        print()
+
+    if pre.app_problems:
+        print("app contracts in this checkout:")
+        for problem in pre.app_problems:
+            print("  FAIL  " + problem)
+        print()
+
+
+def as_json(exp, jobs, pre):
+    return {
+        "experiment": os.path.abspath(exp.path),
+        "site": exp.site.name,
+        "node": {"cores_per_node": exp.site.cores_per_node, "smt": exp.site.smt,
+                 "source": exp.site.node_source},
+        "jobs": [{"key": j.key, "image": j.image,
+                  "app": j.app.get("label") or j.app["name"],
+                  "nodes": j.nodes, "walltime": j.walltime, "repeats": j.repeats,
+                  "cells": [{"name": c.name,
+                             "ranks_per_node": c.placement["ranks_per_node"],
+                             "threads": c.placement["threads"],
+                             "omp": c.omp["name"]} for c in j.cells]}
+                 for j in jobs],
+        "images": [{"subject": r.subject, "state": r.state, "detail": r.detail}
+                   for r in pre.images],
+        "contracts": [{"subject": r.subject, "state": r.state, "detail": r.detail}
+                      for r in pre.contracts],
+        "problems": pre.problems,
+        "exit": {"code": pre.code, "name": EXIT_NAMES.get(pre.code, "error")},
+    }
+
+
+def validate_apps_only(paths, want_json):
+    problems = []
+    for path in paths:
+        try:
+            data = yamlish.load(path)
+        except (yamlish.YamlError, OSError) as exc:
+            problems.append("%s: %s" % (path, exc))
+            continue
+        for problem in schema_mod.validate(data, "app"):
+            problems.append("%s: %s" % (path, problem))
+    if want_json:
+        json.dump({"apps": paths, "problems": problems,
+                   "exit": {"code": EXIT_CONFIG if problems else EXIT_OK,
+                            "name": EXIT_NAMES[EXIT_CONFIG if problems else EXIT_OK]}},
+                  sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        for problem in problems:
+            print("  FAIL  " + problem)
+        print("%d contract(s) checked, %d problem(s)" % (len(paths), len(problems)))
+    return EXIT_CONFIG if problems else EXIT_OK
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Expand and check an experiment without submitting anything.")
+    ap.add_argument("name", nargs="?", help="experiment name or path")
+    ap.add_argument("--site", help="override the site named in the experiment")
+    ap.add_argument("--profile", help="check only the cell this profile names")
+    ap.add_argument("--images", help="override the image list (space separated)")
+    ap.add_argument("--app", nargs="+", metavar="APP_YAML",
+                    help="check contracts against bench/schema/app.json and stop")
+    ap.add_argument("--format", choices=("text", "json"), default="text")
+    args = ap.parse_args()
+
+    want_json = args.format == "json"
+    if args.app:
+        return validate_apps_only(args.app, want_json)
+    if not args.name:
+        ap.error("give an experiment name, or --app <app.yaml>")
+
+    try:
+        exp = exp_mod.load(args.name, args.site)
+        jobs = exp_mod.expand(exp, args.profile,
+                              args.images.split() if args.images else None)
+    except BenchError as exc:
+        if want_json:
+            json.dump({"problems": [str(exc)] + exc.detail,
+                       "exit": {"code": exc.code,
+                                "name": EXIT_NAMES.get(exc.code, "error")}},
+                      sys.stdout, indent=2)
+            sys.stdout.write("\n")
+        else:
+            print("%s: %s" % (EXIT_NAMES.get(exc.code, "error"), exc), file=sys.stderr)
+            for line in exc.detail:
+                print("  " + line, file=sys.stderr)
+        return exc.code
+
+    pre = checks.preflight(exp, jobs)
+
+    if want_json:
+        json.dump(as_json(exp, jobs, pre), sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return pre.code
+
+    describe(exp, jobs, pre)
+    if pre.code == EXIT_OK:
+        unchecked = [r for r in pre.contracts if r.state == "unchecked"]
+        print("OK -- %d job(s) would be submitted." % len(jobs))
+        if unchecked:
+            print("     %d app contract(s) UNCHECKED: no apptainer here, so nothing"
+                  % len(unchecked))
+            print("     looked inside the images.  Unchecked is not the same as ok.")
+    else:
+        print("%s (exit %d)" % (EXIT_NAMES[pre.code].upper(), pre.code))
+    return pre.code
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except BenchError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        for line in exc.detail:
+            print("  " + line, file=sys.stderr)
+        sys.exit(exc.code)
+    except OSError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        sys.exit(EXIT_ERROR)

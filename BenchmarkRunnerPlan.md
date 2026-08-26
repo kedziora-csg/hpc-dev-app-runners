@@ -1,7 +1,7 @@
 # Plan: An App Benchmark Runner With A Real App Contract
 
-Status: **design accepted 2026-08-19; all four DECISIONs answered (see §12). Not yet
-implemented.**
+Status: **design accepted 2026-08-19; all four DECISIONs answered (see §12).
+Phases 0–3 implemented (see §10). Phase 4 next.**
 
 This document proposes the concrete interfaces that `SeparateConcerns.md` and
 `SeparationAnalysis.md` gesture at but do not specify. Those two argued *that* the
@@ -1008,6 +1008,57 @@ Each phase is independently useful and independently revertible.
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
 
 Phases 0–2 are worth doing regardless of whether you accept the rest of this document.
+
+### Phase 3, as built
+
+Landed as `bench/{submit,validate,runner.sh}`, `bench/benchlib/`,
+`bench/schema/{experiment,app}.json`, `bench/experiments/derecho-{hpcg,osu}.yaml`
+and `sites/derecho/job.tmpl`. `Placement_derecho_opt.pbs` became
+`PBS/App_benchmarker_derecho.pbs` — 502 lines down to 131, of which about 90 are
+the header and the site-profile search. `submit_placement_matrix.sh` and
+`timings.txt` are gone; `bench/test_bench.sh` (40 checks, no cluster) runs from
+`libexec/Makefile test` beside the other suites.
+
+Five things the plan left open were decided while building it:
+
+1. **`sweep.per_job` may not hold `images` or `apps`.** A job builds one
+   launcher, resolves one app contract, and records one `ldd` and one `run.meta`
+   — all properties of an image and an app, none of which change between cells.
+   Letting either vary inside a job would mean re-deriving them per cell and a
+   results directory that no longer describes a single thing. Rejected with
+   `EXIT_CONFIG` rather than accepted into a `job.env` the runner would
+   half-honour. Every use `per_job` is named for in §6 — trading queue wait
+   against job length, one cell per job for a long app — is still expressible.
+
+2. **The exit codes are numbered in the order the checks run**: 3 config, 4
+   geometry, 5 image, 6 contract. §6 lists them in a different order, but it is
+   an enumeration, not an ordering. Numbering by check order makes "the lowest
+   code found" and "the earliest thing that is wrong" the same rule, which
+   matters because the later checks are only meaningful once the earlier pass.
+
+3. **`apps:` entries take an optional `label:`.** Two entries of the same app
+   differing only in `env:` — `osu_alltoall` and `osu_allreduce` — need
+   something to name their job directories and result rows apart. Defaults to
+   `name`, so the single-app case is unchanged.
+
+4. **The host reads its node geometry from `site.sh`**
+   (`BENCH_CORES_PER_NODE`, `BENCH_SMT`), not from `sites/derecho.yaml`, which
+   stays at phase 4. `bench/validate` has to reject an illegal `ranks × threads`
+   before there is a node to ask, and that is the only moment the rejection is
+   cheap. The job still probes `lscpu` and its answer is the one that reaches
+   `topology.json`; the runner re-checks against it, because a job can also
+   arrive by hand or land on a node unlike the one the profile describes.
+
+5. **PyYAML has a fallback reader, not a JSON-only fallback.** DECISION 3 made
+   JSON the degraded path if PyYAML is missing. In practice the two places
+   PyYAML is least likely to be installed — a bare login node and a CI container
+   — are exactly where "did I write this correctly?" most needs an answer in a
+   second, and a validator you cannot run is not a validator. `benchlib/yamlish`
+   uses PyYAML when it imports and otherwise parses the subset our own files
+   use, refusing anchors, aliases, tags and multi-document input rather than
+   guessing. `test_bench.sh` parses every shipped `.yaml` both ways and asserts
+   they agree, so the risk of drift is checked rather than hoped about. The same
+   pattern covers `jsonschema`, which is likewise optional.
 
 ---
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """collect -- turn results.jsonl files into something you can read.
 
-    collect [ROOT ...] [--format table|csv|json] [--best] [--include-failed]
+    collect [ROOT ...] [--format table|csv|json] [--best] [--emit-profile]
+            [--include-failed] [--per-run]
 
 ROOT defaults to containers/deploy/ncar-hpc/results.  Every results.jsonl at or
 below each ROOT is read; rows are tagged with the directory they came from, so
@@ -34,6 +35,24 @@ The first cell of each job carries warm=false -- it paid the cold read of the
 .sif off GPFS and the first per-rank Apptainer startup.  It is comparable, but
 --best notes when the winner is one, because that cost is an artifact of
 ordering rather than of the configuration.
+
+REPEATS: MIN AND MEDIAN, NOT ONE SAMPLE
+------------------------------------------------------------------------------
+An experiment's `repeats:` runs each cell N times and writes N rows, which
+differ only in `repeat`.  --best groups them and ranks on the MEDIAN: a mean
+follows one run that hit a noisy neighbour, and a single sample of a shared
+machine is not a measurement at all.  The min is printed beside it because the
+gap between them is the run-to-run spread, which is the thing that says whether
+a difference between two configurations means anything.
+
+--per-run shows every row instead of the grouped table.
+
+--EMIT-PROFILE CLOSES THE LOOP
+------------------------------------------------------------------------------
+The point of a sweep is a configuration you then run.  --emit-profile writes the
+winner as a `profiles:` block you paste into the experiment file, so what the
+benchmark produces is the production configuration itself rather than a table
+someone transcribes it from by hand.
 
 NOTE ON LOCATION
 ------------------------------------------------------------------------------
@@ -165,6 +184,115 @@ def fmt(value):
     return "-" if value == "" or value is None else str(value)
 
 
+def cell_key(row):
+    """What makes two rows the same CELL: everything except which repeat."""
+    return (row["_job"], get(row, "app.name"), get(row, "placement.name"),
+            get(row, "placement.omp_variant"))
+
+
+def group_cells(rows):
+    """Rows that differ only by `repeat`, collapsed one entry per cell.
+
+    Order is preserved so a grouped table reads in the order the job ran.
+    """
+    groups = []
+    index = {}
+    for row in rows:
+        key = cell_key(row)
+        if key not in index:
+            index[key] = len(groups)
+            groups.append((key, []))
+        groups[index[key]][1].append(row)
+    return groups
+
+
+def stat(values):
+    """(min, median) of a list of numbers, or (None, None).
+
+    Median rather than mean: a mean follows the one run that hit a noisy
+    neighbour, which is exactly the run a comparison should be least sensitive
+    to.
+    """
+    values = sorted(v for v in values if isinstance(v, (int, float)))
+    if not values:
+        return None, None
+    mid = len(values) // 2
+    median = values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
+    return values[0], median
+
+
+def cell_stat(pool, metric):
+    return stat([get(r, "metrics." + metric, None) if metric != "wall_s"
+                 else get(r, "wall_s", None) for r in pool])
+
+
+def repeated(rows):
+    """True when any cell was run more than once."""
+    return any(_num(get(row, "repeats", 1)) > 1 for row in rows)
+
+
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 1
+
+
+def print_grouped_table(rows, metrics):
+    """One line per cell, with the median across its repeats.
+
+    The per-run rows are still there in results.jsonl and one --per-run away;
+    what this collapses is a table that would otherwise triple in length and
+    say the same thing three times.
+    """
+    groups = group_cells(rows)
+    cols = [
+        ("IMAGE", lambda k, p: get(p[0], "image.sif", p[0]["_job"])),
+        ("APP", lambda k, p: get(p[0], "app.name")),
+        ("PLACEMENT", lambda k, p: get(p[0], "placement.name")),
+        ("OMP", lambda k, p: get(p[0], "placement.omp_variant")),
+        ("R/NODE", lambda k, p: get(p[0], "placement.ranks_per_node")),
+        ("THREADS", lambda k, p: get(p[0], "placement.threads")),
+        ("N", lambda k, p: len([r for r in p if excluded_because(r) is None])),
+    ]
+    for metric in metrics + ["wall_s"]:
+        cols.append((metric.upper() + "~",
+                     (lambda m: lambda k, p: _fmt_num(cell_stat(
+                         [r for r in p if excluded_because(r) is None], m)[1]))(metric)))
+    cols += [
+        ("BIND", lambda k, p: get(p[0], "placement.verdict")),
+        ("NOTE", lambda k, p: _group_note(p)),
+    ]
+
+    table = [[c[0] for c in cols]]
+    for key, pool in groups:
+        table.append([fmt(getter(key, pool)) for _name, getter in cols])
+    widths = [max(len(r[i]) for r in table) for i in range(len(cols))]
+    for i, line in enumerate(table):
+        print("  ".join(cell.ljust(widths[j]) for j, cell in enumerate(line)).rstrip())
+        if i == 0:
+            print("  ".join("-" * w for w in widths).rstrip())
+    print()
+    print("~ = median across the cell's repeats; N is how many of them are")
+    print("comparable.  --per-run lists every run instead.")
+
+
+def _fmt_num(value):
+    if value is None:
+        return ""
+    return "%g" % value
+
+
+def _group_note(pool):
+    out = [excluded_because(r) for r in pool]
+    reasons = sorted({w for w in out if w})
+    if reasons and len(reasons) == len(out):
+        return "EXCLUDED: " + "; ".join(reasons)
+    if reasons:
+        return "%d/%d excluded: %s" % (len(reasons), len(out), "; ".join(reasons))
+    return ", ".join(get(pool[0], "placement.rules", []) or [])
+
+
 def print_table(rows, metrics, show_all):
     cols = [
         ("IMAGE", lambda r: get(r, "image.sif", r["_job"])),
@@ -172,6 +300,7 @@ def print_table(rows, metrics, show_all):
         ("PLACEMENT", lambda r: get(r, "placement.name")),
         ("R/NODE", lambda r: get(r, "placement.ranks_per_node")),
         ("THREADS", lambda r: get(r, "placement.threads")),
+        ("REPEAT", lambda r: "%s/%s" % (get(r, "repeat", 1), get(r, "repeats", 1))),
         ("WALL_S", lambda r: get(r, "wall_s")),
     ]
     cols += [(m.upper(), (lambda m: lambda r: get(r, "metrics." + m))(m)) for m in metrics]
@@ -222,7 +351,8 @@ def print_csv(rows, metrics):
               "placement.name", "placement.ranks_per_node", "placement.threads",
               "placement.verdict", "placement.rules",
               "placement.omp.OMP_PROC_BIND", "placement.omp.OMP_PLACES",
-              "repeat", "warm", "wall_s", "exit", "valid"]
+              "placement.omp_variant",
+              "repeat", "repeats", "warm", "wall_s", "exit", "valid"]
     fields += ["metrics." + m for m in metrics]
     fields += ["comparable", "excluded_because"]
 
@@ -245,6 +375,16 @@ def print_csv(rows, metrics):
         writer.writerow(out)
 
 
+def rank_cells(pool, metric, better):
+    """Cells of `pool`, best first, by the median of `metric` across repeats."""
+    scored = []
+    for _key, runs in group_cells(pool):
+        low, median = cell_stat(runs, metric)
+        if median is not None:
+            scored.append((median, low, len(runs), runs[0]))
+    return sorted(scored, reverse=better.get(metric, "higher") == "higher")
+
+
 def print_best(rows, metrics, include_failed=False):
     """The winning cell per app, ranked by what the app said its metric was."""
     usable = rows if include_failed else [r for r in rows if excluded_because(r) is None]
@@ -260,40 +400,35 @@ def print_best(rows, metrics, include_failed=False):
         for r in pool:
             better.update(r.get("_better") or {})
 
-        print("app %s -- %d comparable row(s)%s" % (
-            app or "(none)", len(pool),
+        print("app %s -- %d comparable run(s) in %d cell(s)%s" % (
+            app or "(none)", len(pool), len(group_cells(pool)),
             "" if primary else "   [no app.yaml alongside: ranking every metric]"))
 
         # The declared primary first, then any other metric the app reported,
-        # then wall_s -- which is the runner's fallback clock and belongs last.
+        # then wall_s -- the runner's fallback clock, which belongs last.
         ordered = ([primary] if primary in app_metrics else []) \
                   + [m for m in app_metrics if m != primary]
 
         for metric in ordered:
-            have = [r for r in pool
-                    if isinstance(get(r, "metrics." + metric, None), (int, float))]
-            if not have:
+            ranked = rank_cells(pool, metric, better)
+            if not ranked:
                 continue
-            direction = better.get(metric, "higher")
-            pick = min if direction == "lower" else max
-            win = pick(have, key=lambda r: get(r, "metrics." + metric))
-            # With no declared primary there is nothing to rank the metrics
-            # against each other, so each is simply the best of its own.
-            print("  %-5s %-10s %-12s %-28s %s=%s%s" % (
+            median, low, n, win = ranked[0]
+            print("  %-5s %-10s %-12s %-28s %s median=%g min=%g (n=%d)%s" % (
                 "best" if (primary is None or metric == primary) else "     ",
                 metric, get(win, "placement.name"),
                 get(win, "image.sif", win["_job"]),
-                metric, get(win, "metrics." + metric),
+                metric, median, low, n,
                 "   [warm=false: includes cold .sif read]"
                 if get(win, "warm", True) is False else ""))
 
-        have = [r for r in pool if isinstance(get(r, "wall_s", None), (int, float))]
-        if have:
-            win = min(have, key=lambda r: get(r, "wall_s"))
-            print("  %-5s %-10s %-12s %-28s wall_s=%s%s" % (
+        ranked = rank_cells(pool, "wall_s", {"wall_s": "lower"})
+        if ranked:
+            median, low, n, win = ranked[0]
+            print("  %-5s %-10s %-12s %-28s wall_s median=%g min=%g (n=%d)%s" % (
                 "" if app_metrics else "best", "wall_s*",
                 get(win, "placement.name"), get(win, "image.sif", win["_job"]),
-                get(win, "wall_s"),
+                median, low, n,
                 "   [warm=false: includes cold .sif read]"
                 if get(win, "warm", True) is False else ""))
             if app_metrics:
@@ -301,6 +436,50 @@ def print_best(rows, metrics, include_failed=False):
                       % (app or "this app"))
                 print("          container startup and the app's own setup phase")
         print()
+
+
+def emit_profile(rows, include_failed=False):
+    """The winning cell, as a `profiles:` block for the experiment file.
+
+    This is the point of running a sweep: the answer, in the form you run it
+    with (`bench/submit <experiment> --profile production`), rather than a table
+    someone retypes into a config by hand and gets one field wrong.
+    """
+    usable = rows if include_failed else [r for r in rows if excluded_because(r) is None]
+    if not usable:
+        print("# no comparable rows -- nothing to recommend", file=sys.stderr)
+        return 1
+
+    print("# Generated by bench/collect --emit-profile.")
+    print("# Paste into the experiment file, then run it with")
+    print("#     bench/submit <experiment> --profile production")
+    print("profiles:")
+    for app in sorted({get(r, "app.name", "?") for r in usable}):
+        pool = [r for r in usable if get(r, "app.name", "?") == app]
+        primary = next((r["_fom"] for r in pool if r.get("_fom")), None)
+        better = {}
+        for r in pool:
+            better.update(r.get("_better") or {})
+        metric = primary if primary in metric_names(pool) else "wall_s"
+        ranked = rank_cells(pool, metric,
+                            better if metric != "wall_s" else {"wall_s": "lower"})
+        if not ranked:
+            continue
+        median, low, n, win = ranked[0]
+        name = "production" if len({get(r, "app.name") for r in usable}) == 1 \
+               else "production_%s" % app
+        print("  %s:" % name)
+        print("    # %s median=%g min=%g over %d run(s)%s"
+              % (metric, median, low, n,
+                 "   [warm=false: includes the cold .sif read]"
+                 if get(win, "warm", True) is False else ""))
+        print("    placement: %s" % get(win, "placement.name"))
+        omp = get(win, "placement.omp_variant")
+        if omp:
+            print("    omp: %s" % omp)
+        print("    app: %s" % app)
+        print("    images: [%s]" % get(win, "image.sif", win["_job"]))
+    return 0
 
 
 def main():
@@ -315,6 +494,12 @@ def main():
     ap.add_argument("--include-failed", action="store_true",
                     help="let excluded rows win in --best; they are always shown "
                          "in the table either way")
+    ap.add_argument("--per-run", action="store_true",
+                    help="one line per run rather than one per cell; the default "
+                         "collapses an experiment's repeats: to their median")
+    ap.add_argument("--emit-profile", action="store_true",
+                    help="print the winner as a profiles: block for the "
+                         "experiment file, and nothing else")
     args = ap.parse_args()
 
     roots = args.roots or [DEFAULT_ROOT]
@@ -339,13 +524,18 @@ def main():
                              get(r, "placement.name"), get(r, "repeat", 0)))
     metrics = metric_names(rows)
 
+    if args.emit_profile:
+        return emit_profile(rows, include_failed=args.include_failed)
+
     if args.format == "json":
         json.dump(rows, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     elif args.format == "csv":
         print_csv(rows, metrics)
-    else:
+    elif args.per_run or not repeated(rows):
         print_table(rows, metrics, show_all=True)
+    else:
+        print_grouped_table(rows, metrics)
 
     if args.best:
         print()

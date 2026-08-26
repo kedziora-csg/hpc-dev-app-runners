@@ -1,0 +1,49 @@
+# OSU collectives across the same six images.
+#
+# The second experiment, and the check that the config format is not
+# HPCG-shaped: OSU has no input file, takes its flags from a launch hook, and
+# reports on stdout.  Nothing here says any of that -- it is all in the app's
+# own contract, scripts/app.d/osu/.
+#
+#     ../validate derecho-osu
+#     ../submit   derecho-osu --account <PROJECT>
+schema: 1
+site: derecho
+
+defaults:
+  nodes: 2
+  walltime: "00:20:00"
+  repeats: 3
+  scale: node
+
+images:
+  from_make: derecho-hpcg     # the app images; OSU ships in the base layer
+
+# OSU is pure MPI -- app.yaml says requires.openmp: false -- so a thread sweep
+# measures nothing.  Rank count is the axis that matters, which is why the
+# placements below vary ranks_per_node at threads: 1 rather than trading one
+# against the other.
+# Two entries of the SAME app, differing only in env, so each needs a label:
+# that is what names its job directory and its result rows.
+apps:
+  - name: osu
+    label: alltoall
+    env:
+      OSU_BENCHMARK: osu_alltoall
+  - name: osu
+    label: allreduce
+    env:
+      OSU_BENCHMARK: osu_allreduce
+
+placements:
+  - {name: pureMPI, ranks_per_node: 128, threads: 1}
+
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
+
+# per_job holds only the placement axis, so each image x benchmark pair is its
+# own job.  With one placement that is one cell per job -- the right shape when
+# the interesting axis is which image, not which decomposition.
+sweep:
+  matrix:  [images, apps, placements, omp_variants]
+  per_job: [placements, omp_variants]

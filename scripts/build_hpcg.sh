@@ -31,7 +31,7 @@ source ${SCRIPTDIR}/build_common.cfg \
 #
 # At run time HPCG reads ./hpcg.dat from the CURRENT DIRECTORY, so a harness
 # controls problem size and duration by writing its own hpcg.dat in the run
-# directory -- see PBS/Placement_derecho_opt.pbs.  A reference copy is installed
+# directory -- see containers/deploy/bench/runner.sh.  A reference copy is installed
 # alongside the binary.
 #
 # NOTE ON OFFICIALNESS: an official HPCG submission requires a run of at least

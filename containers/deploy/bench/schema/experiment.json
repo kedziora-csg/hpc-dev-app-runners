@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kedziora-csg/demo_github_actions/bench/schema/experiment.json",
+  "title": "Benchmark experiment",
+  "description": "What to sweep: which images, which apps, which rank/thread decompositions, and how the cross product is split into jobs. Host-side only -- bench/submit expands this into a flat job.env per job, and the job itself never parses YAML.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "site", "images", "apps", "placements", "sweep"],
+
+  "properties": {
+    "schema": {
+      "const": 1,
+      "description": "Format version of this file. Bumped only for a change that an older bench/submit would misread."
+    },
+    "site": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Names sites/<site>/site.sh, which supplies the paths and the module bootstrap."
+    },
+    "account": {
+      "type": "string",
+      "description": "Scheduler project to charge. --account overrides it; there is deliberately no default, because this is a billable allocation."
+    },
+
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Job-level settings. Anything an app does not override itself.",
+      "properties": {
+        "nodes": {"type": "integer", "minimum": 1},
+        "walltime": {"type": "string", "pattern": "^[0-9]{1,3}:[0-5][0-9]:[0-5][0-9]$"},
+        "queue": {"type": "string"},
+        "repeats": {
+          "type": "integer", "minimum": 1,
+          "description": "Times each cell is run. Reported as min and median, never as a single sample."
+        },
+        "scale": {
+          "type": "string",
+          "description": "BENCH_SCALE: an app-defined size class (smoke, node, weak, strong)."
+        },
+        "target_seconds": {"type": "integer", "minimum": 1},
+        "allow_undersubscribed": {
+          "type": "boolean",
+          "description": "Permit a ranks x threads product that leaves cores idle. Off by default: --cpu-bind depth packs consecutively from core 0, so a smaller product crowds every rank onto the low chiplets rather than idling cores -- a wrong answer that looks like a valid data point."
+        }
+      }
+    },
+
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Exactly one of from_make or list.",
+      "properties": {
+        "from_make": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "description": "A libexec/Makefile target such as derecho-hpcg, asked via its echo-<target> rule. One definition of 'the six' rather than a copy that drifts."
+        },
+        "list": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "\\.sif$"}
+        }
+      }
+    },
+
+    "apps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Resolved under /container/app.d/<name> in the image, or an absolute path to a bare executable."
+          },
+          "label": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+            "description": "How this entry is named in job directories and result rows. Defaults to name, and is what distinguishes two entries of the SAME app that differ only in env -- osu_alltoall from osu_allreduce, say."
+          },
+          "scale": {"type": "string"},
+          "target_seconds": {"type": "integer", "minimum": 1},
+          "args": {
+            "type": "string",
+            "description": "Appended to the argv. The app's launch hook is the better place for flags."
+          },
+          "env": {
+            "type": "object",
+            "description": "Extra environment for this app's cells, e.g. OSU_BENCHMARK.",
+            "patternProperties": {"^[A-Za-z_][A-Za-z0-9_]*$": {"type": ["string", "integer", "boolean"]}},
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+
+    "placements": {
+      "type": "array",
+      "minItems": 1,
+      "description": "A placement states only what it ASKS for. What it should get -- L3, NUMA and socket footprint -- follows from the topology probed at job start, so there is no expectation field for a checker to assert against.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "ranks_per_node", "threads"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+          "ranks_per_node": {"type": "integer", "minimum": 1},
+          "threads": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+
+    "omp_variants": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Defaults to one variant. Crossing two doubles every sweep, and on HPCG the difference measured 2026-08-19 was minor -- opt in per experiment instead.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+          "OMP_PROC_BIND": {"enum": ["close", "spread", "master", "true", "false"]},
+          "OMP_PLACES": {"enum": ["cores", "threads", "sockets"]}
+        }
+      }
+    },
+
+    "sweep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix"],
+      "properties": {
+        "matrix": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"enum": ["images", "apps", "placements", "omp_variants"]},
+          "description": "The axes crossed. Every axis with two or more entries must appear here; bench/validate refuses to drop values silently."
+        },
+        "per_job": {
+          "type": "array", "uniqueItems": true,
+          "items": {"enum": ["images", "apps", "placements", "omp_variants"]},
+          "description": "Which of those axes ONE job iterates. The rest become separate jobs. This is the knob that trades queue wait against job length."
+        }
+      }
+    },
+
+    "profiles": {
+      "type": "object",
+      "description": "Named single cells -- the answer a sweep produced. bench/submit --profile <name> runs only that. bench/collect --emit-profile generates one from results, so the benchmark's output is the production configuration rather than something transcribed by hand.",
+      "patternProperties": {
+        "^[A-Za-z0-9][A-Za-z0-9_.-]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "placement": {"type": "string"},
+            "omp": {"type": "string"},
+            "app": {"type": "string"},
+            "images": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "nodes": {"type": "integer", "minimum": 1},
+            "repeats": {"type": "integer", "minimum": 1}
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

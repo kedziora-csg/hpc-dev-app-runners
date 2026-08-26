@@ -51,6 +51,20 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # The name recorded in every result row.
 BENCH_SITE="${BENCH_SITE:-derecho}"
 
+# The queue jobs are submitted to.
+BENCH_QUEUE="${BENCH_QUEUE:-main}"
+
+# What one node has.  The job does NOT use these: it probes lscpu on the compute
+# node and every threshold comes from the resulting topology.json.  They are here
+# for the host side, which has to decide whether a placement's ranks x threads is
+# a legal product BEFORE there is a node to ask -- which is the only moment a bad
+# geometry is still cheap to reject.  Leave blank to accept the built-in Derecho
+# fallback, which bench/validate names as a fallback rather than a measurement.
+#
+#   2 x EPYC 7763 Milan: 128 physical cores, SMT on => 256 logical CPUs.
+BENCH_CORES_PER_NODE="${BENCH_CORES_PER_NODE:-128}"
+BENCH_SMT="${BENCH_SMT:-2}"
+
 #-------------------------------------------------------------------------------
 # bench_site_modules -- the state every job here starts from.
 #
@@ -81,7 +95,15 @@ fi
 : "${BENCH_IMAGE_DIR:=${NCAR_HPC_ROOT}/libexec}"
 : "${BENCH_RESULTS_ROOT:=${PBS_O_WORKDIR:-$(pwd)}}"
 
+# bench/ is a sibling of ncar-hpc/, not a child: it is site-agnostic, and
+# ncar-hpc/ is not.  A generated job script names runner.sh outright, so this is
+# for the hand-qsub path, which has only the site profile to go on.
+if [ -z "${BENCH_ROOT:-}" ] && [ -d "${NCAR_HPC_ROOT}/../bench" ]; then
+    BENCH_ROOT="$(cd "${NCAR_HPC_ROOT}/../bench" && pwd)"
+fi
+
 export BENCH_SITE NCAR_HPC_ROOT BENCH_IMAGE_DIR BENCH_RESULTS_ROOT BENCH_SCRATCH
+export BENCH_ROOT BENCH_QUEUE BENCH_CORES_PER_NODE BENCH_SMT
 
 #-------------------------------------------------------------------------------
 # WHAT IS NOT HERE

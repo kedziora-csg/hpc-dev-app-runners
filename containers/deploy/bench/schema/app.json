@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kedziora-csg/demo_github_actions/bench/schema/app.json",
+  "title": "Application contract",
+  "description": "What an application must declare so the runner can drive it without knowing which one it is. Installed into the image at /container/app.d/<app>/app.yaml by build_<app>.sh, beside the prepare/launch/extract hooks. An app with no hooks at all is legal: an app.yaml with just app and binary gets you wall time and a placement verdict, which is the ten-minute entry point that makes the contract adoptable.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["app"],
+
+  "properties": {
+    "app": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "description": "The name the runner is asked for. Must match the app.d directory."
+    },
+    "version": {
+      "type": "string",
+      "description": "Recorded in every result row. A @PLACEHOLDER@ is substituted by build_<app>.sh at install time."
+    },
+    "binary": {
+      "type": "string",
+      "description": "Absolute path inside the image. Required unless there is a launch hook, which may pick a different executable and add flags."
+    },
+    "primary_fom": {
+      "type": "string",
+      "description": "Which figure of merit decides a comparison. Must name a key in figures_of_merit. Read host-side by bench/collect, from the app.yaml copied into the results directory."
+    },
+
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mpi": {"type": "boolean"},
+        "openmp": {
+          "type": "boolean",
+          "description": "false means a thread sweep measures nothing for this app -- rank count is the axis that matters."
+        },
+        "min_ranks": {"type": "integer", "minimum": 1}
+      }
+    },
+
+    "figures_of_merit": {
+      "type": "object",
+      "description": "Ramble's noun, on purpose. Every key that extract may print, plus wall_s which the runner always provides.",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[A-Za-z_][A-Za-z0-9_]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["better"],
+          "properties": {
+            "units": {"type": "string"},
+            "better": {
+              "enum": ["higher", "lower"],
+              "description": "Which direction wins. bench/collect ranks with this; without it a metric is assumed higher-is-better, which is wrong for a latency."
+            },
+            "provided_by": {"enum": ["runner", "app"]},
+            "note": {"type": "string"}
+          }
+        }
+      }
+    },
+
+    "success_criteria": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "app_self_validates": {
+          "type": "boolean",
+          "description": "When true, extract must print valid=true|false. A valid=false row is recorded but never wins a comparison."
+        }
+      }
+    },
+
+    "notes": {
+      "type": "string",
+      "description": "Free text for whoever reads a results directory a year from now: what the numbers mean, and what would make them not mean it."
+    }
+  }
+}

@@ -12,7 +12,10 @@ This repository employs a **hybrid building pattern**:
 
 ### Key Deployment Components
 
-All NCAR-specific deployment files are located under [containers/deploy/ncar-hpc/](containers/deploy/ncar-hpc/):
+All NCAR-specific deployment files are located under [containers/deploy/ncar-hpc/](containers/deploy/ncar-hpc/), with two siblings that are deliberately **not** NCAR-specific:
+
+* [containers/deploy/bench/](../bench/) — the benchmark runner. `submit` and `validate` expand a declarative experiment on the login node; `runner.sh` is the in-job sweep, with no site and no application in it; `collect` turns the resulting `results.jsonl` files into a table or a runnable configuration. Nothing here names Derecho.
+* [containers/deploy/sites/](../sites/) — what one machine needs: `derecho/site.sh` (paths and the module bootstrap) and `derecho/job.tmpl` (the scheduler-directive skeleton `submit` generates from). Adding a second machine is a second directory here.
 
 * **Template-Driven Builds**: 
   The deployment uses a Singularity definition template, [containers/deploy/ncar-hpc/libexec/Deffile](containers/deploy/ncar-hpc/libexec/Deffile).
@@ -137,6 +140,9 @@ submission directory.
 | `BENCH_IMAGE_DIR` | where the `.sif` images live (default `$NCAR_HPC_ROOT/libexec`) |
 | `BENCH_RESULTS_ROOT` | where results directories are created (default: the submission directory) |
 | `BENCH_SCRATCH` | big, fast, purgeable space for apps that stage large inputs |
+| `BENCH_ROOT` | `containers/deploy/bench` — where `runner.sh` and the sweep tools live |
+| `BENCH_QUEUE` | the queue `bench/submit` puts jobs in |
+| `BENCH_CORES_PER_NODE`, `BENCH_SMT` | what one node has, so `bench/validate` can reject an illegal `ranks × threads` before a job is queued. The job itself probes `lscpu` and uses that instead |
 | `bench_site_modules` | the module set-up every job here starts from |
 
 Every one honours a value that is already set, so a one-off change needs no
@@ -146,17 +152,110 @@ edit at all:
 qsub -v BENCH_RESULTS_ROOT=$SCRATCH/hpcdev-bench Placement_derecho.pbs
 ```
 
-### Step 4.2b: Choosing What to Benchmark
+### Step 4.2b: Sweeping a Matrix — `bench/submit`
 
-`APP` names an application whose contract ships in the image:
+An **experiment** says what to sweep: which images, which applications, which
+rank/thread decompositions, and how the cross product is split into jobs. It is
+YAML, it lives in
+[containers/deploy/bench/experiments/](../bench/experiments/), and **the job
+never reads it** — `bench/submit` expands the matrix on the login node and
+writes a flat `job.env` into each results directory.
 
 ```bash
-qsub -A <project> -v APP=hpcg /path/to/Placement_derecho_opt.pbs
-qsub  -A <project> -v APP=osu,OSU_BENCHMARK=osu_allreduce \
-    /path/to/Placement_derecho_opt.pbs
+cd <checkout>/containers/deploy/bench
+./validate derecho-hpcg                        # expand it, check it, submit nothing
+./submit   derecho-hpcg --account <PROJECT>    # six jobs, three cells each
 ```
 
-The runner knows nothing about either. What to write before the run, how to
+`validate` is worth running first every time. It expands the matrix, checks
+every `.sif` exists, checks every image carries a contract for the app, checks
+the geometry, and prints the cells that *would* run. It costs a second, against
+a queue wait for the same answer.
+
+It also has **stable exit codes**, so a script or a CI step can act on the
+result rather than parse prose:
+
+| Code | Meaning |
+|---|---|
+| 0 | fine |
+| 2 | bad command line |
+| 3 | the experiment does not parse, or fails `bench/schema/experiment.json` |
+| 4 | a placement's `ranks × threads` is not a legal product for this node |
+| 5 | a named `.sif` is not on disk |
+| 6 | an image carries no contract for the app |
+
+The two schemas — [`bench/schema/experiment.json`](../bench/schema/experiment.json)
+and [`bench/schema/app.json`](../bench/schema/app.json) — are also what an editor
+uses for autocomplete, and what makes an experiment or a contract something you
+can check without a cluster:
+
+```bash
+./validate --app ../../../scripts/app.d/*/app.yaml
+```
+
+Every key of both formats, with its type, its constraints and what it means, is
+tabulated in [`bench/schema/README.md`](../bench/schema/README.md). That file is
+generated from the schemas by `bench/schemadoc`, so it cannot describe a key that
+does not exist or miss one that does; `test_bench.sh` fails if it is stale.
+
+**Useful options:**
+
+```bash
+./submit derecho-hpcg --dry-run                # write job.pbs/env/json, submit nothing
+./submit derecho-hpcg --nodes 4 --walltime 01:00:00
+./submit derecho-hpcg --images "leap-oneapi-mpich-hpcg.sif"
+./submit derecho-hpcg --account <PROJECT> --profile production   # just the winner
+```
+
+Each job gets its own directory holding **what it was asked to do** as well as
+what it found: `job.pbs` (the generated script, with real `#PBS` directives —
+the exact thing that ran), `job.env` (the flat expansion the runner sources) and
+`job.json` (the same, structured).
+
+#### Editing an experiment
+
+Two knobs matter more than the rest.
+
+`sweep.per_job` decides how the cross product is cut into jobs. It is the trade
+between queue wait and job length, and it is a line rather than a script edit:
+
+```yaml
+sweep:
+  matrix:  [images, apps, placements, omp_variants]
+  per_job: [placements, omp_variants]   # one job per image, all cells inside
+  # per_job: []                         # one cell per job -- for a long app
+```
+
+`placements` states only what each configuration *asks* for. Whether it got it
+is derived from the topology the job probes, so there is no expectation to keep
+in step. `ranks_per_node × threads` has exactly two legal products — 128 (one
+thread per physical core) or 256 (one per hardware thread, both SMT siblings
+computing). Anything else is refused, because `--cpu-bind depth` packs from core
+0: a smaller product does not idle the spare cores, it crowds every rank onto
+the low chiplets, which is a wrong answer that looks like a valid data point.
+
+Note that "128 with `OMP_PLACES=threads`" is **not** SMT: at 128 you have 128
+threads on 128 cores either way, and the setting only changes whether a thread's
+mask is one logical CPU or two. Engaging SMT for computation takes the 256
+product, e.g. `16 ranks × 16 threads`.
+
+### Step 4.2c: Benchmarking One Image By Hand
+
+For iterating — a new image, a new contract, a fix you want to see fail fast —
+skip the experiment file:
+
+```bash
+qsub -A <project> -v APP=hpcg /path/to/PBS/App_benchmarker_derecho.pbs
+qsub -A <project> -v APP=osu,OSU_BENCHMARK=osu_allreduce \
+    /path/to/PBS/App_benchmarker_derecho.pbs
+```
+
+Both paths run the same [`bench/runner.sh`](../bench/runner.sh). With no
+`job.env` to read, it derives its three cells from the topology it probes — one
+rank per core, one per L3, one per NUMA domain — which on Derecho is exactly
+128×1, 16×8 and 8×16.
+
+The runner knows nothing about either app. What to write before the run, how to
 launch it, and how to read its output all come from `/container/app.d/<app>/` —
 see [`scripts/app.d/README.md`](../../../scripts/app.d/README.md). Adding a third
 application is a directory there and a line in its `build_<app>.sh`; it is not a
@@ -165,27 +264,29 @@ change to the runner.
 A bare executable also works, and gets you wall time and a placement verdict:
 
 ```bash
-qsub -v APP=/glade/work/$USER/bin/wrf.exe Placement_derecho_opt.pbs
+qsub -A <project> -v APP=/glade/work/$USER/bin/wrf.exe \
+    PBS/App_benchmarker_derecho.pbs
 ```
 
 To fix an extractor without rebuilding an image, point `BENCH_APP_DIR` at a copy
 of the contract on a filesystem the container binds (on Derecho, `/glade`):
 
 ```bash
-qsub -v APP=hpcg,BENCH_APP_DIR=/glade/work/$USER/app.d ...
+qsub -A <project> -v APP=hpcg,BENCH_APP_DIR=/glade/work/$USER/app.d ...
 ```
 
 Rows produced that way carry `app_dir_override: true`, so they are never mistaken
 for reproducible ones.
 
-### Step 4.2c: What a Benchmark Job Leaves Behind
+### Step 4.2d: What a Benchmark Job Leaves Behind
 
 A results directory is self-contained: reading it never requires the PBS script,
 the job log, or knowing what was submitted.
 
 | File | Contents |
 |---|---|
-| `results.jsonl` | one JSON object per measured cell — the machine-readable record |
+| `results.jsonl` | one JSON object per measured run — the machine-readable record |
+| `job.pbs`, `job.env`, `job.json` | what this job was asked to do, generated by `bench/submit` (absent for a hand `qsub`) |
 | `run.meta` | the job-level `# key value` header: image, digest, geometry, launcher, job id, harness SHA |
 | `topology.json` | the node topology this job probed; every placement threshold is derived from it |
 | `modules.txt`, `env.txt` | the environment the run actually had |
@@ -193,19 +294,34 @@ the job log, or knowing what was submitted.
 | `ldd_*_host.txt` | linkage through the launcher, i.e. after the host libraries displace the container's |
 | `placement_<cfg>.out` | `report_placement` output, provenance header first |
 | `app.yaml` | the contract that was in force: what declared each metric, and which one decides |
-| `run_<cfg>/` | the app's own working directory (`$BENCH_RUNDIR`): inputs, `app.out`, `metrics.kv`, `prepare.log` |
+| `run_<cfg>[_r<n>]/` | the app's own working directory (`$BENCH_RUNDIR`): inputs, `app.out`, `metrics.kv`, `prepare.log`. One per repeat when `repeats:` is more than 1 |
 
 Tabulate one or many jobs:
 
 ```bash
-containers/deploy/bench/collect <results-root>          # table
+containers/deploy/bench/collect <results-root>          # one line per cell
 containers/deploy/bench/collect <results-root> --best   # the winning cell per app
+containers/deploy/bench/collect <results-root> --per-run   # every repeat
 containers/deploy/bench/collect <results-root> --format csv
 ```
 
 `collect` never lets a row win if its placement verdict is `fail`, if the app
 reported itself invalid, or if it exited non-zero — a mis-bound run measures its
 binding, not the code.
+
+An experiment's `repeats:` runs each cell several times, and `collect` ranks on
+the **median**: a mean follows the one run that hit a noisy neighbour, and a
+single sample of a shared machine is not a measurement. The min is printed
+beside it, because the gap between the two is what says whether a difference
+between two configurations means anything.
+
+When the sweep has an answer, `collect` writes it as a runnable configuration
+rather than a table you retype:
+
+```bash
+containers/deploy/bench/collect <results-root> --emit-profile >> bench/experiments/derecho-hpcg.yaml
+containers/deploy/bench/submit derecho-hpcg --account <PROJECT> --profile production
+```
 
 The job log itself carries only the narrative: each cell's geometry, its
 placement verdict, its figure of merit, and anything that aborted it. Set
