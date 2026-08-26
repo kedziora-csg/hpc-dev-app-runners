@@ -1,4 +1,4 @@
-"""checks -- the things that can only be answered by looking at the machine.
+"""checks the things that can only be answered by looking at the machine.
 
 Parsing and schema live in yamlish/schema; the matrix and the geometry rule live
 in experiment.  What is left is the world: is that .sif actually on disk, and
