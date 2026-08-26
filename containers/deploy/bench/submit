@@ -20,22 +20,18 @@ A directory per job, holding what it was asked to do BEFORE it runs and what it
 found AFTER:
 
     job.pbs    the generated script with real directives. This is what will be
-               submitted and preserved.
+               submitted and will be preserved.
     job.env    the flat expansion the runner sources.  The job never parses YAML
     job.json   the same, structured, for provenance and bench/collect
 
 and then everything runner.sh writes: results.jsonl, run.meta, topology.json,
 placement_*.out, run_<cell>/.
 
-The `-v NCAR_HPC_ROOT=...,container_img=...,RESULTS_DIR=...` channel is gone.
-Nothing is passed on the qsub line except the script.
-
 VALIDATION IS THE SAME CODE PATH AS `validate`
 
-Same load, same expansion, and one call to benchlib.checks.preflight() for the
-checks, the verdict and the exit code.  A green validate followed by a submit
-that refuses would make validate worthless, so a new check goes in preflight,
-never here.  test_bench.sh asserts the two commands return the same code.
+Same load, same expansion, same checks, same exit codes.  A green validate
+followed by a submit that refuses would be the worst possible outcome, so there
+is only one implementation for both to be right about.
 """
 
 import argparse
@@ -45,8 +41,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from benchlib import (BenchError, EXIT_ERROR, EXIT_NAMES, EXIT_OK,
-                      EXIT_USAGE)
+from benchlib import (BenchError, EXIT_CONTRACT, EXIT_ERROR, EXIT_IMAGE,
+                      EXIT_NAMES, EXIT_OK, EXIT_USAGE)
 from benchlib import checks, experiment as exp_mod, jobfile
 
 
@@ -104,19 +100,25 @@ def main():
 
     # Check the world before queueing anything.  A missing .sif is a job that
     # waits in a queue to print one line and exit.
-    pre = checks.preflight(exp, jobs)
-    if pre.code != EXIT_OK:
-        print("error: not ready to submit -- %s (exit %d):"
-              % (EXIT_NAMES[pre.code], pre.code), file=sys.stderr)
-        for problem in pre.problems:
-            print("    %s" % problem, file=sys.stderr)
-        if checks.missing(pre.images):
-            target = (exp.data["images"].get("from_make") or "derecho")
-            print("  build the images with:  cd %s/libexec && make %s"
-                  % (exp.site.root, target), file=sys.stderr)
-        print("  %s/validate %s   prints all of it."
-              % (exp.site.bench_root, args.name), file=sys.stderr)
-        return pre.code
+    image_results = checks.images(exp.site, sorted({j.image for j in jobs}))
+    missing = [r for r in image_results if r.state == "missing"]
+    if missing:
+        print("error: these .sif images do not exist:", file=sys.stderr)
+        for result in missing:
+            print("    %s" % result.detail, file=sys.stderr)
+        target = (exp.data["images"].get("from_make") or "derecho")
+        print("  build them with:  cd %s/libexec && make %s"
+              % (exp.site.root, target), file=sys.stderr)
+        return EXIT_IMAGE
+
+    contract_results = checks.contracts(exp.site,
+                                        [(j.image, j.app["name"]) for j in jobs])
+    missing = [r for r in contract_results if r.state == "missing"]
+    if missing:
+        print("error: these images carry no contract for the app:", file=sys.stderr)
+        for result in missing:
+            print("    %s -- %s" % (result.subject, result.detail), file=sys.stderr)
+        return EXIT_CONTRACT
 
     root = args.results_dir or os.path.join(exp.site.results_root, exp.name)
     template = template_for(exp.site)
