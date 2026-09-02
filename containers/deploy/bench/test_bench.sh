@@ -113,6 +113,51 @@ echo "schema reference"
     || bad "schema/undocumented.txt no longer matches the schemas" \
            "$(./schemadoc --missing 2>&1)"
 
+#-- one ~/.config copy must not answer for every machine ------------------------
+# The path ~/.config/hpcdev/site.sh has no site in it, so a copy made for one
+# machine used to answer a request for another -- and a Site takes its name from
+# the profile it read, so an experiment saying `site: casper` ran Derecho's core
+# count, bind list and MPI recipe without a word.  Nothing in the results would
+# have said so, which is why this is tested rather than documented.
+echo
+echo "profile search"
+( export XDG_CONFIG_HOME="${TMP}/xdg"
+  mkdir -p "${XDG_CONFIG_HOME}/hpcdev"
+  cp ../sites/derecho/site.sh "${XDG_CONFIG_HOME}/hpcdev/site.sh"
+  unset BENCH_SITE_CONF
+
+  # Asking for derecho: the copy matches and is used.
+  got="$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import site
+print(site.find_conf("derecho"))' 2>&1)"
+  case "${got}" in
+      "${XDG_CONFIG_HOME}"/*) echo "  ok    a matching ~/.config copy is used" ;;
+      *) echo "  FAIL  a matching ~/.config copy was skipped"; echo "        ${got}" ;;
+  esac
+
+  # Asking for casper: the copy names derecho, so it must be passed over for
+  # the checkout's own casper profile.
+  got="$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import site
+print(site.find_conf("casper"))' 2>&1)"
+  case "${got}" in
+      *"/sites/casper/site.sh") echo "  ok    a ~/.config copy for another site is skipped" ;;
+      *) echo "  FAIL  a Derecho ~/.config copy answered a Casper request"; echo "        ${got}" ;;
+  esac
+
+  # Naming the wrong profile outright is explicit, and still refused: an
+  # override may say WHERE a profile is, never which machine it describes.
+  out="$(BENCH_SITE_CONF="${XDG_CONFIG_HOME}/hpcdev/site.sh" ./validate casper-hpcg 2>&1)"
+  case "${out}" in
+      *"describes 'derecho'"*) echo "  ok    an explicitly named wrong-site profile is refused" ;;
+      *) echo "  FAIL  BENCH_SITE_CONF pointing at another site was accepted" ;;
+  esac
+) | tee "${TMP}/search.out"
+pass=$((pass + $(grep -c '^  ok ' "${TMP}/search.out")))
+fail=$((fail + $(grep -c '^  FAIL' "${TMP}/search.out")))
+
 #-- the site description, and the profile generated from it --------------------
 # sites/<site>.yaml is the single statement of what a machine is; the generated
 # block of sites/<site>/site.sh is what every job actually sources.  Nothing

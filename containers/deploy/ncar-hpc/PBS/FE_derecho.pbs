@@ -24,10 +24,19 @@
 # record of where you were.
 #-------------------------------------------------------------------------------
 _site="${BENCH_SITE:-derecho}"
+# A ~/.config copy holds ONE site, and its path does not say which.  So it is
+# used only when it names the site being asked for; otherwise the search falls
+# through to the checkout, which has a profile per machine.  Without this, a
+# Derecho copy answers a Casper job and the run is silently wrong.
+_profile_site () { ( . "$1" >/dev/null 2>&1; printf '%s' "${BENCH_SITE:-}" ); }
+
 _site_conf=""
-for _c in "${BENCH_SITE_CONF:-}" "${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/site.sh"; do
-    [ -n "${_c}" ] && [ -f "${_c}" ] && { _site_conf="${_c}"; break; }
-done
+if [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ]; then
+    _site_conf="${BENCH_SITE_CONF}"
+else
+    _c="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/site.sh"
+    [ -f "${_c}" ] && [ "$(_profile_site "${_c}")" = "${_site}" ] && _site_conf="${_c}"
+fi
 _d="$(cd "${PBS_O_WORKDIR:-$(pwd)}" 2>/dev/null && pwd)"
 while [ -z "${_site_conf}" ] && [ -n "${_d}" ] && [ "${_d}" != "/" ]; do
     [ -f "${_d}/sites/${_site}/site.sh" ] && _site_conf="${_d}/sites/${_site}/site.sh"

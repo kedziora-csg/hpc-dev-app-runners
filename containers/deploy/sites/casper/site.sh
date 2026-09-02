@@ -20,10 +20,12 @@
 #   where this file itself lives.
 #
 #   Submitting from anywhere on the machine?  Copy this file to
-#   ~/.config/hpcdev/site.sh and set NCAR_HPC_ROOT below to your clone.  Note
-#   that ~/.config holds ONE profile, so a copy there picks a site: keep the
-#   copy for whichever machine you mostly work on and let the other be found by
-#   walking up from the checkout.
+#   ~/.config/hpcdev/site.sh and set NCAR_HPC_ROOT below to your clone.  That
+#   path holds ONE site and does not say which, so a copy is used only for the
+#   site it names: keep the copy for whichever machine you mostly work on, and
+#   the others are still found by walking up from the checkout with no setup.
+#   $BENCH_SITE_CONF overrides both, and is refused if it names a profile for a
+#   different machine.
 #===============================================================================
 
 

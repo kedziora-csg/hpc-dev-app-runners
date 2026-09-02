@@ -85,14 +85,23 @@
 # that checkout even if the operator also has a ~/.config copy pointing
 # elsewhere.  Here, where a person typed the qsub, the search is the point.
 #-------------------------------------------------------------------------------
+_profile_site () { ( . "$1" >/dev/null 2>&1; printf '%s' "${BENCH_SITE:-}" ); }
+
 _find_site_conf () {
     local from="${1:-$(pwd)}" site="${2:-derecho}" d
 
     [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ] && {
         printf '%s' "${BENCH_SITE_CONF}"; return 0; }
 
+    # A ~/.config copy holds ONE site and its path does not say which, so it
+    # answers only for the site being asked for.  Otherwise the search falls
+    # through to the checkout, which has a profile per machine.  Without this a
+    # Derecho copy answers a Casper job and the run is silently wrong: the core
+    # count, the bind list and the host-MPI recipe would all be the other
+    # machine's, and nothing in the results would say so.
     d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/site.sh"
-    [ -f "${d}" ] && { printf '%s' "${d}"; return 0; }
+    [ -f "${d}" ] && [ "$(_profile_site "${d}")" = "${site}" ] && {
+        printf '%s' "${d}"; return 0; }
 
     d="$(cd "${from}" 2>/dev/null && pwd)" || return 1
     while [ -n "${d}" ] && [ "${d}" != "/" ]; do

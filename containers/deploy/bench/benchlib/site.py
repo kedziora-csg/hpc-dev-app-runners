@@ -111,6 +111,18 @@ def _int(text):
         return 0
 
 
+def profile_site(conf):
+    """The site a profile names, or "" if it cannot be read.
+
+    Cheap enough to do while searching: the profile only assigns and defines, so
+    sourcing it costs one subshell and no `module` command runs.
+    """
+    try:
+        return _exported(conf, ("BENCH_SITE",)).get("BENCH_SITE", "")
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
 def find_conf(name, start=None):
     """The site profile, looked for the same three places a PBS script looks.
 
@@ -118,6 +130,16 @@ def find_conf(name, start=None):
     walking up from `start`.  Keeping the order identical to the one inlined in
     the PBS scripts is the point: the host and the job must never disagree about
     which profile is in force.
+
+    THE ~/.config COPY HOLDS ONE SITE
+
+    That path has no site in it, so a copy made for one machine used to answer a
+    request for another -- and because a Site takes its name from the profile it
+    read, an experiment saying `site: casper` would run Derecho's core count,
+    paths and MPI recipe without a word.  So the copy is now accepted only if it
+    names the site being asked for, and is otherwise skipped so the search falls
+    through to the checkout's own profile.  Working on two machines needs no
+    setup beyond having both described.
     """
     named = os.environ.get("BENCH_SITE_CONF")
     if named and os.path.isfile(named):
@@ -126,7 +148,7 @@ def find_conf(name, start=None):
     home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
         os.path.expanduser("~"), ".config")
     candidate = os.path.join(home, "hpcdev", "site.sh")
-    if os.path.isfile(candidate):
+    if os.path.isfile(candidate) and profile_site(candidate) in (name, ""):
         return candidate
 
     here = os.path.abspath(start or os.getcwd())
@@ -140,7 +162,8 @@ def find_conf(name, start=None):
                 "cannot find a site profile for %r" % name, EXIT_ERROR,
                 ["looked for: $BENCH_SITE_CONF, "
                  "${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh,",
-                 "            and sites/%s/site.sh above %s" % (name, start or os.getcwd())])
+                 "            and sites/%s/site.sh above %s" % (name, start or os.getcwd()),
+                 "a ~/.config copy for a DIFFERENT site is skipped, not used"])
         here = parent
 
 
@@ -150,27 +173,55 @@ def load(name, start=None):
     # -- which is how anyone would type it on a login node -- would resolve to
     # nothing once the job started, three hours later.
     conf = os.path.abspath(find_conf(name, start))
-    script = ". %s >/dev/null 2>&1 || exit 1\n" % _quote(conf)
-    script += "".join('printf "%%s\\n" "%s=${%s-}"\n' % (v, v) for v in EXPORTED)
     try:
-        out = subprocess.check_output(["bash", "-c", script])
+        values = _exported(conf, EXPORTED)
     except (OSError, subprocess.CalledProcessError):
         raise BenchError("cannot source the site profile %s" % conf, EXIT_ERROR,
                          ["it must be sourceable on a login node: only "
                           "assignments and function definitions,",
                           "no `module` calls at the top level"])
 
-    values = {}
-    for line in out.decode().splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            values[key] = value
+    # The last line of defence, and the one that covers $BENCH_SITE_CONF: naming
+    # a profile explicitly is allowed to override where it is found, never which
+    # machine it describes.  Running Derecho's core count and bind list under a
+    # Casper experiment produces results that are wrong in a way no reader could
+    # detect afterwards, so it is refused rather than reported.
+    found = values.get("BENCH_SITE") or ""
+    if found and found != name:
+        raise BenchError(
+            "%s describes %r, but %r was asked for" % (conf, found, name),
+            EXIT_ERROR,
+            ["this profile was found via $BENCH_SITE_CONF" if
+             os.environ.get("BENCH_SITE_CONF") else
+             "this profile was found by searching upwards",
+             "point BENCH_SITE_CONF at sites/%s/site.sh, or unset it and let" % name,
+             "the search find the checkout's own profile"])
+
     site = Site(name, conf, values)
     if not site.root or not os.path.isdir(os.path.join(site.root, "libexec")):
         raise BenchError("%s does not point NCAR_HPC_ROOT at a checkout with "
                          "libexec/" % conf, EXIT_ERROR,
                          ["NCAR_HPC_ROOT=%s" % (site.root or "<unset>")])
     return site
+
+
+def _exported(conf, names):
+    """Source `conf` in a subshell and read back `names`.
+
+    Sourcing rather than parsing, because the profile is bash and the host must
+    read exactly what a job will.  Safe: it only assigns and defines, and
+    bench_site_modules is declared there and never called, so no `module`
+    command runs on the login node.
+    """
+    script = ". %s >/dev/null 2>&1 || exit 1\n" % _quote(conf)
+    script += "".join('printf "%%s\\n" "%s=${%s-}"\n' % (v, v) for v in names)
+    out = subprocess.check_output(["bash", "-c", script])
+    values = {}
+    for line in out.decode().splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            values[key] = value
+    return values
 
 
 def _quote(text):

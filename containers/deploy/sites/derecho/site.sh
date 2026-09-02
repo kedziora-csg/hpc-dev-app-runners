@@ -27,6 +27,12 @@
 #   NCAR_HPC_ROOT = /path/to/demo_github_actions/containers/deploy/ncar-hpc
 #   or /path/to/demo_github_actions/containers/deploy/<site_dir>
 #
+#   That path holds ONE site and does not say which, so a copy is used only for
+#   the site it names -- asking for another one passes it over and finds the
+#   checkout's own profile instead.  So keep the copy for the machine you mostly
+#   work on; the others still work with no setup.  $BENCH_SITE_CONF overrides
+#   both, and is refused if it names a profile for a different machine.
+#
 #   A copy outside the checkout goes stale silently -- sitegen --check only sees
 #   the one in the repository.  Re-copy it after a site description changes.
 #
