@@ -1,0 +1,33 @@
+experiment  /glade/u/home/kedziora/demo_github_actions/containers/deploy/bench/experiments/casper-hpcg.yaml
+site        casper   (/glade/u/home/kedziora/demo_github_actions/containers/deploy/sites/casper/site.sh)
+description /glade/u/home/kedziora/demo_github_actions/containers/deploy/sites/casper.yaml   (profile is current, UNVERIFIED (no job has confirmed it))
+node        36 cores, SMT 2   [/glade/u/home/kedziora/demo_github_actions/containers/deploy/sites/casper/site.sh]
+reader      PyYAML / built-in validator
+sweep       matrix=images,apps,placements,omp_variants  per_job=placements,omp_variants
+expands to  3 job(s), 3 cell(s), 9 run(s) at repeats=3
+
+NOTE  defaults.exclusive is false, so these jobs ask only for the cores
+      their cells use and share each node with whatever else is running
+      on it.  That work lands in the timings as noise that cannot be
+      seen or subtracted.  Useful for checking that the harness runs;
+      not a source of numbers to compare against another run.
+
+  JOB                                NODES  APP       CELLS
+  ---------------------------------- ------ --------- ----------------------------------
+  leap-oneapi-openmpi-hpcg           2      hpcg      pureMPI(8x1)
+  leap-gcc14-openmpi-hpcg            2      hpcg      pureMPI(8x1)
+  leap-nvhpc-openmpi-hpcg            2      hpcg      pureMPI(8x1)
+
+images:
+  ok        leap-gcc14-openmpi-hpcg.sif   (/glade/u/home/kedziora/demo_github_actions/containers/deploy/ncar-hpc/libexec/leap-gcc14-openmpi-hpcg.sif)
+  ok        leap-nvhpc-openmpi-hpcg.sif   (/glade/u/home/kedziora/demo_github_actions/containers/deploy/ncar-hpc/libexec/leap-nvhpc-openmpi-hpcg.sif)
+  ok        leap-oneapi-openmpi-hpcg.sif   (/glade/u/home/kedziora/demo_github_actions/containers/deploy/ncar-hpc/libexec/leap-oneapi-openmpi-hpcg.sif)
+
+app contracts:
+  unchecked hpcg in leap-gcc14-openmpi-hpcg.sif   (no apptainer on this host)
+  unchecked hpcg in leap-nvhpc-openmpi-hpcg.sif   (no apptainer on this host)
+  unchecked hpcg in leap-oneapi-openmpi-hpcg.sif   (no apptainer on this host)
+
+OK -- 3 job(s) would be submitted.
+     3 app contract(s) UNCHECKED: no apptainer here, so nothing
+     looked inside the images.  Unchecked is not the same as ok.

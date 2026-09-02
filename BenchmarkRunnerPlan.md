@@ -1169,6 +1169,14 @@ sweep depends on and this hardware does not have: `cores_per_l3` and
 socket. A cache-aligned and a NUMA-aligned placement are the same arrangement
 there, so `casper-hpcg.yaml` is pure MPI and nothing else.
 
+The HOST side has now been exercised there: `bench/validate casper-hpcg` on a
+Casper login node (2026-09-02) found the checkout's own Casper profile rather
+than a `~/.config` copy made for Derecho, agreed that the generated block was
+current, read 36 cores from it, resolved all three images on disk and expanded
+the matrix. It also ran on a login node with no `jsonschema` installed, which is
+the case `benchlib/schema.py`'s fallback validator exists for. Nothing has run on
+a compute node.
+
 Everything that is not the node geometry is still inferred from
 `PBS/OSU_casper.pbs`, so `verified: false` stands and `bench/validate`,
 `bench/sitegen` and the generated profile all say so. It lists no `mpich`

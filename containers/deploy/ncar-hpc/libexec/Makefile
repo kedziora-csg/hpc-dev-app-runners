@@ -67,17 +67,26 @@ echo:
 	@echo "$(all_images)"
 
 # What is on disk, and what the registry says now.  The answer to "is my .sif
-# current?", which `make` alone cannot tell you once a .sif exists.
+# current?", which `make` alone cannot tell you once a .sif exists: the .sif rule
+# is a timestamp rule, so an image built before the app layer existed looks up to
+# date to make and is not.
+#
+# Covers the base images AND the -hpcg app images, because those are the ones an
+# experiment actually names and they come from a different repository.  Override
+# IMAGES to check another set.
+IMAGES ?= $(sort $(derecho_images) $(derecho_hpcg_images))
+
 check-images:
-	@for i in $(derecho_images); do \
+	@for i in $(IMAGES); do \
 	    t="$${i%.sif}" ; \
+	    case "$$t" in *-hpcg) ref="$(GHCR_APPS_REF)" ;; *) ref="$(GHCR_BASE_REF)" ;; esac ; \
 	    have="$$(apptainer inspect $$i 2>/dev/null \
 	             | sed -n 's/.*image.base.digest[": ]*\([a-z0-9:]*\).*/\1/p' | head -1)" ; \
-	    want="$$(./pin_image_digest.sh --resolve $(GHCR_BASE_REF):$$t-latest 2>/dev/null)" ; \
-	    if   [ ! -f "$$i" ];              then state="no .sif -- run make derecho" ; \
+	    want="$$(./pin_image_digest.sh --resolve $$ref:$$t-latest 2>/dev/null)" ; \
+	    if   [ ! -f "$$i" ];              then state="no .sif -- run make $${t##*-}" ; \
 	    elif [ -z "$$want" ];             then state="cannot reach the registry" ; \
 	    elif [ "$$have" = "$$want" ];     then state="current" ; \
-	    elif [ -z "$$have" ];             then state="STALE? built before digests were stamped" ; \
+	    elif [ -z "$$have" ];             then state="STALE? built before digests were stamped -- rm it and rebuild" ; \
 	    else                                   state="STALE -- has $${have#sha256:} want $${want#sha256:}" ; fi ; \
 	    printf "  %-34s %s\n" "$$i" "$$state" ; \
 	done

@@ -226,6 +226,11 @@ def main():
             print("     %d app contract(s) UNCHECKED: no apptainer here, so nothing"
                   % len(unchecked))
             print("     looked inside the images.  Unchecked is not the same as ok.")
+            # On both NCAR machines apptainer is a module rather than a default,
+            # so a login shell that has not loaded it turns the strongest
+            # pre-submit check -- does this image actually carry the app -- into
+            # a shrug.  It is one command away, so say which one.
+            print("     `module load apptainer` and run this again to check them.")
     else:
         print("%s (exit %d)" % (EXIT_NAMES[pre.code].upper(), pre.code))
     return pre.code
