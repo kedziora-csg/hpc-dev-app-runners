@@ -9,11 +9,42 @@
 #PBS -l walltime=00:05:00
 #PBS -l select=2:ncpus=64:mpiprocs=4:ompthreads=4:ngpus=4
 
->/dev/null 2>&1 \
-           module --force purge && \
-           module load ncarenv/24.12 && \
-           module reset && \
-           module load apptainer gcc cuda
+#-------------------------------------------------------------------------------
+# The site profile.  What used to be four hardcoded `module load` lines is now
+# one call to bench_site_modules, whose body comes from sites/<site>.yaml.
+#
+# That change is not cosmetic.  These three scripts said ncarenv/24.12 while
+# sites/derecho/site.sh said 25.10, and nothing compared them -- which is what
+# a value stated in five places does eventually.
+#
+# The search is the same three places every entry point here looks, first found
+# wins: $BENCH_SITE_CONF, then ~/.config/hpcdev/site.sh, then sites/<site>/site.sh
+# walking up from $PBS_O_WORKDIR.  PBS copies this script into its own spool, so
+# $0 does not point at the checkout and $PBS_O_WORKDIR is the only reliable
+# record of where you were.
+#-------------------------------------------------------------------------------
+_site="${BENCH_SITE:-casper}"
+_site_conf=""
+for _c in "${BENCH_SITE_CONF:-}" "${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/site.sh"; do
+    [ -n "${_c}" ] && [ -f "${_c}" ] && { _site_conf="${_c}"; break; }
+done
+_d="$(cd "${PBS_O_WORKDIR:-$(pwd)}" 2>/dev/null && pwd)"
+while [ -z "${_site_conf}" ] && [ -n "${_d}" ] && [ "${_d}" != "/" ]; do
+    [ -f "${_d}/sites/${_site}/site.sh" ] && _site_conf="${_d}/sites/${_site}/site.sh"
+    _d="$(dirname "${_d}")"
+done
+[ -n "${_site_conf}" ] || {
+    echo "cannot find a site profile for '${_site}'." >&2
+    echo "  copy containers/deploy/sites/${_site}/site.sh to ~/.config/hpcdev/" >&2
+    echo "  and set NCAR_HPC_ROOT in it, or submit from inside the checkout." >&2
+    exit 1
+}
+. "${_site_conf}" || { echo "cannot source ${_site_conf}" >&2; exit 1; }
+bench_site_modules || { echo "site module bootstrap failed" >&2; exit 1; }
+
+# Beyond the site bootstrap: this script builds nothing and drives GPU work, so
+# it wants a host compiler; sites/casper.yaml already brings in CUDA.
+module load gcc 2>/dev/null || true
 module list
 
 ### Interrogate Environment
@@ -22,7 +53,9 @@ nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
 nodes_list=${nodes_list//.hpc.ucar.edu/}
 echo "NODES=\""${nodes_list}"\""
 
-export container_img="${container_img:-$(pwd)/libexec/almalinux9-gcc14-openmpi-cuda.sif}"
+# BENCH_IMAGE_DIR comes from the site profile, so this works from any
+# directory rather than only from inside the checkout.
+export container_img="${container_img:-${BENCH_IMAGE_DIR}/almalinux9-gcc14-openmpi-cuda.sif}"
 
 [ -f "${container_img}" ] || { echo "cannot locate requested image: ${container_img}"; exit 1; }
 

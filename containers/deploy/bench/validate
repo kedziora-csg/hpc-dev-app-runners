@@ -43,12 +43,46 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from benchlib import (BenchError, EXIT_CONFIG, EXIT_ERROR, EXIT_NAMES,
                       EXIT_OK)
 from benchlib import checks, experiment as exp_mod, schema as schema_mod
+from benchlib import sitefile
 from benchlib import yamlish
+
+
+def site_state(site):
+    """One line about the site DESCRIPTION, which is a different file from the
+    profile: sites/<site>.yaml is the machine, sites/<site>/site.sh is this
+    operator's paths plus a block generated from it.
+
+    Worth printing because both ways it can be wrong are silent.  A stale block
+    means the profile is describing the machine as it was; an unverified
+    description means nobody has run a job against it yet, and every value in it
+    is still a hypothesis.
+    """
+    try:
+        sf = sitefile.load(site.name, os.path.dirname(os.path.abspath(site.conf)))
+    except BenchError as exc:
+        return "no sites/%s.yaml found (%s)" % (site.name, exc)
+
+    try:
+        block = sitefile.render(sf)
+        current = sitefile.split(open(site.conf).read())[1]
+    except (BenchError, OSError) as exc:
+        return "%s (could not compare against %s)" % (sf.path, exc)
+
+    if current is None:
+        state = "PROFILE HAS NO GENERATED BLOCK -- run bench/sitegen %s --write" % site.name
+    elif current != block:
+        state = "PROFILE IS STALE -- run bench/sitegen %s --write" % site.name
+    else:
+        state = "profile is current"
+    if not sf.verified:
+        state += ", UNVERIFIED (no job has confirmed it)"
+    return "%s   (%s)" % (sf.path, state)
 
 
 def describe(exp, jobs, pre):
     print("experiment  %s" % exp.path)
     print("site        %s   (%s)" % (exp.site.name, exp.site.conf))
+    print("description %s" % site_state(exp.site))
     print("node        %d cores, SMT %d   [%s]"
           % (exp.site.cores_per_node, exp.site.smt, exp.site.node_source))
     print("reader      %s / %s"

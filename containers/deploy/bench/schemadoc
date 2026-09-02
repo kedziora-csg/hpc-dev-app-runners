@@ -31,7 +31,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMAS = [os.path.join(HERE, "schema", "experiment.json"),
-           os.path.join(HERE, "schema", "app.json")]
+           os.path.join(HERE, "schema", "app.json"),
+           os.path.join(HERE, "schema", "site.json")]
 README = os.path.join(HERE, "schema", "README.md")
 UNDOCUMENTED = os.path.join(HERE, "schema", "undocumented.txt")
 
@@ -176,7 +177,8 @@ def main():
     ap = argparse.ArgumentParser(
         description="Generate the schema reference from bench/schema/*.json.")
     ap.add_argument("schema", nargs="*", default=SCHEMAS,
-                    help="schema files (default: experiment.json, app.json)")
+                    help="schema files (default: experiment.json, app.json, "
+                         "site.json)")
     ap.add_argument("--write", action="store_true",
                     help="write schema/README.md instead of stdout")
     ap.add_argument("--check", action="store_true",

@@ -2,7 +2,9 @@
 
     job.env    flat `KEY='value'` lines.  What bench/runner.sh sources.
     job.json   the same facts structured.  What a reader and bench/collect use.
-    job.pbs    the generated scheduler script, rendered from sites/<site>/job.tmpl
+    job.pbs    the generated scheduler script, rendered from the site's job
+               template -- sites/job.<scheduler>.tmpl, or sites/<site>/job.tmpl
+               where a site needs directives of its own
 
 THE JOB NEVER PARSES YAML
 

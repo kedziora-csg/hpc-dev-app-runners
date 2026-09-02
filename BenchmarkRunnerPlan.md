@@ -1,7 +1,8 @@
 # Plan: An App Benchmark Runner With A Real App Contract
 
 Status: **design accepted 2026-08-19; all four DECISIONs answered (see §12).
-Phases 0–3 implemented (see §10). Phase 4 next.**
+Phases 0–4 implemented (see §10). Phase 5 next. Casper's description is written
+but unverified — no job has run there yet.**
 
 This document proposes the concrete interfaces that `SeparateConcerns.md` and
 `SeparationAnalysis.md` gesture at but do not specify. Those two argued *that* the
@@ -1002,7 +1003,7 @@ Each phase is independently useful and independently revertible.
 | **1** | `emit_provenance`, `run.meta`, `results.jsonl`, `bench/collect`; **stamp the source image digest into SIF `%labels`** (§3); **quiet the job log by relocating the diagnostics into the sibling files, with `BENCH_VERBOSE=1` to echo them** (§7); **`sites/derecho/site.sh` so a job can be submitted from anywhere** (§4) | Results become self-contained and machine-readable. Still HPCG-specific. Without the digest stamp, `image.digest` cannot be filled. The stdout cleanup is the same edit as writing the sibling files, so it costs nothing here and would be duplicated work done separately. |
 | **2** | App contract: `/container/app.d/<app>/{app.yaml,prepare,launch,extract}` installed by `build_<app>.sh`; `libexec/app_contract.sh` drives it; runner stops knowing about `hpcg.dat`; `bench/collect` ranks by the app's declared `primary_fom` and `better:` | The structural change. Every HPCG string is gone from the PBS script. Proven by adding OSU as the second app with no runner edit — deliberately unlike HPCG (no input file, flags via `launch`, results on stdout), and `libexec/test_app_contract.sh` exercises both off-cluster. |
 | **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
-| **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. |
+| **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. **Built — see below.** |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9); carry `app_march_flags` through as a per-app build-arg (§3) | CI now validates the contract on every app build. The microarchitecture override belongs here because this is where an app image is built for a *named machine* rather than for everyone. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
@@ -1059,6 +1060,100 @@ Five things the plan left open were decided while building it:
    guessing. `test_bench.sh` parses every shipped `.yaml` both ways and asserts
    they agree, so the risk of drift is checked rather than hoped about. The same
    pattern covers `jsonschema`, which is likewise optional.
+
+### Phase 4, as built
+
+Landed as `sites/{derecho,casper}.yaml`, `bench/schema/site.json`,
+`bench/benchlib/sitefile.py`, `bench/sitegen`, `libexec/check_arch.sh` and
+`libexec/test_site.sh`. `sites/derecho/job.tmpl` became
+`sites/job.pbspro.tmpl`; `sites/casper/site.sh` and
+`bench/experiments/casper-hpcg.yaml` are new. The three legacy PBS scripts
+now source a site profile instead of carrying their own module bootstrap.
+All five suites run from `libexec/Makefile test`: 157 checks, no cluster.
+
+Six things were decided while building it.
+
+1. **The YAML generates `site.sh`; it is not read at submit time.** §4 left
+   open how the declarative half would reach a job, and the obvious answer —
+   `bench/submit` expands it into `job.env` — reaches only jobs that went
+   through `bench/submit`. The hand-qsub entry point does not, and neither does
+   the factory's `Placement_derecho.pbs`, the three legacy scripts, or the
+   off-cluster suites. The one file all of them already source is
+   `sites/<site>/site.sh`, so `bench/sitegen` writes a marked block into it and
+   the four per-operator paths above the marker are never touched. That split
+   is the real content: those four are properties of the *operator*, everything
+   generated is a property of the *machine*. `bench/sitegen --check` fails
+   `test_bench.sh` while a block is stale, which is the contract `schemadoc`
+   already has with `schema/README.md`.
+
+2. **No defaults were kept behind the moved constants.** The bind list, the
+   module maps and the launcher dialects are gone from
+   `make_apptainer_launcher.sh` rather than left as `${VAR:-<literal>}`
+   fallbacks. A defensive default would mean a typo in a YAML key silently
+   resolves to Derecho's paths — which on Derecho looks like everything
+   working, and is exactly the failure a second site exists to expose. Sourcing
+   the launcher with no profile now fails at source time, naming the missing
+   function. The same applies to `probe_topology.sh`: with no profile its
+   fallback reports one core and no SMT, which refuses every real placement,
+   rather than inventing 128 cores on a machine that has 36.
+
+3. **`bench_site_*` are shell functions, not a table of variables.** A `case`
+   statement generated per lookup reads better than twenty
+   `BENCH_COMPILER_MODULE_<tag>` variables, survives a family name that is not
+   a legal identifier, and gives one place for the `*)` arm that says the site
+   does not support this thing.
+
+4. **The generated assignment is `[ -n "${X:-}" ] || X='value'`.** The obvious
+   `X="${X:-value}"` breaks on a value containing `${NAME}` — which a
+   `lib_dirs` entry naming a module's variable does — because the inner brace
+   closes the outer expansion at the wrong place, and escaping the dollar does
+   not help since it is the *brace* that ends it. Single quotes take no
+   expansion at all, so the stored text is exactly what the YAML said, and the
+   only forbidden character is the single quote itself, which the generator
+   refuses rather than tries to quote.
+
+5. **The overlay recipe stayed as code.** The YAML names *which* recipe an MPI
+   family uses — `cray-mpich-abi`, `host-openmpi`, `none` — and supplies its
+   binds, library path and environment. The body stayed in
+   `make_apptainer_launcher.sh`, because which of Cray's two library
+   directories carries the MPICH ABI, and why `OPAL_PREFIX` must be pinned when
+   the container ships an OpenMPI of its own, are arguments rather than data.
+   This is the line §4 already drew and it held.
+
+6. **`job.tmpl` became per-scheduler, not per-site.** Derecho's was generic PBS
+   Pro, and Casper's would have been a byte-for-byte copy. It is now
+   `sites/job.pbspro.tmpl`, with `sites/<site>/job.tmpl` still winning where a
+   site needs directives of its own. A Slurm site is one new
+   `sites/job.slurm.tmpl` rather than one file per machine.
+
+`BENCH_TARGET_ARCH` and the `report_cpu_features` check from §4 landed here
+rather than in phase 1, where they were never implemented. `arch_check` runs
+once, after the app contract resolves and before any node hours are spent, and
+refuses an over-built binary unless `BENCH_ALLOW_ARCH_MISMATCH=1`. Its limit is
+stated in the file: `report_cpu_features` can see AVX-512 and SVE use, so a
+binary built `-march=x86-64-v3` and run on a v2 host would pass unnoticed. That
+is the narrow guarantee, and it is the class that has actually bitten this
+project.
+
+Two things this phase did *not* do. `libexec/wrap_apptainer.sh` still names
+`/glade` and `/local_scratch` itself: it is an interactive convenience wrapper
+on the factory side that runs `make <image>.sif` and never sources a profile,
+so folding it in is a separate change with its own risk and no phase-4 mandate.
+And the nine-line search for the profile is still repeated in four PBS scripts.
+It cannot be factored out without something to find the factoring — the file
+that would hold it is itself located by that search — so what is shared is the
+policy, in the profile, and what is duplicated is only the walk.
+
+**Casper is written and unverified.** `sites/casper.yaml` was derived from
+`PBS/OSU_casper.pbs`, which is one working example rather than a description of
+a machine, and it carries `verified: false` so `bench/validate`, `bench/sitegen`
+and the generated profile all say so. Its node geometry describes the 64-core
+Milan GPU nodes and Casper is heterogeneous; its `ncarenv` version is assumed to
+match Derecho's; and it lists no `mpich` family at all, because Casper has no
+Cray PALS and no ABI shim, so neither Derecho recipe applies. An absent family
+makes the runner refuse such an image by name, which is the right answer until
+somebody has tried it. The first Casper job is as much a test of that file as of
+the images.
 
 ---
 

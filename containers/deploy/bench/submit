@@ -47,21 +47,42 @@ from benchlib import checks, experiment as exp_mod, jobfile
 
 
 def template_for(site):
-    path = os.path.join(os.path.dirname(site.conf), "job.tmpl")
-    if os.path.isfile(path):
-        return path
-    # A profile copied to ~/.config/hpcdev/ has no job.tmpl beside it; the
-    # template belongs to the checkout, so fall back there rather than making
-    # every operator copy two files.
-    path = os.path.join(os.path.dirname(os.path.dirname(site.bench_root)),
-                        "deploy", "sites", site.name, "job.tmpl")
-    fallback = os.path.join(os.path.dirname(site.bench_root), "sites",
-                            site.name, "job.tmpl")
-    for candidate in (path, fallback):
+    """The job script skeleton, most specific first.
+
+        sites/<site>/job.tmpl        this site needs directives of its own
+        sites/job.<scheduler>.tmpl   the default for every site on that scheduler
+
+    Most sites need no template of their own.  A PBS Pro directive block is the
+    same on Derecho as it is on Casper -- the queue, the node count and the
+    walltime are substituted, and everything else a site needs it already gets
+    from its profile.  So the shared one is the normal case and a per-site file
+    is the exception, which is the opposite of how this started.  A Slurm site
+    is then one new sites/job.slurm.tmpl rather than one per machine.
+
+    A profile copied to ~/.config/hpcdev/ has no template beside it, so the
+    checkout is searched too: the template belongs to the harness, and making
+    every operator copy two files would be a second thing to keep in step.
+    """
+    roots = [os.path.dirname(site.conf)]
+    if site.bench_root:
+        roots.append(os.path.join(os.path.dirname(site.bench_root), "sites",
+                                  site.name))
+    candidates = [os.path.join(d, "job.tmpl") for d in roots]
+
+    if site.bench_root:
+        shared = os.path.join(os.path.dirname(site.bench_root), "sites")
+        candidates.append(os.path.join(shared, "job.%s.tmpl" % site.scheduler))
+    candidates.append(os.path.join(os.path.dirname(site.conf), os.pardir,
+                                   "job.%s.tmpl" % site.scheduler))
+
+    for candidate in candidates:
         if os.path.isfile(candidate):
             return candidate
     raise BenchError("no job template for site %r" % site.name, EXIT_ERROR,
-                     ["expected sites/%s/job.tmpl beside %s" % (site.name, site.conf)])
+                     ["looked for, in order:"] +
+                     ["    " + os.path.normpath(c) for c in candidates] +
+                     ["scheduler is %r, from the generated block of %s"
+                      % (site.scheduler or "<unset>", site.conf)])
 
 
 def main():

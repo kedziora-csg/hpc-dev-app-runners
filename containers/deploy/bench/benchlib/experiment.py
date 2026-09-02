@@ -115,6 +115,27 @@ class Experiment(object):
         self.matrix = list(data["sweep"]["matrix"])
         self.per_job = list(data["sweep"].get("per_job") or [])
 
+        # The queue's own limit, from the site description.  Caught here rather
+        # than left to the scheduler because qsub rejects the whole submission:
+        # a matrix of thirty jobs is refused on the first one, having already
+        # written thirty results directories.
+        limit = site.walltime_max
+        if limit and _seconds(self.defaults["walltime"]) > _seconds(limit):
+            raise BenchError(
+                "walltime %s is longer than %s allows (%s)"
+                % (self.defaults["walltime"], site.name, limit), EXIT_CONFIG,
+                ["scheduler.walltime_max in sites/%s.yaml" % site.name,
+                 "raise it there if the queue's limit has changed, or ask for less"])
+
+
+def _seconds(hms):
+    """HH:MM:SS to seconds.  The schema has already checked the shape."""
+    try:
+        h, m, s = (int(part) for part in str(hms).split(":"))
+    except ValueError:
+        return 0
+    return h * 3600 + m * 60 + s
+
 
 def resolve_path(name):
     """An experiment name, a path, or a path without its extension."""

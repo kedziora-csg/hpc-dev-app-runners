@@ -15,7 +15,7 @@ This repository employs a **hybrid building pattern**:
 All NCAR-specific deployment files are located under [containers/deploy/ncar-hpc/](containers/deploy/ncar-hpc/), with two siblings that are deliberately **not** NCAR-specific:
 
 * [containers/deploy/bench/](../bench/) — the benchmark runner. `submit` and `validate` expand a declarative experiment on the login node; `runner.sh` is the in-job sweep, with no site and no application in it; `collect` turns the resulting `results.jsonl` files into a table or a runnable configuration. Nothing here names Derecho.
-* [containers/deploy/sites/](../sites/) — what one machine needs: `derecho/site.sh` (paths and the module bootstrap) and `derecho/job.tmpl` (the scheduler-directive skeleton `submit` generates from). Adding a second machine is a second directory here.
+* [containers/deploy/sites/](../sites/) — what one machine is. `derecho.yaml` and `casper.yaml` describe the machines: scheduler dialect, module bootstrap, node geometry, container binds and the host-MPI recipe. `derecho/site.sh` is the file every job actually sources — four hand-edited paths that belong to you, plus a block generated from the YAML by `bench/sitegen`, so nothing on a compute node parses YAML and no value is written down twice. `job.pbspro.tmpl` is the scheduler-directive skeleton `submit` generates from, shared by every PBS site. Adding a machine is one more YAML and one more `site.sh`.
 
 * **Template-Driven Builds**: 
   The deployment uses a Singularity definition template, [containers/deploy/ncar-hpc/libexec/Deffile](containers/deploy/ncar-hpc/libexec/Deffile).
@@ -56,7 +56,7 @@ cd demo_github_actions/containers/deploy/ncar-hpc
 Load the Apptainer module:
 ```bash
 module purge
-module load ncarenv/24.12  # Or equivalent current environment
+module load ncarenv/25.10  # Or equivalent current environment
 module load apptainer gcc cuda
 ```
 

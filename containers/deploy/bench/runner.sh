@@ -121,12 +121,13 @@ mkdir -p "${RESULTS_DIR}" \
 #
 #   make_apptainer_launcher.sh  the host-MPI launcher and the mpiexec dialects
 #   check_placement.sh          placement_summary / _verdict / _rules_fired
+#   check_arch.sh               arch_check: the app binary against this CPU
 #   results.sh                  the results.jsonl record; pulls in provenance.sh
 #                               for emit_provenance, capture_run_context, the
 #                               sub-second clock and the BENCH_VERBOSE helpers
 #   app_contract.sh             app.yaml + the prepare/launch/extract hooks
 #-------------------------------------------------------------------------------
-for lib in make_apptainer_launcher.sh check_placement.sh results.sh app_contract.sh; do
+for lib in make_apptainer_launcher.sh check_placement.sh check_arch.sh results.sh app_contract.sh; do
     . "${NCAR_HPC_ROOT}/libexec/${lib}" \
         || { echo "cannot source ${NCAR_HPC_ROOT}/libexec/${lib}" >&2; exit 1; }
 done
@@ -255,6 +256,13 @@ if [ -n "${APP}" ]; then
     ${launcher} ldd "${APP_BINARY}" > "ldd_$(basename ${APP_BINARY})_host.txt" 2>&1 \
         || echo "note: cannot ldd ${APP_BINARY} (static, or not present)"
     vshow "ldd_$(basename ${APP_BINARY})_host.txt" "ldd ${APP_BINARY}"
+
+    # Does this binary fit this CPU?  Once, here, before any node hours are
+    # spent: an over-built binary otherwise reaches the first cell and dies with
+    # SIGILL on every rank, which looks like an operating-system fault rather
+    # than a build that targeted the wrong machine.  See libexec/check_arch.sh
+    # for what this can and cannot see.
+    arch_check "${launcher}" "${APP_BINARY}" "${RESULTS_DIR}/cpu_features.txt" || exit 1
 fi
 
 # Job-level provenance.  Per-cell facts go into each placement_<cell>.out header.
@@ -272,6 +280,8 @@ emit_provenance run.meta \
     app_path     "${APP:-none}" \
     app_args     "${APP_ARGS:-none}" \
     app_scale    "${BENCH_SCALE}" \
+    target_arch  "${BENCH_TARGET_ARCH:-unset}" \
+    arch_verdict "${ARCH_VERDICT:-unchecked}" \
     repeats      "${BENCH_REPEATS}" \
     launcher     "${launcher}" \
     report_exe   "${REPORT_EXE}"

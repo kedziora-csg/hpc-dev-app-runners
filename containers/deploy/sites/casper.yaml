@@ -1,0 +1,104 @@
+# Casper -- the second site, and the reason the site contract exists.
+#
+# UNVERIFIED.  Everything here is inferred from PBS/OSU_casper.pbs, which is one
+# working example rather than a description of the machine.  Nothing in this
+# file has been confirmed by a job that actually ran through bench/, so
+# `verified: false` below makes every tool say so out loud rather than let an
+# inference pass for a measurement.
+#
+# WHAT IS KNOWN, BECAUSE OSU_casper.pbs DID IT
+#
+#   - the queue is `casper`
+#   - the host MPI is Open MPI, reached through ${NCAR_ROOT_OPENMPI}
+#   - /proc must be bound, and UCX_POSIX_USE_PROC_LINK=n set, or the UCX POSIX
+#     transport tries to read other ranks' /proc links and is refused by the
+#     container namespace
+#   - GPFS (/usr/lpp/mmfs) is bound and its lib/ is on the library path, for the
+#     same reason as on Derecho: NCAR's Open MPI carries ROMIO's GPFS backend
+#     and libmpi has a hard NEEDED on libgpfs.so
+#   - there are GPUs, and the launcher runs apptainer with --nv
+#
+# WHAT IS GUESSED, AND WHAT WOULD SETTLE IT
+#
+#   node:      taken from `ncpus=64` in that script, read as a 2-socket 64-core
+#              Milan GPU node.  Casper is heterogeneous -- it also has 36-core
+#              Skylake nodes -- so "the Casper node" is not one thing and this
+#              file currently describes one kind.
+#              Settle it with: lscpu on the node type you intend to use.  The
+#              job probes it anyway and topology.json records the truth; these
+#              numbers only decide which geometries bench/validate accepts
+#              before submitting.
+#   ncarenv:   set to 25.10 to match Derecho.  OSU_casper.pbs says 24.12, which
+#              is what Derecho's scripts said before this change too, so it is
+#              more likely to be stale than to be a Casper-specific pin.
+#              Settle it with: module avail ncarenv, on Casper.
+#   mpich:     deliberately ABSENT rather than guessed.  Casper has no Cray PALS
+#              and no Cray MPICH ABI shim, so neither Derecho recipe applies and
+#              an mpich container would need something not written yet.  An
+#              absent family makes the runner refuse such an image with a clear
+#              message, which is the right answer until somebody has tried it.
+schema: 1
+site: casper
+description: "NCAR Casper: heterogeneous analysis and GPU cluster; this file describes its 64-core Milan GPU nodes"
+verified: false
+
+scheduler:
+  kind: pbspro
+  submit: qsub
+  queue: casper
+  walltime_max: "24:00:00"
+
+modules:
+  bootstrap:
+    - module --force purge
+    - module load ncarenv/25.10
+    - module reset
+    - module load apptainer
+    - module load cuda
+
+  compiler_map:
+    oneapi: intel
+    gcc14: gcc/14.3.0
+    gcc: gcc
+    nvhpc: nvhpc
+
+  mpi_map:
+    openmpi: openmpi
+
+node:
+  cores: 64
+  smt: 2
+  sockets: 2
+  smt_stride: 64
+  cores_per_l3: 8
+  cores_per_numa: 16
+  target_arch: x86-64-v3
+  topology: probe
+
+container:
+  runtime: apptainer
+  # /proc is bound here and not on Derecho: UCX's POSIX transport reads other
+  # ranks' /proc links, which the container namespace otherwise refuses.
+  binds: [/glade, /local_scratch, /proc]
+  binds_if_present: [/usr/lpp/mmfs, /run, /var/run]
+  bind_map:
+    /usr/lib64: /host_lib64
+  lib_dirs:
+    - ${NCAR_ROOT_OPENMPI}/lib
+    - /usr/lpp/mmfs/lib
+    - /usr/lib64
+
+mpi:
+  openmpi:
+    launcher: openmpi
+    overlay: host-openmpi
+    env:
+      UCX_POSIX_USE_PROC_LINK: n
+    notes: |
+      UNVERIFIED through bench/.  OSU_casper.pbs ran an Open MPI container this
+      way and worked, but it hand-wrote its launcher rather than going through
+      make_apptainer_launcher, so the host-openmpi recipe has never been
+      exercised here.  The first thing to check in a job log is the '# mpi'
+      header line of report_placement: it names the library that actually
+      initialised, and a container OpenMPI that failed to be displaced shows up
+      there rather than as an error.

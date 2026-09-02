@@ -45,9 +45,18 @@ want () { # want <description> <expected> <actual>
     if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected: $2" "got:      $3"; fi
 }
 
-# Every check runs against THIS checkout's site profile, never an operator's
+# Every check runs against THIS checkout's site profiles, never an operator's
 # ~/.config copy: the numbers below depend on which images the Makefile lists.
+# Default to Derecho, which is what the hand-written cases below assume, and
+# override per file where an experiment names a different machine -- a second
+# site is exactly the thing that made a single pinned profile wrong.
 export BENCH_SITE_CONF="${HERE}/../sites/derecho/site.sh"
+
+conf_for () { # conf_for <experiment.yaml> -- the profile that file's site: names
+    local site
+    site="$(sed -n 's/^site:[[:space:]]*//p' "$1" | head -1)"
+    echo "${HERE}/../sites/${site:-derecho}/site.sh"
+}
 
 # A directory of empty files standing in for the .sif set, so the image check
 # has something to find.  An empty file is enough: nothing here opens one.
@@ -62,7 +71,7 @@ echo
 
 #-- the two YAML readers agree, file by file -----------------------------------
 echo "yaml readers"
-for f in experiments/*.yaml ../../../scripts/app.d/*/app.yaml; do
+for f in experiments/*.yaml ../sites/*.yaml ../../../scripts/app.d/*/app.yaml; do
     python3 - "$f" <<'PY' && ok "$(basename "$(dirname "$f")")/$(basename "$f"): PyYAML == built-in reader" \
                           || bad "$(basename "$(dirname "$f")")/$(basename "$f"): the two readers disagree"
 import sys
@@ -81,11 +90,12 @@ done
 echo
 echo "shipped files"
 for f in experiments/*.yaml; do
-    ./validate "$f" >/dev/null 2>&1
+    BENCH_SITE_CONF="$(conf_for "$f")" ./validate "$f" >/dev/null 2>&1
     rc=$?
     # 5 is image-missing, which depends on what is on this disk, not on the file.
     if [ "${rc}" -eq 0 ] || [ "${rc}" -eq 5 ]; then ok "$(basename "$f") validates"
-    else bad "$(basename "$f") does not validate (exit ${rc})" "$(./validate "$f" 2>&1 | tail -5)"; fi
+    else bad "$(basename "$f") does not validate (exit ${rc})" \
+             "$(BENCH_SITE_CONF="$(conf_for "$f")" ./validate "$f" 2>&1 | tail -5)"; fi
 done
 ./validate --app ../../../scripts/app.d/*/app.yaml >/dev/null 2>&1 \
     && ok "every app.yaml satisfies bench/schema/app.json" \
@@ -102,6 +112,77 @@ echo "schema reference"
     && ok "every schema key is described, or listed in schema/undocumented.txt" \
     || bad "schema/undocumented.txt no longer matches the schemas" \
            "$(./schemadoc --missing 2>&1)"
+
+#-- the site description, and the profile generated from it --------------------
+# sites/<site>.yaml is the single statement of what a machine is; the generated
+# block of sites/<site>/site.sh is what every job actually sources.  Nothing
+# else compares them, so a stale profile would go on describing the machine as
+# it was and no job would notice.
+echo
+echo "site descriptions"
+./sitegen --check >/dev/null 2>&1 \
+    && ok "every sites/<site>/site.sh matches its .yaml" \
+    || bad "a site profile is stale -- run ./sitegen --write" "$(./sitegen --check 2>&1)"
+
+# The generated block is spliced between markers, so regenerating must be a
+# no-op and the hand-edited settings above it must survive untouched.  If they
+# did not, a regeneration would silently discard an operator's paths.
+before="$(sed '/BEGIN GENERATED/,$d' ../sites/derecho/site.sh)"
+./sitegen derecho --write >/dev/null 2>&1
+after="$(sed '/BEGIN GENERATED/,$d' ../sites/derecho/site.sh)"
+want "regenerating leaves the hand-edited half alone" "${before}" "${after}"
+./sitegen --check >/dev/null 2>&1
+want "regenerating is idempotent" 0 "$?"
+
+# Rules the schema cannot state, plus the generator's own refusal to quote a
+# value it cannot safely write.  Each case is a file that is individually
+# well-formed and still describes a machine no job could run on.
+site_case () { # site_case <description> <ok|reject> <yaml>
+    printf '%s\n' "$3" > "${TMP}/site.yaml"
+    out="$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import BenchError, sitefile
+try:
+    sitefile.render(sitefile.load(sys.argv[1]))
+    print("ok")
+except BenchError:
+    print("reject")' "${TMP}/site.yaml" 2>&1)"
+    want "$1" "$2" "${out}"
+}
+
+site_base='schema: 1
+site: testville
+scheduler: {kind: pbspro, submit: qsub, queue: main}
+modules:
+  bootstrap: [module load apptainer]
+  mpi_map: {openmpi: openmpi}
+node: {cores: 64, smt: 1}
+container: {runtime: apptainer, binds: [/glade]}
+mpi:
+  openmpi: {launcher: openmpi, overlay: host-openmpi}'
+
+site_case "a good site description is accepted" ok "${site_base}"
+site_case "an unknown key is config-invalid" reject "${site_base}
+bogus: 1"
+site_case "a scheduler nobody implemented is refused" reject \
+    "$(printf '%s\n' "${site_base}" | sed 's/kind: pbspro/kind: lsf/')"
+site_case "an mpi family with no module mapping is refused" reject \
+    "$(printf '%s\n' "${site_base}" | sed 's/mpi_map: {openmpi: openmpi}/mpi_map: {}/')"
+site_case "a module mapping for a family mpi: omits is refused" reject \
+    "$(printf '%s\n' "${site_base}" | sed 's/mpi_map: {openmpi: openmpi}/mpi_map: {openmpi: openmpi, mpich: ""}/')"
+site_case "the Cray shim under the wrong launcher is refused" reject \
+    "$(printf '%s\n' "${site_base}" | sed 's/overlay: host-openmpi/overlay: cray-mpich-abi/')"
+site_case "cores_per_l3 larger than the node is refused" reject \
+    "$(printf '%s\n' "${site_base}" | sed 's/{cores: 64, smt: 1}/{cores: 64, smt: 1, cores_per_l3: 128}/')"
+site_case "an unknown MPI family is refused" reject \
+    "$(printf '%s\n' "${site_base}" | sed 's/  openmpi: {launcher/  intelmpi: {launcher/;s/mpi_map: {openmpi: openmpi}/mpi_map: {intelmpi: impi}/')"
+
+# The generator writes into a shell file every job sources, so a value it cannot
+# spell safely is refused rather than quoted.  Quoting arbitrary text correctly
+# is the kind of thing that works until the day it does not.
+site_case "a value carrying a quote is refused, not quoted" reject \
+    "${site_base%$'\n'*}
+  openmpi: {launcher: openmpi, overlay: host-openmpi, env: {X: \"a'\\\"b\"}}"
 
 #-- exit codes are the interface -----------------------------------------------
 echo
@@ -160,9 +241,11 @@ agree "a bad walltime: both refuse (3)"      3 "${base}
 defaults: {walltime: half an hour}"
 
 for f in experiments/*.yaml; do
-    ./validate "$f" >/dev/null 2>&1; v=$?
+    c="$(conf_for "$f")"
+    BENCH_SITE_CONF="${c}" ./validate "$f" >/dev/null 2>&1; v=$?
     rm -rf "${TMP}/gate.d"
-    ./submit "$f" --dry-run --results-dir "${TMP}/gate.d" >/dev/null 2>&1; s=$?
+    BENCH_SITE_CONF="${c}" ./submit "$f" --dry-run --results-dir "${TMP}/gate.d" \
+        >/dev/null 2>&1; s=$?
     want "$(basename "$f"): validate and submit agree" "${v}" "${s}"
 done
 rm -rf "${TMP}/gate.d"
@@ -219,6 +302,14 @@ grep -q '@[A-Z_]*@' "${d}/job.pbs" \
 grep -q '^#PBS -l select=2:ncpus=128' "${d}/job.pbs" \
     && ok "job.pbs carries the real select= directive, not a variable" \
     || bad "job.pbs select= directive is wrong" "$(grep '^#PBS -l select' "${d}/job.pbs")"
+
+# The job names its profile outright, and PBS runs it from its own spool
+# directory -- so a relative path, which is how anyone would type
+# $BENCH_SITE_CONF on a login node, would resolve to nothing once the job
+# started rather than when it was submitted.
+grep -q '^\. "/' "${d}/job.pbs" \
+    && ok "job.pbs names the site profile by absolute path" \
+    || bad "job.pbs names the site profile relatively" "$(grep '^\. ' "${d}/job.pbs")"
 
 # The job.env <-> runner.sh contract: every name runner.sh reads is a name
 # submit writes.  This is the seam the whole "the job never parses YAML" design

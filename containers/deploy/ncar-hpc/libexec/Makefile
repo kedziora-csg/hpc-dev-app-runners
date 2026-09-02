@@ -44,6 +44,25 @@ echo-derecho:
 echo-derecho-hpcg:
 	@echo "$(derecho_hpcg_images)"
 
+# Casper: the openmpi half of the same set, and nothing else.  Casper has no
+# Cray PALS and no Cray MPICH ABI shim, so an mpich container has no way to be
+# given the host's MPI there -- sites/casper.yaml lists no mpich family for the
+# same reason.  Building the mpich images for it would produce .sif files no
+# Casper job could use.
+casper_images := leap-oneapi-openmpi.sif \
+                 leap-gcc14-openmpi.sif \
+                 leap-nvhpc-openmpi.sif
+casper_hpcg_images := $(patsubst %.sif,%-hpcg.sif,$(casper_images))
+
+casper: $(casper_images)
+casper-hpcg: $(casper_hpcg_images)
+
+echo-casper:
+	@echo "$(casper_images)"
+
+echo-casper-hpcg:
+	@echo "$(casper_hpcg_images)"
+
 echo:
 	@echo "$(all_images)"
 
@@ -72,6 +91,8 @@ test:
 	@./self_test.sh
 	@echo
 	@./test_results.sh
+	@echo
+	@./test_site.sh
 	@echo
 	@./test_app_contract.sh
 	@echo

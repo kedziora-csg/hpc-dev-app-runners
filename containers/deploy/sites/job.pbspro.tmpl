@@ -13,6 +13,12 @@
 # Do not edit: bench/submit overwrites this file on the next submission.  Edit
 # the experiment, or copy this script somewhere else and qsub the copy.
 #
+# The skeleton is sites/job.pbspro.tmpl -- shared by every PBS Pro site, because
+# the directive block is the same on all of them and the parts that are not
+# (queue, node count, walltime) are substituted.  A site that genuinely needs
+# different directives puts its own sites/<site>/job.tmpl beside its profile,
+# and that wins.
+#
 # It is kept beside the results on purpose.  A directive cannot be
 # parameterised inside a PBS file -- `#PBS -l select=` is a comment to the shell
 # and a directive to PBS, with nothing expanding a variable in between -- so the

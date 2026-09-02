@@ -1,0 +1,143 @@
+# Derecho, described once.
+#
+# Everything here used to be written into the shell instead: the bind list and
+# the two module maps in libexec/make_apptainer_launcher.sh, the node geometry in
+# both libexec/probe_topology.sh and bench/benchlib/site.py, and the module
+# bootstrap in five separate PBS scripts -- three of which had drifted to a
+# different ncarenv version and nobody noticed, because nothing compared them.
+#
+#     ../bench/sitegen derecho --write     regenerate derecho/site.sh from this
+#     ../bench/sitegen --check             fail if that file is stale
+#
+# Nothing on a compute node reads this file.  sitegen turns it into the generated
+# block of sites/derecho/site.sh, which is the one file every job sources -- the
+# hand-qsub path, the generated jobs, the factory's Placement_derecho.pbs and the
+# off-cluster test suites alike.  So there is one authority and no YAML parser
+# anywhere near a node.
+#
+# What is NOT here is the four per-operator paths -- where the checkout is, where
+# the images are, where results go, which scratch.  Those are a property of the
+# person, not of the machine, and they stay hand-edited at the top of site.sh.
+schema: 1
+site: derecho
+description: "NCAR Derecho: 2 x AMD EPYC 7763 (Milan) per CPU node, SMT on, HPE Cray EX with Slingshot 11"
+verified: true
+
+scheduler:
+  kind: pbspro
+  submit: qsub
+  queue: main
+  walltime_max: "12:00:00"
+
+modules:
+  # Order is the content.  `module reset` after loading ncarenv is not
+  # redundant: ncarenv changes MODULEPATH, and reset then applies the site
+  # defaults visible under the NEW path.
+  bootstrap:
+    - module --force purge
+    - module load ncarenv/25.10
+    - module reset
+    - module load apptainer
+
+  # Container compiler tag to host module.  oneapi maps to `intel` because the
+  # site-default intel module IS the oneAPI toolchain; gcc14 is pinned to
+  # 14.3.0 to match the container's gcc exactly rather than whatever the bare
+  # `gcc` module currently defaults to.
+  compiler_map:
+    oneapi: intel
+    gcc14: gcc/14.3.0
+    gcc: gcc
+    nvhpc: nvhpc
+    aocc: aocc
+    clang: clang
+
+  # Empty means there is nothing to load: Cray MPICH ships in the default
+  # ncarenv.  That is not the same as the family being unsupported, which is
+  # what an absent entry under `mpi:` below means.
+  mpi_map:
+    openmpi: openmpi
+    mpich: ""
+    mpich3: ""
+
+  # An openmpi module left loaded by a previous image puts its own mpiexec and
+  # libraries ahead of Cray PALS and the MPICH ABI shim, which is a silent
+  # wrong answer rather than a failure.
+  unload_when:
+    mpich: [openmpi]
+    mpich3: [openmpi]
+
+# Fallbacks, not measurements.  The job probes lscpu on the compute node and
+# topology.json carries that answer; these are only what can be known before
+# there is a node to ask, which is when an illegal ranks x threads is still
+# cheap to reject.
+node:
+  cores: 128
+  smt: 2
+  sockets: 2
+  smt_stride: 128         # block layout: sibling of CPU c is c + 128
+  cores_per_l3: 8         # one Milan CCD, 32 MB
+  cores_per_numa: 16      # NPS4: 8 NUMA domains across 128 cores
+  target_arch: x86-64-v3  # Zen 3: AVX2, no AVX-512
+  topology: probe
+
+container:
+  runtime: apptainer
+  # Unconditional: every Derecho compute node has all of these.
+  binds: [/glade, /local_scratch, /run, /var/run, /opt/cray, /etc/cray]
+  # GPFS is needed by any host MPI whose ROMIO carries the GPFS ADIO backend,
+  # which NCAR's OpenMPI does.  Conditional because apptainer treats a missing
+  # bind SOURCE as fatal: binding it unconditionally would turn "this node has
+  # no GPFS" into "the job will not start".
+  binds_if_present: [/usr/lpp/mmfs]
+  # Not /usr/lib64 onto itself: that would replace the container's entire
+  # system library tree.  It goes to a name of its own and is named again at
+  # the end of lib_dirs.
+  bind_map:
+    /usr/lib64: /host_lib64
+  # In this order, after whatever the MPI overlay prepends.  A * entry is a
+  # glob and takes its newest match, because these directories carry a version
+  # number that changes under us at every system update.
+  # ${NCAR_ROOT_LIBFABRIC} is what the module says; the glob under it is the
+  # same tree found the hard way, kept because a standalone call that never
+  # loaded the module still has to resolve libfabric.
+  lib_dirs:
+    - /opt/cray/pe/lib64
+    - /opt/cray/pals/*/lib
+    - ${NCAR_ROOT_LIBFABRIC}/lib64
+    - /opt/cray/libfabric/*/lib64
+    - /usr/lpp/mmfs/lib
+    - /usr/lib64
+
+mpi:
+  mpich:
+    launcher: pals
+    overlay: cray-mpich-abi
+    env:
+      MPICH_SMP_SINGLE_COPY_MODE: NONE
+      MPICH_VERSION_DISPLAY: 1
+    notes: |
+      Verified.  MPICH_SMP_SINGLE_COPY_MODE=NONE because XPMEM/CMA single-copy
+      needs ptrace visibility across ranks that the container namespace does
+      not have.  MPICH_VERSION_DISPLAY=1 so the job log states which MPI
+      actually initialised, which is the fastest way to catch the shim not
+      taking effect.
+
+  mpich3:
+    launcher: pals
+    overlay: cray-mpich-abi
+    env:
+      MPICH_SMP_SINGLE_COPY_MODE: NONE
+      MPICH_VERSION_DISPLAY: 1
+
+  openmpi:
+    launcher: openmpi
+    overlay: host-openmpi
+    env:
+      UCX_POSIX_USE_PROC_LINK: n
+      OMPI_MCA_btl_vader_single_copy_mechanism: none
+    notes: |
+      OpenMPI is not part of the MPICH ABI Compatibility Initiative, so there
+      is no cross-implementation shim: the container's OpenMPI must version
+      match the host's, and it bootstraps over PMIx and must agree with what
+      PALS serves.  Check the '# mpi' header line of report_placement to see
+      which library actually loaded.

@@ -1,0 +1,49 @@
+# The same sweep as derecho-hpcg, on the second machine.
+#
+# This file is the point of the site contract, and it is worth noticing how
+# little of it is new.  Compared to derecho-hpcg.yaml only four things differ:
+# the site name, the image set, the node count and the three decompositions --
+# and the last is not a choice, it follows from Casper having 64 cores per node
+# where Derecho has 128.  Everything a machine differs by -- scheduler dialect,
+# module bootstrap, bind list, which host MPI displaces the container's -- is in
+# sites/casper.yaml and appears here not at all.
+#
+#     ../validate casper-hpcg              expand it, check it, submit nothing
+#     ../submit   casper-hpcg --account <PROJECT>
+#
+# UNVERIFIED, like the site it names.  sites/casper.yaml was written from one
+# working PBS script rather than from a job that ran, so the first run of this
+# is as much a test of the site description as of the images.
+schema: 1
+site: casper
+
+defaults:
+  nodes: 2
+  walltime: "00:30:00"
+  repeats: 3
+  scale: node
+  target_seconds: 60
+
+# The openmpi half of the Derecho set.  Casper has no Cray MPICH ABI shim, so
+# there is no way to give an mpich container the host's MPI there -- which is
+# why sites/casper.yaml lists no mpich family, and why bench/validate will
+# refuse an mpich image for this site rather than build one that cannot run.
+images:
+  from_make: casper-hpcg
+
+apps:
+  - name: hpcg
+
+# ranks_per_node x threads == 64, the same three ideas as on Derecho sized to
+# this node: one core per rank, one L3 (CCD) per rank, one NUMA domain per rank.
+placements:
+  - {name: pureMPI, ranks_per_node: 64, threads: 1}
+  - {name: ccd,     ranks_per_node: 8,  threads: 8}
+  - {name: numa,    ranks_per_node: 4,  threads: 16}
+
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
+
+sweep:
+  matrix:  [images, apps, placements, omp_variants]
+  per_job: [placements, omp_variants]

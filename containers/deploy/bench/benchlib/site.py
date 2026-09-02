@@ -14,10 +14,15 @@ That is a deliberate choice over re-declaring the same paths in Python:
 Sourcing is safe: site.sh only assigns and defines.  `bench_site_modules` is
 declared there, never called, so no `module` command runs on the host.
 
-The declarative half of the site contract -- scheduler dialect, queue, bind
-list, topology fallbacks -- is sites/<site>.yaml at phase 4 of the plan, and is
-deliberately still unwritten.  Until it exists, the few things the HOST needs to
-know before a job runs are read from site.sh, which already carries the rest.
+WHERE THE VALUES COME FROM NOW
+
+Everything below the hand-edited paths is generated into site.sh from
+sites/<site>.yaml by bench/sitegen -- see benchlib/sitefile.py for why that
+direction and not the other.  So this module has no constants of its own: it
+reads what the profile exports, and a profile that exports nothing is an error
+rather than an occasion to assume Derecho.  The host used to keep its own copy
+of the node geometry, which meant three files stating 128 cores and nothing
+comparing them.
 """
 
 import os
@@ -25,21 +30,14 @@ import subprocess
 
 from . import BenchError, EXIT_ERROR
 
-# Read back after sourcing.  Every one is exported by site.sh itself, so this
-# list adding a name is not enough -- the profile has to export it.
+# Read back after sourcing.  Every one is exported by site.sh itself, so adding
+# a name to this list is not enough -- the profile has to export it, which for
+# everything except the four paths means adding it to sitefile.render.
 EXPORTED = ("BENCH_SITE", "NCAR_HPC_ROOT", "BENCH_IMAGE_DIR",
             "BENCH_RESULTS_ROOT", "BENCH_SCRATCH", "BENCH_ROOT",
-            "BENCH_QUEUE", "BENCH_CORES_PER_NODE", "BENCH_SMT")
-
-# What the host assumes when the profile does not say.  Deliberately the same
-# numbers probe_topology.sh falls back to, and labelled the same way: a fallback
-# must never be mistaken for a measurement.  The job re-derives all of this from
-# lscpu on the compute node and its answer is the one that ends up in
-# topology.json; this is only what can be known BEFORE the job runs, which is
-# when a bad geometry is still cheap to reject.
-FALLBACK_CORES_PER_NODE = 128
-FALLBACK_SMT = 2
-FALLBACK_SOURCE = "fallback:derecho-milan"
+            "BENCH_SCHEDULER", "BENCH_SUBMIT", "BENCH_QUEUE",
+            "BENCH_WALLTIME_MAX", "BENCH_CORES_PER_NODE", "BENCH_SMT",
+            "BENCH_TARGET_ARCH", "BENCH_TOPOLOGY_MODE")
 
 
 class Site(object):
@@ -51,15 +49,33 @@ class Site(object):
         self.results_root = values.get("BENCH_RESULTS_ROOT", "")
         self.scratch = values.get("BENCH_SCRATCH", "")
         self.bench_root = values.get("BENCH_ROOT", "")
-        self.queue = values.get("BENCH_QUEUE") or "main"
+        self.scheduler = values.get("BENCH_SCHEDULER") or ""
+        self.submit_cmd = values.get("BENCH_SUBMIT") or ""
+        self.queue = values.get("BENCH_QUEUE") or ""
+        self.walltime_max = values.get("BENCH_WALLTIME_MAX") or ""
+        self.target_arch = values.get("BENCH_TARGET_ARCH") or ""
+        self.topology_mode = values.get("BENCH_TOPOLOGY_MODE") or "probe"
 
         self.cores_per_node = _int(values.get("BENCH_CORES_PER_NODE"))
         self.smt = _int(values.get("BENCH_SMT"))
+        # The profile is where these live now, so an unset one means the block
+        # was never generated -- almost always a ~/.config/hpcdev/site.sh copied
+        # before sitegen existed.  Assuming Derecho here is exactly the silent
+        # wrong answer the generated block was introduced to remove: it would
+        # accept a 128-core geometry on a machine that has 36.
+        if not self.cores_per_node or not self.smt:
+            raise BenchError(
+                "%s does not describe the node" % conf, EXIT_ERROR,
+                ["BENCH_CORES_PER_NODE=%s BENCH_SMT=%s"
+                 % (values.get("BENCH_CORES_PER_NODE") or "<unset>",
+                    values.get("BENCH_SMT") or "<unset>"),
+                 "these come from the generated block of site.sh, written from",
+                 "sites/%s.yaml by bench/sitegen.  A profile without one is" % self.name,
+                 "either older than sitegen or a hand-made copy:",
+                 "    bench/sitegen %s --write        regenerate it" % self.name,
+                 "    cp sites/%s/site.sh ~/.config/hpcdev/   refresh your copy"
+                 % self.name])
         self.node_source = self.conf
-        if not self.cores_per_node:
-            self.cores_per_node, self.node_source = FALLBACK_CORES_PER_NODE, FALLBACK_SOURCE
-            self.smt = self.smt or FALLBACK_SMT
-        self.smt = self.smt or 1
 
     def image_path(self, sif):
         return os.path.join(self.image_dir, sif)
@@ -129,7 +145,11 @@ def find_conf(name, start=None):
 
 
 def load(name, start=None):
-    conf = find_conf(name, start)
+    # Absolute from here on.  A generated job script names this path outright
+    # and PBS runs it from its own spool directory, so a relative $BENCH_SITE_CONF
+    # -- which is how anyone would type it on a login node -- would resolve to
+    # nothing once the job started, three hours later.
+    conf = os.path.abspath(find_conf(name, start))
     script = ". %s >/dev/null 2>&1 || exit 1\n" % _quote(conf)
     script += "".join('printf "%%s\\n" "%s=${%s-}"\n' % (v, v) for v in EXPORTED)
     try:

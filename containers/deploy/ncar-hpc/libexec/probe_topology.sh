@@ -16,8 +16,11 @@
 # authoritative, costs nothing, is correct on Casper and on any future non-Milan
 # node, and turns the topology into recorded provenance.
 #
-# Derecho's constants survive only as a last-resort fallback, labelled as such in
-# the output so a fallback is never mistaken for a measurement.
+# The site profile's node: block survives only as a last-resort fallback, and is
+# labelled as such in the output so a fallback is never mistaken for a
+# measurement.  It is not stated here: sites/<site>.yaml is where a machine's
+# geometry is decided, and this file has no business having an opinion about
+# which machine it is running on.
 #
 # WHAT IT WRITES
 #
@@ -46,23 +49,43 @@
 # actual cpu->core map and only names one that reproduces it exactly.
 #-------------------------------------------------------------------------------
 
-# Last-resort fallback: Derecho CPU node (2 x EPYC 7763 Milan, SMT on, NPS4).
-# Only used when lscpu is unavailable AND no topology.json was written.
-TOPO_FALLBACK_SOURCE="fallback:derecho-milan"
+# Last-resort fallback, used only when lscpu is unavailable AND no topology.json
+# was written.  The numbers come from the site profile -- the node: block of
+# sites/<site>.yaml, generated into site.sh -- and not from this file, which used
+# to state Derecho's geometry itself.  Three files saying 128 cores, with nothing
+# comparing them, is how a fallback stops describing the machine it names.
+#
+# Nothing is invented here.  Without a profile the fallback reports a single
+# core with no SMT, which is wrong in the direction that makes a caller notice:
+# it refuses every multi-rank placement instead of accepting one the node cannot
+# run.  TOPO_SOURCE says which of the two happened.
+TOPO_FALLBACK_SOURCE="fallback:site-profile"
 _topo_set_fallback () {
-    TOPO_SOURCE="${TOPO_FALLBACK_SOURCE}"
     TOPO_HOST=""
-    TOPO_CPUS=256
-    TOPO_CORES_PER_NODE=128
-    TOPO_SOCKETS=2
-    TOPO_SMT=2
-    TOPO_SMT_STRIDE=128
-    TOPO_SMT_LAYOUT="block"
-    TOPO_CORES_PER_SOCKET=64
-    TOPO_CORES_PER_L3=8
-    TOPO_NUMA_DOMAINS=8
-    TOPO_CORES_PER_NUMA=16
     TOPO_FILE=""
+    TOPO_SMT_LAYOUT="block"
+
+    if [ -n "${BENCH_CORES_PER_NODE:-}" ]; then
+        TOPO_SOURCE="${TOPO_FALLBACK_SOURCE}:${BENCH_SITE:-unknown}"
+        TOPO_CORES_PER_NODE="${BENCH_CORES_PER_NODE}"
+        TOPO_SMT="${BENCH_SMT:-1}"
+        TOPO_SOCKETS="${BENCH_SOCKETS:-1}"
+        TOPO_SMT_STRIDE="${BENCH_SMT_STRIDE:-${BENCH_CORES_PER_NODE}}"
+        TOPO_CORES_PER_L3="${BENCH_CORES_PER_L3:-${BENCH_CORES_PER_NODE}}"
+        TOPO_CORES_PER_NUMA="${BENCH_CORES_PER_NUMA:-${BENCH_CORES_PER_NODE}}"
+    else
+        TOPO_SOURCE="fallback:none"
+        TOPO_CORES_PER_NODE=1
+        TOPO_SMT=1
+        TOPO_SOCKETS=1
+        TOPO_SMT_STRIDE=1
+        TOPO_CORES_PER_L3=1
+        TOPO_CORES_PER_NUMA=1
+    fi
+
+    TOPO_CPUS=$((TOPO_CORES_PER_NODE * TOPO_SMT))
+    TOPO_CORES_PER_SOCKET=$((TOPO_CORES_PER_NODE / TOPO_SOCKETS))
+    TOPO_NUMA_DOMAINS=$((TOPO_CORES_PER_NODE / TOPO_CORES_PER_NUMA))
 }
 
 #-------------------------------------------------------------------------------
