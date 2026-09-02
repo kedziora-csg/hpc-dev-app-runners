@@ -1,9 +1,11 @@
 # Plan: An App Benchmark Runner With A Real App Contract
 
 Status: **design accepted 2026-08-19; all four DECISIONs answered (see §12).
-Phases 0–4 implemented (see §10). Phase 5 next. Casper is described for one node
-type — the high-throughput Cascade Lake nodes — and is unverified: no job has run
-there yet. Sub-clusters (§11.6) are what the rest of Casper needs.**
+Phases 0–4 implemented (see §10). Casper is described for one node type — the
+high-throughput Cascade Lake nodes — and is unverified: no job has run there yet.
+**Phase 4.5 proposed and next**: what this document calls a *site* is a cluster,
+and the missing outer level (NCAR) and inner level (node type) are one change,
+which must land before phase 5.**
 
 This document proposes the concrete interfaces that `SeparateConcerns.md` and
 `SeparationAnalysis.md` gesture at but do not specify. Those two argued *that* the
@@ -384,6 +386,12 @@ the knowledge is moving to where it already lives.
 ---
 
 ## 4. The site contract
+
+> **Naming, as of phase 4.5 (§10).** What this section calls a *site* is a
+> **cluster**. NCAR is the site, Derecho and Casper are clusters within it, and
+> each cluster has several node types. The vocabulary here is left as written
+> because it is what the code says today; phase 4.5 is where both change
+> together.
 
 Derecho first, but the abstraction is worth doing now because **the duplication has
 already started**: `PBS/OSU_derecho.pbs` and `PBS/OSU_casper.pbs` are two copies of one
@@ -1005,6 +1013,7 @@ Each phase is independently useful and independently revertible.
 | **2** | App contract: `/container/app.d/<app>/{app.yaml,prepare,launch,extract}` installed by `build_<app>.sh`; `libexec/app_contract.sh` drives it; runner stops knowing about `hpcg.dat`; `bench/collect` ranks by the app's declared `primary_fom` and `better:` | The structural change. Every HPCG string is gone from the PBS script. Proven by adding OSU as the second app with no runner edit — deliberately unlike HPCG (no input file, flags via `launch`, results on stdout), and `libexec/test_app_contract.sh` exercises both off-cluster. |
 | **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
 | **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. **Built — see below.** |
+| **4.5** | Rename the middle level: **site → cluster**, and introduce the three-level model site (NCAR) / cluster (Derecho, Casper) / sub-cluster (node type). Merges §11.6 | The name is wrong now and every value it governs is being written twice. Must precede 5, which builds an image for a "named machine" — naming it correctly is a prerequisite, not a follow-up. |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9); carry `app_march_flags` through as a per-app build-arg (§3) | CI now validates the contract on every app build. The microarchitecture override belongs here because this is where an app image is built for a *named machine* rather than for everyone. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
@@ -1169,13 +1178,25 @@ sweep depends on and this hardware does not have: `cores_per_l3` and
 socket. A cache-aligned and a NUMA-aligned placement are the same arrangement
 there, so `casper-hpcg.yaml` is pure MPI and nothing else.
 
-The HOST side has now been exercised there: `bench/validate casper-hpcg` on a
-Casper login node (2026-09-02) found the checkout's own Casper profile rather
-than a `~/.config` copy made for Derecho, agreed that the generated block was
-current, read 36 cores from it, resolved all three images on disk and expanded
-the matrix. It also ran on a login node with no `jsonschema` installed, which is
-the case `benchlib/schema.py`'s fallback validator exists for. Nothing has run on
-a compute node.
+The HOST side has now passed there in full: `bench/validate casper-hpcg` on a
+Casper login node (2026-09-02) exits 0 with every one of its six checks green.
+It resolved the site profile through `$BENCH_SITE_CONF`, agreed that the
+generated block was current, read 36 cores back out of it, found all three
+images on disk, and — with `apptainer` loaded — looked inside each one and
+confirmed `/container/app.d/hpcg/app.yaml`. It also ran on a login node with no
+`jsonschema` installed, which is the case `benchlib/schema.py`'s fallback
+validator exists for.
+
+That last check earned its place immediately. The first run reported the
+contract MISSING in all three images, because they predated phase 2 and carried
+the HPCG binary with nothing telling the runner how to drive it. Three jobs
+would have queued, resolved a launcher, probed the topology and then found
+nothing to benchmark. `make check-images` was extended to cover the `-hpcg` app
+images at the same time, since it checked only the base set and the `.sif` rule
+is a timestamp rule -- an image built before the app layer existed looks current
+to `make` and is not.
+
+Nothing has run on a compute node.
 
 Everything that is not the node geometry is still inferred from
 `PBS/OSU_casper.pbs`, so `verified: false` stands and `bench/validate`,
@@ -1195,6 +1216,88 @@ map whose entries override `node:`, and an experiment naming which one it wants
 cheaper than doing it before. Building it now would also have meant guessing at
 PBS resource attribute names from a documentation table, which is exactly how
 the first draft of this file ended up claiming a node type that does not exist.
+
+### Phase 4.5, proposed: site, cluster, sub-cluster
+
+**The criticism.** What this document calls a *site* is a cluster. NCAR is the
+site; Derecho and Casper are two clusters within it; each cluster has several
+node types. Three levels are being described with two names, and the middle one
+has taken the name of the outer.
+
+**The evidence is already in the files.** Sixteen values are identical between
+`sites/derecho.yaml` and `sites/casper.yaml`, and they are not identical by
+coincidence — they are NCAR conventions rather than Derecho facts:
+
+```
+modules.compiler_map.oneapi     intel          the NCAR module set names it `intel`
+modules.compiler_map.gcc14      gcc/14.3.0
+modules.bootstrap               module load ncarenv/25.10
+container.runtime               apptainer
+container.bind_map./usr/lib64   /host_lib64
+scheduler.kind / .submit        pbspro / qsub
+```
+
+Both also bind `/glade`, which is one filesystem mounted on both machines. Every
+one of those is edited twice today and will eventually be edited once, in a way
+that leaves the other copy behind — which is the same failure this phase removed
+from five PBS scripts.
+
+**The three levels, by what actually varies.**
+
+| level | what belongs to it | evidence today |
+|---|---|---|
+| **site** — NCAR | module naming conventions, the `ncarenv` bootstrap, GLADE, the container runtime, the scheduler dialect | the sixteen identical values above |
+| **cluster** — Derecho, Casper | queue, walltime limit, which MPI families can be hosted and by which overlay recipe, the cluster-specific binds and library paths | the Cray paths, the whole `mpi:` block, `scheduler.queue` |
+| **sub-cluster** — node type | `node:` in full, including `target_arch` | §11.6: Casper has at least six core counts, Derecho's GPU nodes differ from its CPU nodes |
+
+**This is one change with sub-clusters, not two.** Adding `subclusters:` beneath
+a level that is misnamed would fix the bottom of the hierarchy while cementing
+the confusion in the middle. Both are the same edit to the same schema, the same
+generator and the same vocabulary, so doing them separately means two format
+bumps and two passes over every file. §11.6 is therefore folded into this phase.
+
+**What it does not cost.** The runtime contract does not change at all.
+`bench/sitegen` already flattens a description into one block of plain shell
+variables and functions; it would merge site, cluster and sub-cluster host-side
+and emit exactly the same flat block. Nothing a compute node sources changes
+shape, `make_apptainer_launcher.sh` and `probe_topology.sh` are untouched, and
+`libexec/test_site.sh` — which runs against a synthetic profile rather than
+against Derecho's values — keeps passing unchanged. This is a change to how a
+machine is *described*, not to what a job *reads*, and that is what makes it
+tractable.
+
+**What it does cost.** `schema: 1` becomes `schema: 2` in both formats. An
+experiment's `site:` key becomes `cluster:` and gains an optional `subcluster:`.
+`BENCH_SITE` splits into `BENCH_SITE` (`ncar`) and `BENCH_CLUSTER` (`derecho`),
+with both recorded in every `results.jsonl` row — a results-format change worth
+making at the same time rather than twice. `sites/` becomes a two-level tree,
+and `bench/validate` gains a rule that a cluster names a site that exists. The
+profile search grows a level, which is worth care: the fix that made a
+`~/.config` copy answer only for the site it names has to become "only for the
+cluster it names".
+
+**The build side, and the one genuinely expensive part.**
+`containers/deploy/ncar-hpc/` is already named for the site and is roughly
+right. The image repository is not:
+`ghcr.io/kedziora-csg/hpcdev-derecho-x86_64`, built with `-march=znver3` in
+`derecho-images-ghcr.yaml`. That flag targets Derecho's **CPU nodes** — a node
+type — and the first Casper run will consume those images on Cascade Lake
+hardware, where Zen 3 code runs correctly but is not what anyone would have
+chosen. So the repository name states a cluster, the content promises a
+microarchitecture, and the consumer is a third machine.
+
+Phase 5 is where an app image is built for a named machine, so that is where the
+question must be answered: does a tuned image belong to a cluster or to a
+microarchitecture? Renaming a published GHCR repository is the one part of this
+that is externally visible and not cheap to undo — every existing digest pin and
+every `Deffile` names it — so it is a decision to take deliberately, possibly by
+publishing under a new name and leaving the old one in place, rather than a
+rename to carry out as part of a refactor.
+
+**Why before phase 5.** Phase 5 carries `app_march_flags` through as a per-app
+build-arg and is described as the point where an app image is built for a *named
+machine* rather than for everyone. Naming that machine correctly is a
+prerequisite for that, not a follow-up to it.
 
 ---
 
@@ -1250,7 +1353,12 @@ All four DECISIONs are answered — see §12. What remains open:
    build one image with and without, and compare HPCG's own `Benchmark Time Summary` setup
    figures at 8 and 16 threads.
 
-6. **Sub-clusters.** A site is currently one `node:` block, and neither NCAR
+6. **Sub-clusters.** ~~Open.~~ **Folded into phase 4.5** (§10), because the
+   level below a cluster and the level above it are the same edit: the schema,
+   the generator and the vocabulary all change once. What follows is why it is
+   needed; the plan for doing it is in that phase.
+
+   A cluster is currently one `node:` block, and neither NCAR
    machine is one kind of node. Casper spans at least six core counts and four
    processor generations; Derecho's GPU partition differs from its CPU nodes.
    The shape of the answer looks clear — a `subclusters:` map whose entries
