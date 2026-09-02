@@ -59,7 +59,7 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # Every setting below honours a value already in the environment, so a
 # one-off `qsub -v BENCH_QUEUE=develop ...` still wins over the file.
 #
-# NCAR Casper: heterogeneous analysis and GPU cluster; this file describes its 64-core Milan GPU nodes
+# NCAR Casper high-throughput nodes (crhtc<nn>): 2 x 18-core Xeon Gold 6240 (Cascade Lake), 36 cores, SMT on
 #
 # UNVERIFIED: nothing here has been confirmed by a job that ran.
 # Treat every value as a hypothesis until one has.
@@ -75,19 +75,19 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # The job probes lscpu and topology.json carries THAT answer.  These
 # are what can be known before there is a node to ask, which is when
 # an illegal ranks x threads is still cheap to reject.
-[ -n "${BENCH_CORES_PER_NODE:-}" ] || BENCH_CORES_PER_NODE='64'
+[ -n "${BENCH_CORES_PER_NODE:-}" ] || BENCH_CORES_PER_NODE='36'
 [ -n "${BENCH_SMT:-}" ] || BENCH_SMT='2'
 [ -n "${BENCH_SOCKETS:-}" ] || BENCH_SOCKETS='2'
-[ -n "${BENCH_SMT_STRIDE:-}" ] || BENCH_SMT_STRIDE='64'
-[ -n "${BENCH_CORES_PER_L3:-}" ] || BENCH_CORES_PER_L3='8'
-[ -n "${BENCH_CORES_PER_NUMA:-}" ] || BENCH_CORES_PER_NUMA='16'
+[ -n "${BENCH_SMT_STRIDE:-}" ] || BENCH_SMT_STRIDE='36'
+[ -n "${BENCH_CORES_PER_L3:-}" ] || BENCH_CORES_PER_L3='18'
+[ -n "${BENCH_CORES_PER_NUMA:-}" ] || BENCH_CORES_PER_NUMA='18'
 [ -n "${BENCH_TOPOLOGY_MODE:-}" ] || BENCH_TOPOLOGY_MODE='probe'
 
 # What this hardware runs, in report_cpu_features' spelling.  Checked
 # against the app binary once at job start: a mismatch costs one line
 # before the first cell instead of a SIGILL on every rank, three hours
 # into a queue, with no output and exit 132.
-[ -n "${BENCH_TARGET_ARCH:-}" ] || BENCH_TARGET_ARCH='x86-64-v3'
+[ -n "${BENCH_TARGET_ARCH:-}" ] || BENCH_TARGET_ARCH='x86-64-v4'
 
 #-- the container --------------------------------------------------------
 [ -n "${BENCH_CONTAINER_RUNTIME:-}" ] || BENCH_CONTAINER_RUNTIME='apptainer'

@@ -30,6 +30,33 @@ import json
 import os
 
 
+def select_size(exp, job):
+    """(ncpus, mpiprocs) for one node in the select directive.
+
+    Exclusive by default, which asks for every core on the node whether or not
+    this job's cells use them all.  For a benchmark that is the only defensible
+    setting: a co-tenant's work on the same node lands in your timings as noise
+    you cannot see, cannot subtract and will not know is there.  Paying for idle
+    cores is the cheaper mistake.
+
+    defaults.exclusive: false asks for exactly what the cells use.  That is for a
+    machine whose nodes are shared by design -- Casper's high-throughput nodes
+    are documented as being for tasks using one or two CPUs -- where holding a
+    whole node means waiting for the scheduler to drain other people's small jobs
+    from it.  It buys queue time and costs comparability, and it is the right
+    trade only while the question is "does this harness run here at all".
+
+    The exclusive answer is not simply the larger one.  It is a different claim:
+    give me the node.  So the two are not max()ed together.
+    """
+    if exp.defaults["exclusive"]:
+        return exp.site.cores_per_node, exp.site.cores_per_node
+    ranks = max(c.placement["ranks_per_node"] for c in job.cells)
+    cpus = max(c.placement["ranks_per_node"] * c.placement["threads"]
+               for c in job.cells)
+    return cpus, ranks
+
+
 def render(template_path, values):
     """Substitute @NAME@ placeholders; refuse to leave one unfilled."""
     with open(template_path) as fh:
@@ -156,14 +183,15 @@ def write(exp, job, results_dir, template_path, account, profile=None):
                   indent=2, sort_keys=True)
         fh.write("\n")
 
+    ncpus, mpiprocs = select_size(exp, job)
     script = render(template_path, {
         "JOB_NAME": "bench_" + job.key,
         "ACCOUNT": account,
         "QUEUE": exp.defaults["queue"],
         "WALLTIME": job.walltime,
         "NODES": job.nodes,
-        "NCPUS": exp.site.cores_per_node,
-        "MPIPROCS": exp.site.cores_per_node,
+        "NCPUS": ncpus,
+        "MPIPROCS": mpiprocs,
         "RESULTS_DIR": results_dir,
         "SITE_CONF": exp.site.conf,
         "BENCH_ROOT": exp.site.bench_root,

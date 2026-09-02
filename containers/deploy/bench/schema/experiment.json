@@ -40,6 +40,11 @@
           "description": "BENCH_SCALE: an app-defined size class (smoke, node, weak, strong)."
         },
         "target_seconds": {"type": "integer", "minimum": 1},
+        "exclusive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask the scheduler for every core on each node, whether or not the cells use them all. True by default, and for a benchmark that is the only defensible setting: a co-tenant's work on the same node lands in your timings as noise you cannot see or subtract. Set it false only on a machine whose nodes are shared by design -- Casper's high-throughput nodes -- where holding a whole node means a long wait to drain other people's small jobs. Then the job requests exactly what its cells use, schedules in minutes, and produces numbers that verify the harness rather than measure the hardware."
+        },
         "allow_undersubscribed": {
           "type": "boolean",
           "description": "Permit a ranks x threads product that leaves cores idle. Off by default: --cpu-bind depth packs consecutively from core 0, so a smaller product crowds every rank onto the low chiplets rather than idling cores -- a wrong answer that looks like a valid data point."

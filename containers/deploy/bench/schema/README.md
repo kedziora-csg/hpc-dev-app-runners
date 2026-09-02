@@ -54,6 +54,7 @@ Job-level settings. Anything an app does not override itself.
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `allow_undersubscribed` | boolean |  |  | Permit a ranks x threads product that leaves cores idle. Off by default: --cpu-bind depth packs consecutively from core 0, so a smaller product crowds every rank onto the low chiplets rather than idling cores -- a wrong answer that looks like a valid data point. |
+| `exclusive` | boolean |  | default `true` | Ask the scheduler for every core on each node, whether or not the cells use them all. True by default, and for a benchmark that is the only defensible setting: a co-tenant's work on the same node lands in your timings as noise you cannot see or subtract. Set it false only on a machine whose nodes are shared by design -- Casper's high-throughput nodes -- where holding a whole node means a long wait to drain other people's small jobs. Then the job requests exactly what its cells use, schedules in minutes, and produces numbers that verify the harness rather than measure the hardware. |
 | `nodes` | integer |  | at least 1 |  |
 | `queue` | string |  |  |  |
 | `repeats` | integer |  | at least 1 | Times each cell is run. Reported as min and median, never as a single sample. |

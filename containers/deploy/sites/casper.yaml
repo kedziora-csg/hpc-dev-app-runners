@@ -1,45 +1,64 @@
 # Casper -- the second site, and the reason the site contract exists.
 #
-# UNVERIFIED.  Everything here is inferred from PBS/OSU_casper.pbs, which is one
-# working example rather than a description of the machine.  Nothing in this
-# file has been confirmed by a job that actually ran through bench/, so
-# `verified: false` below makes every tool say so out loud rather than let an
-# inference pass for a measurement.
+# WHICH CASPER THIS DESCRIBES
 #
-# WHAT IS KNOWN, BECAUSE OSU_casper.pbs DID IT
+# Casper is not one machine.  Its hardware table lists at least six distinct
+# core counts across four processor generations: 36-core Skylake and Cascade
+# Lake, 48- and 64-core EPYC, 128-core Milan on the A100 nodes, 62-of-64 usable
+# on the EPYC 9554P nodes.  A single node: block cannot describe that, and this
+# file does not try to.
+#
+# It describes the HIGH-THROUGHPUT CASCADE LAKE NODES, named crhtc<nn>: two
+# 18-core Xeon Gold 6240 processors, 36 cores, hardware threading on.  Those are
+# the most plentiful nodes on Casper, which is what makes them the practical
+# place to verify that this harness works here at all.
+#
+# Describing the rest needs a sub-cluster concept -- a subclusters: map whose
+# entries override node:, and an experiment that names which one it wants.
+# Everything else in this file is genuinely site-wide: the bind list, the module
+# bootstrap, the scheduler, the queue and the host-MPI recipe do not vary between
+# Casper node types.  So that change is additive rather than a rewrite, which is
+# why it is deferred rather than guessed at now.  Derecho will need it too, once
+# its own GPU nodes are in scope.
+#
+# WHAT IS MEASURED AND WHAT IS STILL INFERRED
+#
+# The node: block below is MEASURED -- libexec/probe_topology.sh run on crhtc55,
+# 2026-09-02.  Note that cores_per_l3 and cores_per_numa are both 18: on this
+# Intel part the last-level cache, the NUMA domain and the socket are the same
+# 18 cores, so a cache-aligned placement and a NUMA-aligned placement are the
+# same arrangement.  That is not true on Derecho and is why its three-way sweep
+# does not carry over.
+#
+# Everything else is still inferred from PBS/OSU_casper.pbs, which is one working
+# example rather than a description of the machine, so `verified: false` stands.
+# The container binds, the host-MPI overlay and the module bootstrap have not
+# been exercised by a job that ran through bench/.
 #
 #   - the queue is `casper`
 #   - the host MPI is Open MPI, reached through ${NCAR_ROOT_OPENMPI}
 #   - /proc must be bound, and UCX_POSIX_USE_PROC_LINK=n set, or the UCX POSIX
 #     transport tries to read other ranks' /proc links and is refused by the
 #     container namespace
-#   - GPFS (/usr/lpp/mmfs) is bound and its lib/ is on the library path, for the
-#     same reason as on Derecho: NCAR's Open MPI carries ROMIO's GPFS backend
-#     and libmpi has a hard NEEDED on libgpfs.so
-#   - there are GPUs, and the launcher runs apptainer with --nv
+#   - GPFS (/usr/lpp/mmfs) is bound and its lib/ is on the library path: NCAR's
+#     Open MPI carries ROMIO's GPFS backend and libmpi has a hard NEEDED on
+#     libgpfs.so
+#   - mpich is deliberately ABSENT rather than guessed.  Casper has no Cray PALS
+#     and no Cray MPICH ABI shim, so neither Derecho recipe applies.  An absent
+#     family makes the runner refuse such an image by name, which is the right
+#     answer until somebody has tried it.
 #
-# WHAT IS GUESSED, AND WHAT WOULD SETTLE IT
+# A NOTE ON THESE NODES AND MEASUREMENT
 #
-#   node:      taken from `ncpus=64` in that script, read as a 2-socket 64-core
-#              Milan GPU node.  Casper is heterogeneous -- it also has 36-core
-#              Skylake nodes -- so "the Casper node" is not one thing and this
-#              file currently describes one kind.
-#              Settle it with: lscpu on the node type you intend to use.  The
-#              job probes it anyway and topology.json records the truth; these
-#              numbers only decide which geometries bench/validate accepts
-#              before submitting.
-#   ncarenv:   set to 25.10 to match Derecho.  OSU_casper.pbs says 24.12, which
-#              is what Derecho's scripts said before this change too, so it is
-#              more likely to be stale than to be a Casper-specific pin.
-#              Settle it with: module avail ncarenv, on Casper.
-#   mpich:     deliberately ABSENT rather than guessed.  Casper has no Cray PALS
-#              and no Cray MPICH ABI shim, so neither Derecho recipe applies and
-#              an mpich container would need something not written yet.  An
-#              absent family makes the runner refuse such an image with a clear
-#              message, which is the right answer until somebody has tried it.
+# High-throughput nodes are shared by design -- the documentation describes them
+# as being for tasks using one or two CPUs.  A job that does not hold a whole
+# node shares it with other tenants, whose work lands in your timings as noise
+# you cannot see or subtract.  So this site is the right place to verify that the
+# harness runs on Casper, and the wrong place to produce numbers meant to be
+# compared with Derecho's.  Comparable numbers need whole nodes.
 schema: 1
 site: casper
-description: "NCAR Casper: heterogeneous analysis and GPU cluster; this file describes its 64-core Milan GPU nodes"
+description: "NCAR Casper high-throughput nodes (crhtc<nn>): 2 x 18-core Xeon Gold 6240 (Cascade Lake), 36 cores, SMT on"
 verified: false
 
 scheduler:
@@ -65,14 +84,22 @@ modules:
   mpi_map:
     openmpi: openmpi
 
+# Measured on crhtc55 with libexec/probe_topology.sh, 2026-09-02.  Still
+# fallbacks in the sense that matters -- the job re-probes and topology.json
+# carries that answer -- but these are no longer guesses.
 node:
-  cores: 64
+  cores: 36
   smt: 2
   sockets: 2
-  smt_stride: 64
-  cores_per_l3: 8
-  cores_per_numa: 16
-  target_arch: x86-64-v3
+  smt_stride: 36          # block layout: sibling of CPU c is c + 36
+  cores_per_l3: 18        # one socket: Intel shares one L3 across the die
+  cores_per_numa: 18      # two NUMA domains, one per socket
+  # Cascade Lake has AVX-512, so these nodes are a level above Derecho's Milan.
+  # That difference is the whole reason check_arch.sh exists: a binary built
+  # here carries instructions Casper's own A100 Milan nodes cannot execute.
+  # If this value is wrong, arch_check says so at job start rather than
+  # silently -- it compares this claim against what the node actually reports.
+  target_arch: x86-64-v4
   topology: probe
 
 container:

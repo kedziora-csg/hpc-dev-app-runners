@@ -1,19 +1,33 @@
-# The same sweep as derecho-hpcg, on the second machine.
+# HPCG on Casper's high-throughput nodes -- a plumbing check, not a measurement.
 #
-# This file is the point of the site contract, and it is worth noticing how
-# little of it is new.  Compared to derecho-hpcg.yaml only four things differ:
-# the site name, the image set, the node count and the three decompositions --
-# and the last is not a choice, it follows from Casper having 64 cores per node
-# where Derecho has 128.  Everything a machine differs by -- scheduler dialect,
-# module bootstrap, bind list, which host MPI displaces the container's -- is in
-# sites/casper.yaml and appears here not at all.
+# WHAT THIS IS FOR
+#
+# It answers "does the harness run on Casper at all": does the site profile load,
+# does the host Open MPI displace the container's, do the binds work, does the
+# placement probe report something sane on an Intel node.  Every one of those is
+# currently unverified.
+#
+# It does NOT produce numbers to compare with Derecho's, and it is written so
+# that nobody mistakes it for a file that does.  `exclusive: false` lets the job
+# share a node with other people's work, which is the only way these particular
+# nodes schedule promptly -- your own documentation describes them as being for
+# tasks using one or two CPUs.  A co-tenant's work lands in the timings as noise
+# that cannot be seen or subtracted.  Comparable numbers need whole nodes, and
+# whole Cascade Lake nodes take a long time to obtain because the scheduler has
+# to drain other people's small jobs from them first.
 #
 #     ../validate casper-hpcg              expand it, check it, submit nothing
 #     ../submit   casper-hpcg --account <PROJECT>
 #
-# UNVERIFIED, like the site it names.  sites/casper.yaml was written from one
-# working PBS script rather than from a job that ran, so the first run of this
-# is as much a test of the site description as of the images.
+# WHY THERE IS ONLY ONE PLACEMENT
+#
+# Derecho's sweep asks three questions -- one rank per core, one per last-level
+# cache, one per NUMA domain -- because on an EPYC 7763 those are three different
+# sizes: 1, 8 and 16 cores.  On these nodes probe_topology reports cores_per_l3
+# and cores_per_numa both as 18, because an Intel die shares one cache across the
+# whole socket and there is one NUMA domain per socket.  So a cache-aligned and a
+# NUMA-aligned placement are the same 2 x 18 arrangement, and the axis has
+# nothing left to measure.  Pure MPI is the whole of it.
 schema: 1
 site: casper
 
@@ -24,22 +38,29 @@ defaults:
   scale: node
   target_seconds: 60
 
+  # Share the node.  See the header: this buys a job that starts in minutes and
+  # costs any claim that the timings mean something.
+  exclusive: false
+
+  # 8 x 1 is 8 of 36 cores, which the geometry check refuses by default and is
+  # right to: on a node held exclusively, a smaller product does not idle the
+  # spare cores, it crowds every rank onto the lowest-numbered ones.  Here the
+  # job is not holding the node in the first place, so there are no spare cores
+  # to idle -- it asks for eight and gets eight.
+  allow_undersubscribed: true
+
 # The openmpi half of the Derecho set.  Casper has no Cray MPICH ABI shim, so
-# there is no way to give an mpich container the host's MPI there -- which is
-# why sites/casper.yaml lists no mpich family, and why bench/validate will
-# refuse an mpich image for this site rather than build one that cannot run.
+# there is no way to give an mpich container the host's MPI here -- which is why
+# sites/casper.yaml lists no mpich family, and why bench/validate refuses an
+# mpich image for this site rather than queueing one that cannot run.
 images:
   from_make: casper-hpcg
 
 apps:
   - name: hpcg
 
-# ranks_per_node x threads == 64, the same three ideas as on Derecho sized to
-# this node: one core per rank, one L3 (CCD) per rank, one NUMA domain per rank.
 placements:
-  - {name: pureMPI, ranks_per_node: 64, threads: 1}
-  - {name: ccd,     ranks_per_node: 8,  threads: 8}
-  - {name: numa,    ranks_per_node: 4,  threads: 16}
+  - {name: pureMPI, ranks_per_node: 8, threads: 1}
 
 omp_variants:
   - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}

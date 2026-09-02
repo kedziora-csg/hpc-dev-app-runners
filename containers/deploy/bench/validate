@@ -95,6 +95,13 @@ def describe(exp, jobs, pre):
     runs = sum(len(j.cells) * j.repeats for j in jobs)
     print("expands to  %d job(s), %d cell(s), %d run(s) at repeats=%d"
           % (len(jobs), cells, runs, exp.defaults["repeats"]))
+    if not exp.defaults["exclusive"]:
+        print()
+        print("NOTE  defaults.exclusive is false, so these jobs ask only for the cores")
+        print("      their cells use and share each node with whatever else is running")
+        print("      on it.  That work lands in the timings as noise that cannot be")
+        print("      seen or subtracted.  Useful for checking that the harness runs;")
+        print("      not a source of numbers to compare against another run.")
     print()
 
     print("  %-34s %-6s %-9s %s" % ("JOB", "NODES", "APP", "CELLS"))

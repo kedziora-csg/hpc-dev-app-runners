@@ -36,7 +36,8 @@ is the point:
 
 Anything else is refused unless `allow_undersubscribed`, because --cpu-bind depth
 packs consecutively from core 0: a smaller product does not idle the spare cores,
-it crowds every rank onto the low chiplets.  That is a wrong answer that looks
+it crowds every rank onto the lowest-numbered ones -- the low chiplets on Derecho,
+the first socket on a two-socket Intel node.  That is a wrong answer that looks
 like a valid data point, which is the worst kind.
 """
 
@@ -111,6 +112,7 @@ class Experiment(object):
             "scale": d.get("scale", "node"),
             "target_seconds": d.get("target_seconds", 60),
             "allow_undersubscribed": bool(d.get("allow_undersubscribed", False)),
+            "exclusive": bool(d.get("exclusive", True)),
         }
         self.matrix = list(data["sweep"]["matrix"])
         self.per_job = list(data["sweep"].get("per_job") or [])
@@ -246,7 +248,7 @@ def geometry_problem(exp, placement):
     how = "under" if product < cores else "over"
     return ("placement %r: %d ranks/node x %d threads = %d, which %ssubscribes a "
             "%d-core node (legal products: %d, or %d with SMT). --cpu-bind depth "
-            "packs from core 0, so this crowds every rank onto the low chiplets "
+            "packs from core 0, so this crowds every rank onto the lowest-numbered "
             "rather than %s. Set defaults.allow_undersubscribed: true if that is "
             "the experiment."
             % (placement["name"], placement["ranks_per_node"], placement["threads"],

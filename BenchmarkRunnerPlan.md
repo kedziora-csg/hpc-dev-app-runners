@@ -1,8 +1,9 @@
 # Plan: An App Benchmark Runner With A Real App Contract
 
 Status: **design accepted 2026-08-19; all four DECISIONs answered (see §12).
-Phases 0–4 implemented (see §10). Phase 5 next. Casper's description is written
-but unverified — no job has run there yet.**
+Phases 0–4 implemented (see §10). Phase 5 next. Casper is described for one node
+type — the high-throughput Cascade Lake nodes — and is unverified: no job has run
+there yet. Sub-clusters (§11.6) are what the rest of Casper needs.**
 
 This document proposes the concrete interfaces that `SeparateConcerns.md` and
 `SeparationAnalysis.md` gesture at but do not specify. Those two argued *that* the
@@ -1144,16 +1145,48 @@ It cannot be factored out without something to find the factoring — the file
 that would hold it is itself located by that search — so what is shared is the
 policy, in the profile, and what is duplicated is only the walk.
 
-**Casper is written and unverified.** `sites/casper.yaml` was derived from
-`PBS/OSU_casper.pbs`, which is one working example rather than a description of
-a machine, and it carries `verified: false` so `bench/validate`, `bench/sitegen`
-and the generated profile all say so. Its node geometry describes the 64-core
-Milan GPU nodes and Casper is heterogeneous; its `ncarenv` version is assumed to
-match Derecho's; and it lists no `mpich` family at all, because Casper has no
-Cray PALS and no ABI shim, so neither Derecho recipe applies. An absent family
-makes the runner refuse such an image by name, which is the right answer until
-somebody has tried it. The first Casper job is as much a test of that file as of
-the images.
+7. **A job claims the whole node unless told otherwise.** `bench/submit` used
+   to derive `ncpus` and `mpiprocs` from the site's core count unconditionally,
+   which is right for a benchmark — a co-tenant's work on the same node lands in
+   your timings as noise you cannot see, cannot subtract and will not know is
+   there, so paying for idle cores is the cheaper mistake. It is wrong on a
+   machine whose nodes are shared by design. `defaults.exclusive: false` now
+   asks for exactly what the cells use; `jobfile.select_size` decides, and
+   `bench/validate` says out loud that such a run is not a source of comparable
+   numbers. The two are deliberately not `max()`ed together: exclusive is a
+   different claim, not a larger one.
+
+**Casper describes one node type, and is still unverified.** Its hardware table
+lists at least six core counts across four processor generations — 36-core
+Skylake and Cascade Lake, 48- and 64-core EPYC, 128-core Milan on the A100
+nodes, 62 usable of 64 on the EPYC 9554P nodes. `sites/casper.yaml` therefore
+describes the **high-throughput Cascade Lake nodes** (`crhtc<nn>`, 2 × Xeon Gold
+6240, 36 cores) and says so in its own header rather than pretending to cover
+the machine. Its `node:` block is measured — `probe_topology.sh` on `crhtc55` —
+and the probe's first run on non-AMD hardware turned up something the Derecho
+sweep depends on and this hardware does not have: `cores_per_l3` and
+`cores_per_numa` are both 18, because an Intel die shares one cache across the
+socket. A cache-aligned and a NUMA-aligned placement are the same arrangement
+there, so `casper-hpcg.yaml` is pure MPI and nothing else.
+
+Everything that is not the node geometry is still inferred from
+`PBS/OSU_casper.pbs`, so `verified: false` stands and `bench/validate`,
+`bench/sitegen` and the generated profile all say so. It lists no `mpich`
+family, because Casper has no Cray PALS and no ABI shim, so neither Derecho
+recipe applies; an absent family makes the runner refuse such an image by name,
+which is the right answer until somebody has tried it.
+
+**Sub-clusters are the next thing this needs, and were deliberately not built.**
+One `node:` block cannot describe Casper, and Derecho will have the same problem
+once its GPU nodes are in scope. The encouraging finding is how little varies:
+the bind list, the module bootstrap, the scheduler, the queue and the host-MPI
+recipe are the same across every Casper node type, so only `node:` and
+`target_arch` differ. That makes the eventual change additive — a `subclusters:`
+map whose entries override `node:`, and an experiment naming which one it wants
+— rather than a rewrite, which is why doing it after the first verified run is
+cheaper than doing it before. Building it now would also have meant guessing at
+PBS resource attribute names from a documentation table, which is exactly how
+the first draft of this file ended up claiming a node type that does not exist.
 
 ---
 
@@ -1208,6 +1241,23 @@ All four DECISIONs are answered — see §12. What remains open:
    out from under the patch, which is the risk worth guarding. If anyone wants it settled:
    build one image with and without, and compare HPCG's own `Benchmark Time Summary` setup
    figures at 8 and 16 threads.
+
+6. **Sub-clusters.** A site is currently one `node:` block, and neither NCAR
+   machine is one kind of node. Casper spans at least six core counts and four
+   processor generations; Derecho's GPU partition differs from its CPU nodes.
+   The shape of the answer looks clear — a `subclusters:` map whose entries
+   override `node:` and `target_arch`, since nothing else varies within a site,
+   plus an experiment key naming which one it wants — but two things are not
+   known without the machine: which PBS resource attribute selects a node type
+   there, and whether the right unit is the node type, the queue, or something
+   else the scheduler exposes. Deferred until one Casper job has run, so that
+   the abstraction is added on top of something verified rather than on top of
+   another guess.
+
+   This also decides where `target_arch` belongs. Casper's Cascade Lake nodes
+   have AVX-512 and its Milan nodes do not, so a binary built for one cannot run
+   on the other — the exact failure `arch_check` exists to catch, and a case
+   where a single per-site value is not merely imprecise but wrong.
 
 ---
 

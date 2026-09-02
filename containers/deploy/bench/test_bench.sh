@@ -303,6 +303,30 @@ grep -q '^#PBS -l select=2:ncpus=128' "${d}/job.pbs" \
     && ok "job.pbs carries the real select= directive, not a variable" \
     || bad "job.pbs select= directive is wrong" "$(grep '^#PBS -l select' "${d}/job.pbs")"
 
+# A benchmark job claims the whole node by default, whether or not its cells use
+# every core, because a co-tenant's work would land in the timings unseen.
+# defaults.exclusive: false is the opt-out, for a machine whose nodes are shared
+# by design -- and it must change what is REQUESTED, not just what is recorded.
+grep -q '^#PBS -l select=2:ncpus=128:mpiprocs=128' "${d}/job.pbs" \
+    && ok "an exclusive job asks for every core on the node" \
+    || bad "the exclusive select= is wrong" "$(grep '^#PBS -l select' "${d}/job.pbs")"
+
+# Built from ${base} rather than by editing a shipped file: a sed that has to
+# insert a newline behaves differently under BSD and GNU sed, and a test that
+# passes on one machine and not the other is worse than no test.
+printf '%s\n' "${base}" \
+    | sed 's/defaults: {nodes: 1}/defaults: {nodes: 2, exclusive: false, allow_undersubscribed: true}/' \
+    | sed 's/ranks_per_node: 128/ranks_per_node: 8/' > "${TMP}/shared.yaml"
+rm -rf "${TMP}/shared.d"
+./submit "${TMP}/shared.yaml" --dry-run --results-dir "${TMP}/shared.d" >/dev/null 2>&1
+want "exclusive: false asks only for the cores the cells use" \
+     "#PBS -l select=2:ncpus=8:mpiprocs=8:ompthreads=1" \
+     "$(grep -h '^#PBS -l select' "${TMP}/shared.d"/*/job.pbs 2>/dev/null)"
+
+./validate "${TMP}/shared.yaml" 2>&1 | grep -q "share each node" \
+    && ok "validate says out loud that the nodes will be shared" \
+    || bad "a shared-node experiment validates with no warning"
+
 # The job names its profile outright, and PBS runs it from its own spool
 # directory -- so a relative path, which is how anyone would type
 # $BENCH_SITE_CONF on a login node, would resolve to nothing once the job
