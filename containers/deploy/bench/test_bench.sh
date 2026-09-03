@@ -372,6 +372,26 @@ want "exclusive: false asks only for the cores the cells use" \
     && ok "validate says out loud that the nodes will be shared" \
     || bad "a shared-node experiment validates with no warning"
 
+# A description that says what the hardware is but not how to ask for it
+# produces jobs that measure whatever the pool had free -- which is exactly what
+# the first Casper run did.  So the selector has to reach the directive.
+grep -q '^#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1$' "${d}/job.pbs" \
+    && ok "no node.select leaves the directive unchanged" \
+    || bad "an absent node.select changed the select directive" \
+           "$(grep '^#PBS -l select' "${d}/job.pbs")"
+
+rm -rf "${TMP}/sel.d"
+# casper-hpcg names the openmpi third of the same image set, so the stand-in
+# files created at the top of this script already cover it.
+BENCH_SITE_CONF="${HERE}/../sites/casper/site.sh" ./submit \
+    "${HERE}/experiments/casper-hpcg.yaml" --dry-run \
+    --results-dir "${TMP}/sel.d" >/dev/null 2>&1
+sel="$(grep -h '^#PBS -l select' "${TMP}/sel.d"/*/job.pbs 2>/dev/null | head -1)"
+case "${sel}" in
+    *":cpu_type=genoa") ok "node.select is appended to the select chunk" ;;
+    *) bad "node.select did not reach the select directive" "${sel:-<no job.pbs>}" ;;
+esac
+
 # The job names its profile outright, and PBS runs it from its own spool
 # directory -- so a relative path, which is how anyone would type
 # $BENCH_SITE_CONF on a login node, would resolve to nothing once the job

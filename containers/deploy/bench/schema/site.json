@@ -136,6 +136,11 @@
           "pattern": "^[a-z0-9][a-z0-9._-]*$",
           "description": "The instruction set this hardware actually runs, in the spelling report_cpu_features prints. Checked against the app binary once at job start, which turns a SIGILL on every rank three hours into a queue into one line before the first cell. Deliberately a check and not an input: the image was built in CI long before this file was read, so a site can only refuse to measure an image, never change it."
         },
+        "select": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+(:[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+)*$",
+          "description": "Scheduler resource clauses that ask for THIS node type, appended to the select directive -- on Casper, cpu_type=genoa. Without it a description says what the hardware is but not how to obtain it, which is worse than saying nothing because it looks authoritative: the first Casper run named no processor and landed on a node type the file did not describe. Use only resources that steer node CHOICE. A node's queue-eligibility tag is not one of them: on a system with a routing queue, selecting on it fights the router rather than directing it."
+        },
         "topology": {
           "enum": ["probe", "declared"],
           "default": "probe",

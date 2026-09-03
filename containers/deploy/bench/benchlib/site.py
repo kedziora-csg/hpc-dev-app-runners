@@ -37,7 +37,7 @@ EXPORTED = ("BENCH_SITE", "NCAR_HPC_ROOT", "BENCH_IMAGE_DIR",
             "BENCH_RESULTS_ROOT", "BENCH_SCRATCH", "BENCH_ROOT",
             "BENCH_SCHEDULER", "BENCH_SUBMIT", "BENCH_QUEUE",
             "BENCH_WALLTIME_MAX", "BENCH_CORES_PER_NODE", "BENCH_SMT",
-            "BENCH_TARGET_ARCH", "BENCH_TOPOLOGY_MODE")
+            "BENCH_TARGET_ARCH", "BENCH_TOPOLOGY_MODE", "BENCH_NODE_SELECT")
 
 
 class Site(object):
@@ -55,6 +55,7 @@ class Site(object):
         self.walltime_max = values.get("BENCH_WALLTIME_MAX") or ""
         self.target_arch = values.get("BENCH_TARGET_ARCH") or ""
         self.topology_mode = values.get("BENCH_TOPOLOGY_MODE") or "probe"
+        self.node_select = values.get("BENCH_NODE_SELECT") or ""
 
         self.cores_per_node = _int(values.get("BENCH_CORES_PER_NODE"))
         self.smt = _int(values.get("BENCH_SMT"))

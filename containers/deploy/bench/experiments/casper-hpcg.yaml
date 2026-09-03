@@ -1,33 +1,46 @@
-# HPCG on Casper's high-throughput nodes -- a plumbing check, not a measurement.
+# HPCG on Casper's high-throughput Genoa nodes.
 #
-# WHAT THIS IS FOR
+# The plumbing check this file used to be has served its purpose: the run of
+# 2026-09-03 proved the module bootstrap, the host Open MPI displacement, the
+# binds and the whole record-and-collect path work on Casper.  What it could not
+# do is mean anything, for two reasons that are now both fixable.
 #
-# It answers "does the harness run on Casper at all": does the site profile load,
-# does the host Open MPI displace the container's, do the binds work, does the
-# placement probe report something sane on an Intel node.  Every one of those is
-# currently unverified.
+#   it did not choose its hardware   the request named no processor, and the
+#                                    high-throughput pool -- 64 Genoa, 50
+#                                    Cascade Lake, 4 Skylake -- handed back
+#                                    Genoa.  sites/casper.yaml now carries
+#                                    node.select: cpu_type=genoa, so the nodes
+#                                    are the ones it describes.
+#   it shared its nodes              asking for 8 of 64 CPUs got 8 LOGICAL CPUs
+#                                    beside other people's work: every rank was
+#                                    pinned to one SMT sibling rather than a
+#                                    whole core, and the checker warned on all
+#                                    nine runs.  exclusive: true now claims the
+#                                    node.
 #
-# It does NOT produce numbers to compare with Derecho's, and it is written so
-# that nobody mistakes it for a file that does.  `exclusive: false` lets the job
-# share a node with other people's work, which is the only way these particular
-# nodes schedule promptly -- your own documentation describes them as being for
-# tasks using one or two CPUs.  A co-tenant's work lands in the timings as noise
-# that cannot be seen or subtracted.  Comparable numbers need whole nodes, and
-# whole Cascade Lake nodes take a long time to obtain because the scheduler has
-# to drain other people's small jobs from them first.
+# The cost is queue time.  These nodes are shared by design, so the scheduler
+# has to drain other people's small jobs from two of them before this starts.
+# That is the price of a number anybody can compare.
 #
 #     ../validate casper-hpcg              expand it, check it, submit nothing
 #     ../submit   casper-hpcg --account <PROJECT>
 #
-# WHY THERE IS ONLY ONE PLACEMENT
+# THE PLACEMENTS
 #
-# Derecho's sweep asks three questions -- one rank per core, one per last-level
-# cache, one per NUMA domain -- because on an EPYC 7763 those are three different
-# sizes: 1, 8 and 16 cores.  On these nodes probe_topology reports cores_per_l3
-# and cores_per_numa both as 18, because an Intel die shares one cache across the
-# whole socket and there is one NUMA domain per socket.  So a cache-aligned and a
-# NUMA-aligned placement are the same 2 x 18 arrangement, and the axis has
-# nothing left to measure.  Pure MPI is the whole of it.
+# An EPYC 9554 is single-socket, 64 cores, 8 cores per L3, one NUMA domain over
+# the whole node.  So two of Derecho's three questions survive and the third
+# does not:
+#
+#   pureMPI  64 x 1   one rank per core
+#   ccx       8 x 8   one rank per last-level cache, 8 cores -- the same
+#                     question Derecho's `ccd` cell asks of a Milan CCD
+#   (numa)            would be 1 x 64, the whole node: degenerate on a
+#                     single-domain part, so it is not asked
+#
+# Note this is NOT the reasoning that applies to Casper's Cascade Lake nodes,
+# where the cache and the NUMA domain are both the 18-core socket and the two
+# questions collapse into one.  Which node type you are on decides which sweep
+# is meaningful, which is the argument for sub-clusters in one sentence.
 schema: 1
 site: casper
 
@@ -37,17 +50,6 @@ defaults:
   repeats: 3
   scale: node
   target_seconds: 60
-
-  # Share the node.  See the header: this buys a job that starts in minutes and
-  # costs any claim that the timings mean something.
-  exclusive: false
-
-  # 8 x 1 is 8 of 36 cores, which the geometry check refuses by default and is
-  # right to: on a node held exclusively, a smaller product does not idle the
-  # spare cores, it crowds every rank onto the lowest-numbered ones.  Here the
-  # job is not holding the node in the first place, so there are no spare cores
-  # to idle -- it asks for eight and gets eight.
-  allow_undersubscribed: true
 
 # The openmpi half of the Derecho set.  Casper has no Cray MPICH ABI shim, so
 # there is no way to give an mpich container the host's MPI here -- which is why
@@ -59,8 +61,11 @@ images:
 apps:
   - name: hpcg
 
+# ranks_per_node x threads == 64 for both, which is what the geometry check
+# requires of a node held exclusively.
 placements:
-  - {name: pureMPI, ranks_per_node: 8, threads: 1}
+  - {name: pureMPI, ranks_per_node: 64, threads: 1}    # one core per rank
+  - {name: ccx,     ranks_per_node: 8,  threads: 8}    # one L3 per rank, 32 MB
 
 omp_variants:
   - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}

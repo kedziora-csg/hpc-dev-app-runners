@@ -192,6 +192,11 @@ def write(exp, job, results_dir, template_path, account, profile=None):
         "NODES": job.nodes,
         "NCPUS": ncpus,
         "MPIPROCS": mpiprocs,
+        # Already ':'-prefixed, or empty.  Appended to the select statement
+        # rather than passed as a separate -l, because a resource that chooses
+        # a node belongs to the chunk being described: `-l cpu_type=...` on its
+        # own is a job-wide resource and does not mean the same thing.
+        "NODE_SELECT": (":" + exp.site.node_select) if exp.site.node_select else "",
         "RESULTS_DIR": results_dir,
         "SITE_CONF": exp.site.conf,
         "BENCH_ROOT": exp.site.bench_root,

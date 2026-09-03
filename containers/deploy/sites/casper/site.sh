@@ -61,10 +61,7 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # Every setting below honours a value already in the environment, so a
 # one-off `qsub -v BENCH_QUEUE=develop ...` still wins over the file.
 #
-# NCAR Casper high-throughput nodes (crhtc<nn>): 2 x 18-core Xeon Gold 6240 (Cascade Lake), 36 cores, SMT on
-#
-# UNVERIFIED: nothing here has been confirmed by a job that ran.
-# Treat every value as a hypothesis until one has.
+# NCAR Casper high-throughput nodes: 1 x 64-core AMD EPYC 9554 (Genoa), SMT on. The crhtc pool also holds 36-core Cascade Lake nodes -- see the header.
 
 #-- identity and scheduler -----------------------------------------------
 [ -n "${BENCH_SITE:-}" ] || BENCH_SITE='casper'
@@ -77,13 +74,19 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # The job probes lscpu and topology.json carries THAT answer.  These
 # are what can be known before there is a node to ask, which is when
 # an illegal ranks x threads is still cheap to reject.
-[ -n "${BENCH_CORES_PER_NODE:-}" ] || BENCH_CORES_PER_NODE='36'
+[ -n "${BENCH_CORES_PER_NODE:-}" ] || BENCH_CORES_PER_NODE='64'
 [ -n "${BENCH_SMT:-}" ] || BENCH_SMT='2'
-[ -n "${BENCH_SOCKETS:-}" ] || BENCH_SOCKETS='2'
-[ -n "${BENCH_SMT_STRIDE:-}" ] || BENCH_SMT_STRIDE='36'
-[ -n "${BENCH_CORES_PER_L3:-}" ] || BENCH_CORES_PER_L3='18'
-[ -n "${BENCH_CORES_PER_NUMA:-}" ] || BENCH_CORES_PER_NUMA='18'
+[ -n "${BENCH_SOCKETS:-}" ] || BENCH_SOCKETS='1'
+[ -n "${BENCH_SMT_STRIDE:-}" ] || BENCH_SMT_STRIDE='64'
+[ -n "${BENCH_CORES_PER_L3:-}" ] || BENCH_CORES_PER_L3='8'
+[ -n "${BENCH_CORES_PER_NUMA:-}" ] || BENCH_CORES_PER_NUMA='64'
 [ -n "${BENCH_TOPOLOGY_MODE:-}" ] || BENCH_TOPOLOGY_MODE='probe'
+
+# How to ask the scheduler for THIS node type.  Appended to the select
+# directive by bench/submit.  Without it a job takes whatever the pool
+# offers, which is how the first Casper run measured hardware this file
+# did not describe.
+[ -n "${BENCH_NODE_SELECT:-}" ] || BENCH_NODE_SELECT='cpu_type=genoa'
 
 # What this hardware runs, in report_cpu_features' spelling.  Checked
 # against the app binary once at job start: a mismatch costs one line
@@ -182,7 +185,7 @@ export BENCH_SITE BENCH_SCHEDULER BENCH_SUBMIT BENCH_QUEUE
 export BENCH_CORES_PER_NODE BENCH_SMT BENCH_TOPOLOGY_MODE
 export BENCH_CONTAINER_RUNTIME BENCH_BINDS BENCH_BINDS_IF_PRESENT
 export BENCH_BIND_MAP BENCH_LIB_DIRS
-export BENCH_WALLTIME_MAX BENCH_SOCKETS BENCH_SMT_STRIDE BENCH_CORES_PER_L3 BENCH_CORES_PER_NUMA BENCH_TARGET_ARCH
+export BENCH_WALLTIME_MAX BENCH_SOCKETS BENCH_SMT_STRIDE BENCH_CORES_PER_L3 BENCH_CORES_PER_NUMA BENCH_TARGET_ARCH BENCH_NODE_SELECT
 # <<< END GENERATED
 
 

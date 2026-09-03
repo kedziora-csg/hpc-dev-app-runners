@@ -1,8 +1,10 @@
 # Plan: An App Benchmark Runner With A Real App Contract
 
 Status: **design accepted 2026-08-19; all four DECISIONs answered (see §12).
-Phases 0–4 implemented (see §10). Casper is described for one node type — the
-high-throughput Cascade Lake nodes — and is unverified: no job has run there yet.
+Phases 0–4 implemented (see §10) and **verified on both clusters**: Derecho, and
+Casper as of 2026-09-03. Casper describes one node type, the EPYC 9554
+high-throughput nodes, which is the type the scheduler gives when the request
+names none.
 **Phase 4.5 proposed and next**: what this document calls a *site* is a cluster,
 and the missing outer level (NCAR) and inner level (node type) are one change,
 which must land before phase 5.**
@@ -1214,7 +1216,40 @@ make the profile's contents depend on how a job was started. `test_bench.sh` now
 sources and `exec`s for real, and that test was confirmed to fail without the
 fix.
 
-Nothing has yet run a cell on a compute node.
+**The harness now runs on Casper.** Three jobs, nine runs, 2026-09-03. The
+module bootstrap came up; the host Open MPI displaced the container's for all
+three compilers, with Lmod rebuilding it against each (`gcc/14.3.0`,
+`nvhpc/25.9`, `intel-oneapi-compilers/2025.3.2`); the binds were sufficient;
+`/proc` plus `UCX_POSIX_USE_PROC_LINK=n` was enough for UCX inside the
+container; the contract resolved; the placement checker, `results.jsonl` and
+`bench/collect` all worked. `sites/casper.yaml` is now `verified: true`, which
+refers to that and to nothing about the numbers.
+
+Three things it turned up.
+
+**The node type was not ours to choose.** The request said `ncpus=8` and named
+no processor, and landed on AMD EPYC 9554 nodes -- 64 cores, one socket, 8 cores
+per L3, one NUMA domain -- rather than the 36-core two-socket Cascade Lake nodes
+the file described. The `crhtc` prefix names the high-throughput *pool*, not a
+node type, and both live in it. `sites/casper.yaml` now describes the EPYC nodes,
+measured from that run, and records the Cascade Lake measurement beside it.
+
+**The wrong `node:` block did no harm, which is the point.** Every threshold came
+from `probe_topology.sh` reading the real machine, so the run was correct while
+its fallback was wrong. §4 argued for probing rather than hardcoding; this is that
+argument demonstrated rather than asserted.
+
+**`target_arch` agreed for the wrong reason.** `x86-64-v4` was declared for
+Cascade Lake, and Genoa reported `x86-64-v4` too, because both have AVX-512. The
+check passed without checking anything, which is worth knowing when reading a
+`cpu` line.
+
+Also recorded, as caveats rather than faults: the host Open MPI version is not
+uniform across compilers on Casper (5.0.8 for gcc14 and nvhpc, 5.0.9 for
+oneapi), so a comparison across those images is also a comparison across two MPI
+versions; and asking for eight CPUs of a shared SMT node gets eight *logical*
+CPUs, so every rank was pinned to a single SMT sibling and the placement checker
+warned on all nine runs -- correctly, and as the price of `exclusive: false`.
 
 Everything that is not the node geometry is still inferred from
 `PBS/OSU_casper.pbs`, so `verified: false` stands and `bench/validate`,
@@ -1266,7 +1301,73 @@ from five PBS scripts.
 |---|---|---|
 | **site** — NCAR | module naming conventions, the `ncarenv` bootstrap, GLADE, the container runtime, the scheduler dialect | the sixteen identical values above |
 | **cluster** — Derecho, Casper | queue, walltime limit, which MPI families can be hosted and by which overlay recipe, the cluster-specific binds and library paths | the Cray paths, the whole `mpi:` block, `scheduler.queue` |
-| **sub-cluster** — node type | `node:` in full, including `target_arch` | §11.6: Casper has at least six core counts, Derecho's GPU nodes differ from its CPU nodes |
+| **sub-cluster** — node type | `node:` in full, including `target_arch`, **and how to ask the scheduler for it** | §11.6, and the first Casper run, which asked for no processor type and got a different one than the file described |
+
+**A sub-cluster is not only a description.** The first Casper run corrects the
+design sketched in §11.6, which said only `node:` and `target_arch` vary. A third
+thing does: the scheduler request. That job asked for `ncpus=8` with no processor
+selector and was given EPYC 9554 nodes where the file described Cascade Lake
+ones, because both sit in the same `crhtc` pool. A sub-cluster that says what
+hardware it is but not how to obtain it describes something you cannot ask for,
+which is worse than useless — it looks authoritative and is not. So each entry
+needs its scheduler selector alongside its geometry, something like
+
+```yaml
+subclusters:
+  htc-genoa:      {select: "cpu_type=genoa",      node: {cores: 64, ...}}
+  htc-cascadelake:{select: "cpu_type=cascadelake", node: {cores: 36, ...}}
+```
+
+with `bench/submit` folding that into the `select=` directive.
+
+**`node.select` landed early, in phase 4.** Not as scope creep but because the
+first Casper run made the gap concrete: a description that says what the
+hardware is and not how to obtain it produces jobs that measure whatever the
+pool had free. `sites/<site>.yaml` now takes `node.select` beside the geometry it
+belongs to, `sitegen` emits `BENCH_NODE_SELECT`, and `jobfile` appends it to the
+select chunk rather than passing a separate `-l` — a resource that chooses a
+node belongs to the chunk being described. Casper carries `cpu_type=genoa` and
+its jobs now read
+
+    #PBS -l select=2:ncpus=64:mpiprocs=64:ompthreads=1:cpu_type=genoa
+
+That is forward-compatible rather than temporary: a `subclusters:` entry carries
+its own `node:` block, and `select` is already inside it. `bench/validate` says
+`NO PROCESSOR SELECTOR` where one is absent, which is the state Derecho is in
+and is correct there — it has one CPU node type today.
+
+**The attribute is `cpu_type`, confirmed from `pbsnodes` on 2026-09-03**, and it
+is populated on every Casper node. Counting by `cpu_type` and NCAR's
+site-defined `Qlist` resource, which tags the queues a node may serve:
+
+| `cpu_type` | high-throughput | other pools |
+|---|---|---|
+| `genoa` | 64 | 6 vis, 6 largemem |
+| `cascadelake` | 50 | 12 jhublogin, 4 nvgpu, 4 gdex/rda, 2 largemem |
+| `skylake` | 4 | 7 vis, 4 nvgpu, 4 jhublogin, 2 plain |
+| `milan` | — | 8 nvgpu (the A100 nodes) |
+| `sapphirerapids` | — | 2 nvgpu (the H100 nodes) |
+| `turin` | — | 4 gdex/rda |
+| `mi300a` | — | 2 amdgpu |
+
+That table explains the surprise: the high-throughput pool is 64 Genoa against
+50 Cascade Lake, so a request naming no processor was always most likely to land
+on Genoa.
+
+`Qlist` is worth a note of its own, and a correction. Every node carries the
+value `system` except the eight `gdex,rda` ones, which are the Research Data
+Archive nodes the documentation describes as reserved, so `system` marks general
+availability and selects nothing. The other tags — `htc`, `vis`, `nvgpu`,
+`largemem`, `jhublogin`, `gdex`, `amdgpu` — name **execution queues**, and on
+Casper you submit to the `casper` routing queue, which assigns one. So `Qlist`
+is for *reading* the machine, not for steering it: putting it in a select clause
+would fight the router rather than direct it. A sub-cluster's `select:` should
+carry `cpu_type` alone, which is verified to work there.
+
+Two of those rows are not in `sites/CasperDoc.md` at all: `turin` and `mi300a`.
+The hardware table also says four RDA nodes where the scheduler reports eight.
+So the documentation is behind the machine, which is a second reason this phase
+must be designed against `pbsnodes` rather than against a table.
 
 **This is one change with sub-clusters, not two.** Adding `subclusters:` beneath
 a level that is misnamed would fix the bottom of the hierarchy while cementing

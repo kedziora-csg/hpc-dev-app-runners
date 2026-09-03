@@ -316,6 +316,13 @@ def render(sf, source_rel=None):
             out.append(_assign(var, node[key], "node." + key))
     out.append(_assign("BENCH_TOPOLOGY_MODE", node.get("topology", "probe"),
                        "node.topology"))
+    if node.get("select"):
+        out.append("")
+        out.append("# How to ask the scheduler for THIS node type.  Appended to the select")
+        out.append("# directive by bench/submit.  Without it a job takes whatever the pool")
+        out.append("# offers, which is how the first Casper run measured hardware this file")
+        out.append("# did not describe.")
+        out.append(_assign("BENCH_NODE_SELECT", node["select"], "node.select"))
     if node.get("target_arch"):
         out.append("")
         out.append("# What this hardware runs, in report_cpu_features' spelling.  Checked")
@@ -407,7 +414,8 @@ def render(sf, source_rel=None):
                 ("BENCH_SMT_STRIDE", node.get("smt_stride")),
                 ("BENCH_CORES_PER_L3", node.get("cores_per_l3")),
                 ("BENCH_CORES_PER_NUMA", node.get("cores_per_numa")),
-                ("BENCH_TARGET_ARCH", node.get("target_arch"))]
+                ("BENCH_TARGET_ARCH", node.get("target_arch")),
+                ("BENCH_NODE_SELECT", node.get("select"))]
     present = [name for name, value in optional if value is not None]
     if present:
         out.append("export " + " ".join(present))

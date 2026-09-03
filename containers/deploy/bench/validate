@@ -83,8 +83,11 @@ def describe(exp, jobs, pre):
     print("experiment  %s" % exp.path)
     print("site        %s   (%s)" % (exp.site.name, exp.site.conf))
     print("description %s" % site_state(exp.site))
-    print("node        %d cores, SMT %d   [%s]"
-          % (exp.site.cores_per_node, exp.site.smt, exp.site.node_source))
+    print("node        %d cores, SMT %d%s   [%s]"
+          % (exp.site.cores_per_node, exp.site.smt,
+             ", select %s" % exp.site.node_select if exp.site.node_select
+             else ", NO PROCESSOR SELECTOR",
+             exp.site.node_source))
     print("reader      %s / %s"
           % ("PyYAML" if yamlish.HAVE_PYYAML else "built-in YAML subset",
              "jsonschema" if schema_mod.HAVE_JSONSCHEMA else "built-in validator"))
