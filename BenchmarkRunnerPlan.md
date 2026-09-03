@@ -1196,7 +1196,25 @@ images at the same time, since it checked only the base set and the `.sif` rule
 is a timestamp rule -- an image built before the app layer existed looks current
 to `make` and is not.
 
-Nothing has run on a compute node.
+The first SUBMISSION exposed a real defect, which is what a first run is for.
+Three jobs reached their nodes, printed their node lists and died sourcing
+`make_apptainer_launcher.sh` with "no site profile has been sourced" -- while the
+profile plainly had been sourced. Both entry points source it and then `exec`
+the runner, and **exported variables cross an `exec` but shell functions do
+not**. So `NCAR_HPC_ROOT` arrived and `bench_site_mpi_overlay` did not. Phase 4
+introduced that hazard by moving the module maps and overlay lookups from literals
+in the shell into generated functions, and no test crossed an exec boundary.
+
+`runner.sh` now re-sources the profile when the functions are absent, naming
+`$BENCH_SITE_CONF` -- which both entry points export for the purpose -- so a job
+recovers the same profile it was submitted with rather than searching again from
+a different directory. Re-sourcing rather than `export -f`: exported functions
+travel as mangled environment entries, are not portable across shells, and would
+make the profile's contents depend on how a job was started. `test_bench.sh` now
+sources and `exec`s for real, and that test was confirmed to fail without the
+fix.
+
+Nothing has yet run a cell on a compute node.
 
 Everything that is not the node geometry is still inferred from
 `PBS/OSU_casper.pbs`, so `verified: false` stands and `bench/validate`,

@@ -418,6 +418,31 @@ bash -n runner.sh && ok "runner.sh parses" || bad "runner.sh has a syntax error"
 ( unset NCAR_HPC_ROOT; ./runner.sh >/dev/null 2>&1 )
 want "runner.sh refuses to run without a site profile" 1 "$?"
 
+# The exec boundary.  Both entry points source the site profile and then `exec`
+# runner.sh: exported VARIABLES cross an exec, shell FUNCTIONS do not.  So the
+# runner arrives with NCAR_HPC_ROOT set and bench_site_mpi_overlay undefined,
+# and dies sourcing the launcher -- after the queue wait, in a job that had
+# already printed its node list.  That is what the first Casper submission hit,
+# and nothing here would have caught it.
+#
+# Reproduced exactly: source, exec, and assert the runner gets PAST loading its
+# libraries.  It still fails afterwards for want of an image and a `module`
+# command, which is fine -- the assertion is about which failure comes first.
+out="$(bash -c '. "$1" >/dev/null 2>&1; exec ./runner.sh' _ \
+       "${HERE}/../sites/derecho/site.sh" 2>&1)"
+case "${out}" in
+    *"no site profile has been sourced"*)
+        bad "the site profile's functions did not survive the exec into runner.sh" \
+            "$(printf '%s' "${out}" | tail -4)" ;;
+    *)  ok "runner.sh recovers the site profile across an exec" ;;
+esac
+
+# And the generator's half of it: the job names the profile so the runner
+# recovers the one this job was submitted with, not one it searched for.
+grep -q '^export BENCH_SITE_CONF=' "${d}/job.pbs" \
+    && ok "job.pbs exports the profile path across the exec" \
+    || bad "job.pbs does not export BENCH_SITE_CONF"
+
 #-- results ---------------------------------------------------------------------
 echo
 echo "collect"

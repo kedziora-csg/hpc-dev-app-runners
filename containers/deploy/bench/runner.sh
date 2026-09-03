@@ -78,6 +78,39 @@
     exit 1
 }
 
+# The profile again, because its FUNCTIONS did not survive getting here.
+#
+# job.tmpl and the hand-qsub script both source the profile and then `exec` this
+# script.  Exported VARIABLES cross an exec; shell FUNCTIONS do not.  So
+# NCAR_HPC_ROOT arrives and bench_site_mpi_overlay does not, and the first thing
+# to notice is make_apptainer_launcher.sh refusing to load with "no site profile
+# has been sourced" -- after the queue wait, in a job that had already printed
+# its node list.  That is what the first Casper submission hit.
+#
+# Re-sourcing rather than `export -f` in the generated block: exported functions
+# travel as environment entries with mangled names, are not portable across
+# shells, and would make the profile's contents depend on how a job was started.
+# Sourcing the file again is idempotent -- every assignment in it honours a value
+# already set -- and it costs one read of a small file.
+#
+# Which file: BENCH_SITE_CONF when the caller exported it, which both entry
+# points now do, so the job is driven by the same profile it was submitted with.
+# Otherwise derived from the two variables that DID survive, which keeps
+# runner.sh runnable by hand for debugging.
+if ! command -v bench_site_mpi_overlay >/dev/null 2>&1; then
+    _conf="${BENCH_SITE_CONF:-}"
+    [ -n "${_conf}" ] || _conf="${NCAR_HPC_ROOT}/../sites/${BENCH_SITE:-}/site.sh"
+    if [ -f "${_conf}" ]; then
+        . "${_conf}" || { echo "runner.sh: cannot source ${_conf}" >&2; exit 1; }
+    fi
+    command -v bench_site_mpi_overlay >/dev/null 2>&1 || {
+        echo "runner.sh: the site profile defines no bench_site_* functions." >&2
+        echo "  tried: ${_conf}" >&2
+        echo "  That block is generated -- run: bench/sitegen ${BENCH_SITE:-<site>} --write" >&2
+        exit 1
+    }
+fi
+
 #-------------------------------------------------------------------------------
 # 2. This job's expanded configuration.
 #-------------------------------------------------------------------------------

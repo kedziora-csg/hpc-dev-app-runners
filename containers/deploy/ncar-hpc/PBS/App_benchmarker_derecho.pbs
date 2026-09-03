@@ -137,4 +137,10 @@ fi
 
 bench_site_modules || { echo "site module bootstrap failed" >&2; exit 1; }
 
+# Exported because the next line is an exec: exported VARIABLES cross an exec,
+# shell FUNCTIONS do not.  The runner re-sources this file to recover the
+# bench_site_* lookups, and naming it here means it recovers the one this job
+# actually found rather than searching again from a different directory.
+export BENCH_SITE_CONF="${_site_conf}"
+
 exec "${BENCH_ROOT}/runner.sh"
