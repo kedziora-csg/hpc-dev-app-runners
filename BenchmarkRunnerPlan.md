@@ -1574,6 +1574,36 @@ All four DECISIONs are answered — see §12. What remains open:
    or staging the `.sif` on node-local NVMe — and nothing needs it yet, since it
    does not touch the figure of merit.
 
+8. **How big a difference is a real difference?** Two independent Derecho
+   sweeps, 2026-09-04 and 2026-09-05, on different nodes and from different
+   directories, give the first measurement of this harness's own resolution:
+
+   | placement | run-to-run agreement across the six images |
+   |---|---|
+   | `pureMPI` 128 x 1 | within **1%** (worst 0.6%) |
+   | `ccd` 16 x 8 | within **4%** |
+   | `numa` 8 x 16 | within **2%** |
+
+   That is the number needed to read the tables honestly. The 2% by which
+   `oneapi` leads at `ccd` is inside the noise of that cell; the 1.5% by which
+   MPICH leads OpenMPI at `pureMPI` is not, because `pureMPI` repeats to under
+   1%. Threaded cells are the noisier ones, which is what one would expect of a
+   bandwidth-bound code sharing memory controllers.
+
+   Two conclusions follow. Any claim about a difference smaller than a cell's
+   own reproducibility needs more repeats, not more confidence — `repeats: 3`
+   was chosen before there was any evidence about what it buys, and this is the
+   first evidence. And the harness should probably say this itself: `collect`
+   knows the spread within a cell but has no way to know the spread BETWEEN
+   runs, so comparing two results directories of the same experiment is a
+   feature it does not have and could.
+
+   The second sweep also confirmed something not asked of it. It ran on the
+   `main` queue with no `place` directive in the job script, and `run.meta`
+   records `pbs_place scatter:exclhost` read back from `qstat -f` -- so that
+   queue allocates whole hosts exclusively by default, and `scheduler.place`
+   is correctly absent for Derecho rather than merely untried.
+
 ---
 
 ## 12. Decision log

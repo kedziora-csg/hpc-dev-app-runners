@@ -331,6 +331,15 @@ print(len({c['name'] for c in cells}), len(cells))")"
 want "two OMP variants give six distinctly named cells" "6 6" "${names}"
 
 #-- generated jobs --------------------------------------------------------------
+# Derecho's own node.select, whatever it happens to be this week.  The
+# assertions below are about the MECHANISM -- the selector is appended to the
+# chunk, the place directive is not -- and must not encode an operator's current
+# choice of queue, memory or processor.  Hardcoding `ompthreads=1` as the end of
+# the line broke three tests the first time somebody added `mem=` to the site
+# file, which is a test being wrong rather than a change being wrong.
+sel_suffix="$( . "${HERE}/../sites/derecho/site.sh" >/dev/null 2>&1
+               printf '%s' "${BENCH_NODE_SELECT:+:${BENCH_NODE_SELECT}}" )"
+
 echo
 echo "generated jobs"
 ./submit derecho-hpcg --dry-run --results-dir "${TMP}/out" >/dev/null 2>&1 \
@@ -365,7 +374,7 @@ printf '%s\n' "${base}" \
 rm -rf "${TMP}/shared.d"
 ./submit "${TMP}/shared.yaml" --dry-run --results-dir "${TMP}/shared.d" >/dev/null 2>&1
 want "exclusive: false asks only for the cores the cells use" \
-     "#PBS -l select=2:ncpus=8:mpiprocs=8:ompthreads=1" \
+     "#PBS -l select=2:ncpus=8:mpiprocs=8:ompthreads=1${sel_suffix}" \
      "$(grep -h '^#PBS -l select' "${TMP}/shared.d"/*/job.pbs 2>/dev/null)"
 
 ./validate "${TMP}/shared.yaml" 2>&1 | grep -q "share each node" \
@@ -375,10 +384,25 @@ want "exclusive: false asks only for the cores the cells use" \
 # A description that says what the hardware is but not how to ask for it
 # produces jobs that measure whatever the pool had free -- which is exactly what
 # the first Casper run did.  So the selector has to reach the directive.
-grep -q '^#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1$' "${d}/job.pbs" \
-    && ok "no node.select leaves the directive unchanged" \
-    || bad "an absent node.select changed the select directive" \
-           "$(grep '^#PBS -l select' "${d}/job.pbs")"
+# A site with node.select REMOVED must get no suffix at all -- built here
+# rather than assumed of derecho.yaml, which now has one.
+sed '/^  select: /d' ../sites/derecho.yaml > "${TMP}/nosel.yaml"
+mkdir -p "${TMP}/nosel/derecho"
+cp "${TMP}/nosel.yaml" "${TMP}/nosel/derecho.yaml"
+sed "s|^NCAR_HPC_ROOT=.*|NCAR_HPC_ROOT='$(cd ../ncar-hpc && pwd)'|" \
+    ../sites/derecho/site.sh > "${TMP}/nosel/derecho/site.sh"
+python3 -c "
+import sys; sys.path.insert(0, '${HERE}')
+from benchlib import sitefile
+sf = sitefile.load('${TMP}/nosel/derecho.yaml')
+text = open('${TMP}/nosel/derecho/site.sh').read()
+open('${TMP}/nosel/derecho/site.sh', 'w').write(sitefile.splice(text, sitefile.render(sf)))" 2>/dev/null
+rm -rf "${TMP}/nosel.d"
+BENCH_SITE_CONF="${TMP}/nosel/derecho/site.sh" ./submit derecho-hpcg --dry-run \
+    --results-dir "${TMP}/nosel.d" >/dev/null 2>&1
+want "no node.select appends nothing" \
+     "#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1" \
+     "$(grep -h '^#PBS -l select' "${TMP}/nosel.d"/*/job.pbs 2>/dev/null | head -1)"
 
 rm -rf "${TMP}/sel.d"
 # casper-hpcg names the openmpi third of the same image set, so the stand-in
@@ -420,7 +444,7 @@ BENCH_SITE_CONF="${TMP}/psite/derecho/site.sh" ./submit derecho-hpcg --dry-run \
 want "scheduler.place becomes its own directive" "#PBS -l place=scatter:excl" \
      "$(grep -h '^#PBS -l place' "${TMP}/pl.d"/*/job.pbs 2>/dev/null | head -1)"
 want "and does not leak into the select chunk" \
-     "#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1" \
+     "#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1${sel_suffix}" \
      "$(grep -h '^#PBS -l select' "${TMP}/pl.d"/*/job.pbs 2>/dev/null | head -1)"
 
 # The job names its profile outright, and PBS runs it from its own spool
