@@ -26,7 +26,7 @@ verified: true
 scheduler:
   kind: pbspro
   submit: qsub
-  queue: main
+  queue: develop
   walltime_max: "12:00:00"
 
 modules:

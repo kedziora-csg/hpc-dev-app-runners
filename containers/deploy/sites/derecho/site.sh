@@ -89,7 +89,7 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 [ -n "${BENCH_SITE+set}" ] || BENCH_SITE='derecho'
 [ -n "${BENCH_SCHEDULER+set}" ] || BENCH_SCHEDULER='pbspro'
 [ -n "${BENCH_SUBMIT+set}" ] || BENCH_SUBMIT='qsub'
-[ -n "${BENCH_QUEUE+set}" ] || BENCH_QUEUE='main'
+[ -n "${BENCH_QUEUE+set}" ] || BENCH_QUEUE='develop'
 [ -n "${BENCH_WALLTIME_MAX+set}" ] || BENCH_WALLTIME_MAX='12:00:00'
 
 #-- node geometry: fallbacks, never measurements --------------------------
