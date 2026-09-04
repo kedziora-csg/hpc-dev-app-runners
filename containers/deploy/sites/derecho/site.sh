@@ -79,48 +79,50 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # fails while it is stale.  Change the YAML instead.
 #
 # Every setting below honours a value already in the environment, so a
-# one-off `qsub -v BENCH_QUEUE=develop ...` still wins over the file.
+# one-off `BENCH_QUEUE=develop bench/submit ...` wins over the file.
+# An EMPTY value counts: `BENCH_PLACE= bench/submit ...` switches an
+# optional setting off, which is not the same as leaving it unset.
 #
 # NCAR Derecho: 2 x AMD EPYC 7763 (Milan) per CPU node, SMT on, HPE Cray EX with Slingshot 11
 
 #-- identity and scheduler -----------------------------------------------
-[ -n "${BENCH_SITE:-}" ] || BENCH_SITE='derecho'
-[ -n "${BENCH_SCHEDULER:-}" ] || BENCH_SCHEDULER='pbspro'
-[ -n "${BENCH_SUBMIT:-}" ] || BENCH_SUBMIT='qsub'
-[ -n "${BENCH_QUEUE:-}" ] || BENCH_QUEUE='main'
-[ -n "${BENCH_WALLTIME_MAX:-}" ] || BENCH_WALLTIME_MAX='12:00:00'
+[ -n "${BENCH_SITE+set}" ] || BENCH_SITE='derecho'
+[ -n "${BENCH_SCHEDULER+set}" ] || BENCH_SCHEDULER='pbspro'
+[ -n "${BENCH_SUBMIT+set}" ] || BENCH_SUBMIT='qsub'
+[ -n "${BENCH_QUEUE+set}" ] || BENCH_QUEUE='main'
+[ -n "${BENCH_WALLTIME_MAX+set}" ] || BENCH_WALLTIME_MAX='12:00:00'
 
 #-- node geometry: fallbacks, never measurements --------------------------
 # The job probes lscpu and topology.json carries THAT answer.  These
 # are what can be known before there is a node to ask, which is when
 # an illegal ranks x threads is still cheap to reject.
-[ -n "${BENCH_CORES_PER_NODE:-}" ] || BENCH_CORES_PER_NODE='128'
-[ -n "${BENCH_SMT:-}" ] || BENCH_SMT='2'
-[ -n "${BENCH_SOCKETS:-}" ] || BENCH_SOCKETS='2'
-[ -n "${BENCH_SMT_STRIDE:-}" ] || BENCH_SMT_STRIDE='128'
-[ -n "${BENCH_CORES_PER_L3:-}" ] || BENCH_CORES_PER_L3='8'
-[ -n "${BENCH_CORES_PER_NUMA:-}" ] || BENCH_CORES_PER_NUMA='16'
-[ -n "${BENCH_TOPOLOGY_MODE:-}" ] || BENCH_TOPOLOGY_MODE='probe'
+[ -n "${BENCH_CORES_PER_NODE+set}" ] || BENCH_CORES_PER_NODE='128'
+[ -n "${BENCH_SMT+set}" ] || BENCH_SMT='2'
+[ -n "${BENCH_SOCKETS+set}" ] || BENCH_SOCKETS='2'
+[ -n "${BENCH_SMT_STRIDE+set}" ] || BENCH_SMT_STRIDE='128'
+[ -n "${BENCH_CORES_PER_L3+set}" ] || BENCH_CORES_PER_L3='8'
+[ -n "${BENCH_CORES_PER_NUMA+set}" ] || BENCH_CORES_PER_NUMA='16'
+[ -n "${BENCH_TOPOLOGY_MODE+set}" ] || BENCH_TOPOLOGY_MODE='probe'
 
 # What this hardware runs, in report_cpu_features' spelling.  Checked
 # against the app binary once at job start: a mismatch costs one line
 # before the first cell instead of a SIGILL on every rank, three hours
 # into a queue, with no output and exit 132.
-[ -n "${BENCH_TARGET_ARCH:-}" ] || BENCH_TARGET_ARCH='x86-64-v3'
+[ -n "${BENCH_TARGET_ARCH+set}" ] || BENCH_TARGET_ARCH='x86-64-v3'
 
 #-- the container --------------------------------------------------------
-[ -n "${BENCH_CONTAINER_RUNTIME:-}" ] || BENCH_CONTAINER_RUNTIME='apptainer'
-[ -n "${BENCH_BINDS:-}" ] || BENCH_BINDS='/glade /local_scratch /run /var/run /opt/cray /etc/cray'
+[ -n "${BENCH_CONTAINER_RUNTIME+set}" ] || BENCH_CONTAINER_RUNTIME='apptainer'
+[ -n "${BENCH_BINDS+set}" ] || BENCH_BINDS='/glade /local_scratch /run /var/run /opt/cray /etc/cray'
 # Bound only where the directory exists: apptainer treats a missing bind
 # SOURCE as fatal, so an unconditional bind of a filesystem this machine
 # may lack turns 'that mount is absent' into 'the job will not start'.
-[ -n "${BENCH_BINDS_IF_PRESENT:-}" ] || BENCH_BINDS_IF_PRESENT='/usr/lpp/mmfs'
+[ -n "${BENCH_BINDS_IF_PRESENT+set}" ] || BENCH_BINDS_IF_PRESENT='/usr/lpp/mmfs'
 # host:container pairs, for a directory that must NOT land on top of the
 # container's own tree.
-[ -n "${BENCH_BIND_MAP:-}" ] || BENCH_BIND_MAP='/usr/lib64:/host_lib64'
+[ -n "${BENCH_BIND_MAP+set}" ] || BENCH_BIND_MAP='/usr/lib64:/host_lib64'
 # LD_LIBRARY_PATH inside the container, in order, after whatever the MPI
 # overlay prepends.  A * entry is a glob and takes its newest match.
-[ -n "${BENCH_LIB_DIRS:-}" ] || BENCH_LIB_DIRS='/opt/cray/pe/lib64 /opt/cray/pals/*/lib ${NCAR_ROOT_LIBFABRIC}/lib64 /opt/cray/libfabric/*/lib64 /usr/lpp/mmfs/lib /usr/lib64'
+[ -n "${BENCH_LIB_DIRS+set}" ] || BENCH_LIB_DIRS='/opt/cray/pe/lib64 /opt/cray/pals/*/lib ${NCAR_ROOT_LIBFABRIC}/lib64 /opt/cray/libfabric/*/lib64 /usr/lpp/mmfs/lib /usr/lib64'
 
 #-- host modules ---------------------------------------------------------
 # Container compiler tag to host module.  The host MPI that

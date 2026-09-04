@@ -4,6 +4,11 @@
 #PBS -j oe
 #PBS -q @QUEUE@
 #PBS -l walltime=@WALLTIME@
+# The next line looks like a typo and is not: @PLACE_DIRECTIVE@ expands to a
+# whole directive line ending in a newline, or to nothing at all.  It has to
+# vanish completely when a site states no scheduler.place -- `#PBS -l place=`
+# with an empty value is an error, and a blank line here would sit inside the
+# directive block -- so the placeholder butts against the line that follows it.
 @PLACE_DIRECTIVE@#PBS -l select=@NODES@:ncpus=@NCPUS@:mpiprocs=@MPIPROCS@:ompthreads=1@NODE_SELECT@
 #PBS -o @RESULTS_DIR@/job.log
 

@@ -462,6 +462,75 @@ want "an occupied results directory is refused without --force" 2 "$?"
 want "--force accepts it" 0 "$?"
 rm -f "${d}/results.jsonl"
 
+#-- run it from anywhere ---------------------------------------------------------
+# The tools are invoked by path from a scratch directory as often as from inside
+# the checkout, so neither the profile search nor the results path may depend on
+# where somebody happens to be standing.
+echo
+echo "cwd independence"
+mkdir -p "${TMP}/elsewhere"
+( cd "${TMP}/elsewhere"
+  unset BENCH_SITE_CONF
+  # No BENCH_SITE_CONF, no ~/.config copy, and nothing named derecho above this
+  # directory: the only way to find the profile is from where the CODE lives.
+  XDG_CONFIG_HOME="${TMP}/no-such-config" python3 -c "
+import sys
+sys.path.insert(0, '${HERE}')
+from benchlib import site
+print(site.find_conf('derecho'))" 2>&1 ) > "${TMP}/anywhere.out" 2>&1
+case "$(cat "${TMP}/anywhere.out")" in
+    *"/sites/derecho/site.sh") ok "the profile is found from outside the checkout" ;;
+    *) bad "running from another directory cannot find the site profile" \
+           "$(cat "${TMP}/anywhere.out")" ;;
+esac
+
+# A relative --results-dir reaches `#PBS -o` and job.env's RESULTS_DIR, and the
+# job resolves neither from where you were standing.  It has to be absolute
+# before it is written into anything.
+( cd "${TMP}" && rm -rf rel.d && \
+  "${HERE}/submit" derecho-hpcg --dry-run --results-dir rel.d >/dev/null 2>&1 )
+out="$(grep -h '^#PBS -o' "${TMP}/rel.d"/*/job.pbs 2>/dev/null | head -1)"
+case "${out}" in
+    "#PBS -o /"*) ok "a relative --results-dir is made absolute" ;;
+    *) bad "a relative --results-dir reached the job script" "${out:-<no job.pbs>}" ;;
+esac
+
+#-- env.sh -----------------------------------------------------------------------
+# One line in ~/.bashrc, then `submit derecho-hpcg` from any directory.  What it
+# must NOT do matters as much as what it does: exporting NCAR_HPC_ROOT or
+# BENCH_ROOT would be honoured by every clone's site.sh, so one line naming one
+# checkout would drive every other checkout's jobs at the first one's libexec
+# and images.
+echo
+echo "env.sh"
+bash -n env.sh && ok "env.sh parses" || bad "env.sh has a syntax error"
+
+# This suite exports BENCH_SITE_CONF for its own reasons; unset it here or the
+# check below would be testing the harness rather than env.sh.
+envout="$(bash -c '
+    unset BENCH_SITE_CONF
+    cd "$1" || exit 1
+    . "$2/env.sh" || exit 1
+    . "$2/env.sh" || exit 1
+    echo "submit=$(command -v submit)"
+    echo "onpath=$(tr : "\n" <<< "${PATH}" | grep -c "/bench$")"
+    echo "hpcroot=[${NCAR_HPC_ROOT:-}] benchroot=[${BENCH_ROOT:-}] siteconf=[${BENCH_SITE_CONF:-}]"
+' _ "${TMP}" "${HERE}" 2>&1)"
+
+case "${envout}" in
+    *"submit=${HERE}/submit"*) ok "sourcing env.sh puts this checkout's submit on PATH" ;;
+    *) bad "env.sh did not put submit on PATH" "${envout}" ;;
+esac
+case "${envout}" in
+    *"onpath=1"*) ok "sourcing it twice does not grow PATH" ;;
+    *) bad "env.sh added itself to PATH more than once" "${envout}" ;;
+esac
+case "${envout}" in
+    *"hpcroot=[] benchroot=[] siteconf=[]"*)
+        ok "env.sh exports nothing that could cross two checkouts" ;;
+    *) bad "env.sh exported a path that site.sh would honour" "${envout}" ;;
+esac
+
 #-- the runner ------------------------------------------------------------------
 echo
 echo "runner"

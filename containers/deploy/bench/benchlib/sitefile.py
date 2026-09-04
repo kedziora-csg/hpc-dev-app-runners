@@ -226,11 +226,20 @@ def _safe(value, where):
 
 
 def _assign(name, value, where):
-    """[ -n "${X:-}" ] || X='value' -- an environment override still wins.
+    """[ -n "${X+set}" ] || X='value' -- an environment override still wins.
 
     site.sh has always advertised that every setting honours an existing value,
     which is what makes `qsub -v BENCH_QUEUE=develop ...` work for a one-off, so
     a plain assignment would quietly take that away.
+
+    `${X+set}` and not `${X:-}`, because those differ on the case that matters:
+    a variable SET TO EMPTY.  With `-n` an empty value reads as absent and the
+    default is applied anyway, so an operator could change an optional setting
+    from the environment but never switch it OFF -- `BENCH_PLACE= submit ...`
+    would silently keep emitting the site's place directive.  `+set` is true for
+    a variable that exists at all, so an empty one means exactly what it looks
+    like.  It is also the honest reading of what the header has always claimed:
+    an exported empty variable is a value already in the environment.
 
     Written this way rather than as X="${X:-value}" because the default there is
     inside a parameter expansion, and a value containing ${NAME} -- which a
@@ -243,7 +252,7 @@ def _assign(name, value, where):
     exactly what the YAML said and the only forbidden character is the single
     quote itself, which _safe already refuses.
     """
-    return "[ -n \"${%s:-}\" ] || %s='%s'" % (name, name, _safe(value, where))
+    return "[ -n \"${%s+set}\" ] || %s='%s'" % (name, name, _safe(value, where))
 
 
 def _case(fname, mapping, families, default="", comment=None):
@@ -292,7 +301,9 @@ def render(sf, source_rel=None):
            "# fails while it is stale.  Change the YAML instead.",
            "#",
            "# Every setting below honours a value already in the environment, so a",
-           "# one-off `qsub -v BENCH_QUEUE=develop ...` still wins over the file."]
+           "# one-off `BENCH_QUEUE=develop bench/submit ...` wins over the file.",
+           "# An EMPTY value counts: `BENCH_PLACE= bench/submit ...` switches an",
+           "# optional setting off, which is not the same as leaving it unset."]
     if d.get("description"):
         out += ["#", "# " + d["description"]]
     if not sf.verified:

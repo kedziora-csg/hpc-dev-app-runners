@@ -154,19 +154,38 @@ def find_conf(name, start=None):
     if os.path.isfile(candidate) and profile_site(candidate) in (name, ""):
         return candidate
 
-    here = os.path.abspath(start or os.getcwd())
+    # Walking up from where you are, then from where THIS CODE is.
+    #
+    # The second is what lets `/path/to/checkout/bench/submit` work from any
+    # directory on the machine: the tool knows which checkout it belongs to, so
+    # standing somewhere else is not a reason to fail.  It is tried second, not
+    # first, so a person working inside a checkout still gets that checkout's
+    # profile even when they invoked another one's script.
+    from_here = os.path.dirname(os.path.abspath(__file__))
+    for origin in (start or os.getcwd(), from_here):
+        found = _walk_up(name, origin)
+        if found:
+            return found
+
+    raise BenchError(
+        "cannot find a site profile for %r" % name, EXIT_ERROR,
+        ["looked for: $BENCH_SITE_CONF, "
+         "${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh,",
+         "            sites/%s/site.sh above %s" % (name, start or os.getcwd()),
+         "            and sites/%s/site.sh above %s" % (name, from_here),
+         "a ~/.config copy for a DIFFERENT site is skipped, not used"])
+
+
+def _walk_up(name, origin):
+    """sites/<name>/site.sh in `origin` or any directory above it, or None."""
+    here = os.path.abspath(origin)
     while True:
         candidate = os.path.join(here, "sites", name, "site.sh")
         if os.path.isfile(candidate):
             return candidate
         parent = os.path.dirname(here)
         if parent == here:
-            raise BenchError(
-                "cannot find a site profile for %r" % name, EXIT_ERROR,
-                ["looked for: $BENCH_SITE_CONF, "
-                 "${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh,",
-                 "            and sites/%s/site.sh above %s" % (name, start or os.getcwd()),
-                 "a ~/.config copy for a DIFFERENT site is skipped, not used"])
+            return None
         here = parent
 
 

@@ -1553,6 +1553,27 @@ All four DECISIONs are answered — see §12. What remains open:
    on the other — the exact failure `arch_check` exists to catch, and a case
    where a single per-site value is not merely imprecise but wrong.
 
+7. **What does the container cost?** The Derecho sweep of 2026-09-04 answers
+   part of this for the first time, and the answer is not small. Wall time minus
+   the app's own reported time is about **156 s at 128 ranks/node**, against 25 s
+   at 16 and 21 s at 8 — and it is steady across all three repeats, so it is not
+   the cold `.sif` read the runner already warns about. The launcher starts one
+   `apptainer exec` per rank, so 2 nodes x 128 ranks is 256 container startups
+   per run.
+
+   Two things follow. First, it validates a design decision rather than
+   undermining one: `bench/collect` ranks on the app's own figure of merit and
+   not on wall time, and here those two would have chosen different winners —
+   `pureMPI` has the best GFLOP/s and the worst wall time in the same table.
+   Second, "what does running in a container cost" is arguably a question this
+   whole project exists to answer, and the harness can now measure it: the same
+   image run natively at the same geometry would isolate the startup cost from
+   everything else.
+
+   Whether it is worth *reducing* is a separate question — `apptainer instance`,
+   or staging the `.sif` on node-local NVMe — and nothing needs it yet, since it
+   does not touch the figure of merit.
+
 ---
 
 ## 12. Decision log
