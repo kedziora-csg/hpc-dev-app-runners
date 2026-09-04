@@ -79,6 +79,7 @@ node:
   cores_per_numa: 16      # NPS4: 8 NUMA domains across 128 cores
   target_arch: x86-64-v3  # Zen 3: AVX2, no AVX-512
   topology: probe
+  mem: 230GB
 
 container:
   runtime: apptainer
