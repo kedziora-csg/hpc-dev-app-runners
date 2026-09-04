@@ -462,6 +462,22 @@ want "an occupied results directory is refused without --force" 2 "$?"
 want "--force accepts it" 0 "$?"
 rm -f "${d}/results.jsonl"
 
+# A per-site job.tmpl wins over the shared one and can carry directives no site
+# file mentions, so removing a key from the YAML would appear to do nothing.
+# That override is announced rather than left to be discovered.
+cp ../sites/job.pbspro.tmpl ../sites/derecho/job.tmpl
+rm -rf "${TMP}/fork.d"
+out="$(./submit derecho-hpcg --dry-run --results-dir "${TMP}/fork.d" 2>&1)"
+rm -f ../sites/derecho/job.tmpl
+case "${out}" in
+    *"a per-site template, overriding"*) ok "a forked job.tmpl announces itself" ;;
+    *) bad "a per-site template overrode the shared one silently" ;;
+esac
+rm -rf "${TMP}/nofork.d"
+./submit derecho-hpcg --dry-run --results-dir "${TMP}/nofork.d" 2>&1 | grep -q "per-site template" \
+    && bad "the shared template was reported as an override" \
+    || ok "the shared template is not reported as an override"
+
 #-- run it from anywhere ---------------------------------------------------------
 # The tools are invoked by path from a scratch directory as often as from inside
 # the checkout, so neither the profile search nor the results path may depend on

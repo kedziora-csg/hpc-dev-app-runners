@@ -150,6 +150,12 @@ def main():
     root = os.path.abspath(
         args.results_dir or os.path.join(exp.site.results_root, exp.name))
     template = template_for(exp.site)
+    # A per-site job.tmpl silently overrides the shared one and can carry
+    # directives no site file mentions, so it is never left unsaid: removing a
+    # key from the YAML changes nothing if a forked template hardcodes it.
+    shared = os.path.join(os.path.dirname(exp.site.bench_root), "sites",
+                          "job.%s.tmpl" % exp.site.scheduler)
+    site_template = os.path.abspath(template) != os.path.abspath(shared)
 
     print("experiment : %s" % exp.path)
     print("site       : %s   (%s)" % (exp.site.name, exp.site.conf))
@@ -163,6 +169,11 @@ def main():
           % (exp.defaults["queue"],
              "    place: %s" % exp.site.place if exp.site.place else ""))
     print("results    : %s" % root)
+    if site_template:
+        print("template   : %s" % template)
+        print("             ^ a per-site template, overriding sites/job.%s.tmpl."
+              % exp.site.scheduler)
+        print("               Directives in it are NOT described by any site file.")
     if args.profile:
         print("profile    : %s" % args.profile)
     print("jobs       : %d  (%d cell(s), %d run(s))"
