@@ -104,6 +104,12 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 [ -n "${BENCH_CORES_PER_NUMA+set}" ] || BENCH_CORES_PER_NUMA='16'
 [ -n "${BENCH_TOPOLOGY_MODE+set}" ] || BENCH_TOPOLOGY_MODE='probe'
 
+# How to ask the scheduler for THIS node type.  Appended to the select
+# directive by bench/submit.  Without it a job takes whatever the pool
+# offers, which is how the first Casper run measured hardware this file
+# did not describe.
+[ -n "${BENCH_NODE_SELECT+set}" ] || BENCH_NODE_SELECT='mem=230GB'
+
 # What this hardware runs, in report_cpu_features' spelling.  Checked
 # against the app binary once at job start: a mismatch costs one line
 # before the first cell instead of a SIGILL on every rank, three hours
@@ -212,7 +218,7 @@ export BENCH_SITE BENCH_SCHEDULER BENCH_SUBMIT BENCH_QUEUE
 export BENCH_CORES_PER_NODE BENCH_SMT BENCH_TOPOLOGY_MODE
 export BENCH_CONTAINER_RUNTIME BENCH_BINDS BENCH_BINDS_IF_PRESENT
 export BENCH_BIND_MAP BENCH_LIB_DIRS
-export BENCH_WALLTIME_MAX BENCH_SOCKETS BENCH_SMT_STRIDE BENCH_CORES_PER_L3 BENCH_CORES_PER_NUMA BENCH_TARGET_ARCH
+export BENCH_WALLTIME_MAX BENCH_SOCKETS BENCH_SMT_STRIDE BENCH_CORES_PER_L3 BENCH_CORES_PER_NUMA BENCH_TARGET_ARCH BENCH_NODE_SELECT
 # <<< END GENERATED
 
 
