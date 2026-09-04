@@ -85,8 +85,9 @@ def describe(exp, jobs, pre):
     print("description %s" % site_state(exp.site))
     print("node        %d cores, SMT %d%s   [%s]"
           % (exp.site.cores_per_node, exp.site.smt,
-             ", select %s" % exp.site.node_select if exp.site.node_select
-             else ", NO PROCESSOR SELECTOR",
+             (", select %s" % exp.site.node_select if exp.site.node_select
+              else ", NO PROCESSOR SELECTOR")
+             + (", place %s" % exp.site.place if exp.site.place else ""),
              exp.site.node_source))
     print("reader      %s / %s"
           % ("PyYAML" if yamlish.HAVE_PYYAML else "built-in YAML subset",

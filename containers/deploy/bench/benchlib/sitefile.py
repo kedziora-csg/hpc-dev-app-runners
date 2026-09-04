@@ -181,6 +181,15 @@ def cross_checks(data):
             out.append("unknown MPI family %r (expected %s)"
                        % (family, ", ".join(FAMILIES)))
 
+    select = (data.get("node") or {}).get("select") or ""
+    for clause in select.split(":"):
+        if clause.startswith("place="):
+            out.append(
+                "node.select carries %r. `place` is a job-wide directive, not a "
+                "per-chunk resource, so inside select= it would be read as a "
+                "chunk resource of that name and quietly do nothing. Use "
+                "scheduler.place." % clause)
+
     binds = (data.get("container") or {}).get("binds") or []
     bind_map = (data.get("container") or {}).get("bind_map") or {}
     for host_path in sorted(bind_map):
@@ -300,6 +309,11 @@ def render(sf, source_rel=None):
     if sched.get("walltime_max"):
         out.append(_assign("BENCH_WALLTIME_MAX", sched["walltime_max"],
                            "scheduler.walltime_max"))
+    if sched.get("place"):
+        out.append("# Job-wide placement policy, its own directive rather than part of the")
+        out.append("# select chunk.  Only stated where the queue's default is not what this")
+        out.append("# site wants.")
+        out.append(_assign("BENCH_PLACE", sched["place"], "scheduler.place"))
     out.append("")
 
     out.append("#-- node geometry: fallbacks, never measurements " + "-" * 26)
@@ -415,7 +429,8 @@ def render(sf, source_rel=None):
                 ("BENCH_CORES_PER_L3", node.get("cores_per_l3")),
                 ("BENCH_CORES_PER_NUMA", node.get("cores_per_numa")),
                 ("BENCH_TARGET_ARCH", node.get("target_arch")),
-                ("BENCH_NODE_SELECT", node.get("select"))]
+                ("BENCH_NODE_SELECT", node.get("select")),
+                ("BENCH_PLACE", sched.get("place"))]
     present = [name for name, value in optional if value is not None]
     if present:
         out.append("export " + " ".join(present))

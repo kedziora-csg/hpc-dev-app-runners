@@ -197,6 +197,11 @@ def write(exp, job, results_dir, template_path, account, profile=None):
         # a node belongs to the chunk being described: `-l cpu_type=...` on its
         # own is a job-wide resource and does not mean the same thing.
         "NODE_SELECT": (":" + exp.site.node_select) if exp.site.node_select else "",
+        # A whole directive line, or nothing at all.  Its own -l because place is
+        # job-wide: PBS reads it as how to spread the chunks and who else may
+        # share them, which is not something a chunk can say about itself.
+        "PLACE_DIRECTIVE": ("#PBS -l place=%s\n" % exp.site.place
+                            if exp.site.place else ""),
         "RESULTS_DIR": results_dir,
         "SITE_CONF": exp.site.conf,
         "BENCH_ROOT": exp.site.bench_root,

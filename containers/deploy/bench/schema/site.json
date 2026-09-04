@@ -47,6 +47,11 @@
           "type": "string",
           "description": "Default queue. An experiment's defaults.queue overrides it, and so does BENCH_QUEUE in the environment."
         },
+        "place": {
+          "type": "string",
+          "pattern": "^[a-z]+(:[a-z]+)*$",
+          "description": "The scheduler's placement policy, emitted as its own directive because it is job-wide rather than per-chunk -- PBS spells it `-l place=scatter:excl`. Distinct from node.select, which describes ONE chunk and cannot express `spread these chunks across distinct hosts and let nobody else on them`. Omit it where the queue's default is already what you want: Derecho's main queue allocates whole nodes, so only a queue that does not needs this stated."
+        },
         "walltime_max": {
           "type": "string",
           "pattern": "^[0-9]{1,3}:[0-5][0-9]:[0-5][0-9]$",

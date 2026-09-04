@@ -7,7 +7,8 @@ high-throughput nodes, which is the type the scheduler gives when the request
 names none.
 **Phase 4.5 proposed and next**: what this document calls a *site* is a cluster,
 and the missing outer level (NCAR) and inner level (node type) are one change,
-which must land before phase 5.**
+which must land before phase 5. **Phase 4.6** follows it: Slurm, for TACC, which
+is both a second site and a second scheduler.**
 
 This document proposes the concrete interfaces that `SeparateConcerns.md` and
 `SeparationAnalysis.md` gesture at but do not specify. Those two argued *that* the
@@ -1016,6 +1017,7 @@ Each phase is independently useful and independently revertible.
 | **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
 | **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. **Built — see below.** |
 | **4.5** | Rename the middle level: **site → cluster**, and introduce the three-level model site (NCAR) / cluster (Derecho, Casper) / sub-cluster (node type). Merges §11.6 | The name is wrong now and every value it governs is being written twice. Must precede 5, which builds an image for a "named machine" — naming it correctly is a prerequisite, not a follow-up. |
+| **4.6** | A second scheduler: Slurm, for TACC. Named the PBS assumptions and the Slurm shape; **implement when there is an account to test against** | The abstraction is half there already — per-scheduler templates, an `srun` arm in `mpi_launch_flags`, `scheduler.kind`. What is missing is three places that still assume PBS in code. Designing the rest from a manual is how the Casper node type came out wrong twice. |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9); carry `app_march_flags` through as a per-app build-arg (§3) | CI now validates the contract on every app build. The microarchitecture override belongs here because this is where an app image is built for a *named machine* rather than for everyone. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
@@ -1418,6 +1420,60 @@ build-arg and is described as the point where an app image is built for a *named
 machine* rather than for everyone. Naming that machine correctly is a
 prerequisite for that, not a follow-up to it.
 
+### Phase 4.6, proposed: a second scheduler
+
+TACC is the reason this becomes concrete, and it is worth noticing that TACC is
+a second **site** in phase 4.5's sense — Frontera, Stampede and Vista are its
+clusters — so the two changes reinforce each other rather than compete. It also
+runs Slurm, which nothing here has ever run against.
+
+**What is already scheduler-shaped**, from phases 3 and 4, mostly by accident of
+having done the work once carefully:
+
+| already there | what it does |
+|---|---|
+| `scheduler.kind: pbspro \| slurm` | an enum, so a typo is refused rather than silently accepted |
+| `scheduler.submit` | `qsub` or `sbatch`, read from the profile |
+| `sites/job.<kind>.tmpl` | the template lookup is already per-scheduler, so a Slurm site is one new file and not one per machine |
+| `mpi_launch_flags` | already has an `srun` arm beside `pals` and `openmpi` |
+| `bench_site_mpi_launcher` | the site says which dialect a family uses, so nothing infers it |
+
+**What is genuinely PBS-specific**, and each needs a decision rather than a
+translation:
+
+| where | what | Slurm |
+|---|---|---|
+| `sites/job.pbspro.tmpl` | the `#PBS` directive block, `select=`/`place=` | `#SBATCH`, `--nodes`, `--ntasks-per-node`, `--cpus-per-task`, `--exclusive`, `--constraint` |
+| `benchlib/jobfile.select_size` | one chunk description carrying nodes, cores and ranks together | three separate flags; the `exclusive` distinction stops being a core count and becomes a flag |
+| `node.select` | `cpu_type=genoa` inside the chunk | `--constraint=...`, which is a job-wide flag, so it stops being a select clause |
+| `scheduler.place` | `-l place=scatter:excl` | partly `--exclusive`, partly `--distribution`, partly the default |
+| `runner.sh` | `$PBS_NODEFILE` for the node list | `$SLURM_JOB_NODELIST`, which is a *range expression* and needs `scontrol show hostnames` to expand |
+| `provenance.sh` | `qstat -f` for the job's real `place` and `select` | `scontrol show job`, different keys, and "was this node shared" is asked differently |
+| `bench/submit` | `qsub` returning a job id on stdout | `sbatch` prints `Submitted batch job N` |
+| `experiment.defaults.queue` | a PBS queue | a Slurm *partition*, which is the same idea under another name |
+
+**The shape this suggests.** The directive block is already behind a
+per-scheduler template, and `mpi_launch_flags` already dispatches on a dialect
+the site names. What is missing is the same treatment for the three places that
+still assume PBS in code: the select-versus-flags rendering in `jobfile`, the
+node list in `runner.sh`, and the job-resource query in `provenance.sh`. Each is
+small on its own; the risk is that a Slurm arm written from documentation would
+be wrong in ways nobody notices, exactly as the Casper node type was.
+
+**So this is designed now and implemented when there is an account to test it
+against.** That is not caution for its own sake: this project has now twice
+produced a confidently wrong description by reasoning from a hardware table or a
+manual rather than from `pbsnodes` and a job that ran. A Slurm arm with no Slurm
+to run it on would be a third. The useful preparation in the meantime is to keep
+the PBS assumptions *named* — which is what the table above is for — so that
+when access exists the work is a list rather than a search.
+
+One thing worth doing before then, because it costs nothing and is true either
+way: `pbs_place` and `pbs_select` in `run.meta` are PBS-shaped key names for a
+scheduler-independent question, namely "did this job have the node to itself and
+how were its chunks spread". Renaming them at the same time as the phase 4.5
+results-format change would avoid a second format bump.
+
 ---
 
 ## 11. Open questions
@@ -1434,12 +1490,15 @@ All four DECISIONs are answered — see §12. What remains open:
    pre-Haswell hardware. Deliberately left open; the app-level override in §3 is
    what makes it *not urgent*.
 
-   A second, narrower thing to check while deciding: the nvhpc stage sets
+   ~~A second, narrower thing to check: the nvhpc stage sets
    `CFLAGS="-fPIC ${MARCH_FLAGS}"` with no `-O`, and `AC_PROG_CC` only supplies
-   its default `-g -O2` when `CFLAGS` is **unset**. If that is what it looks like,
-   the autotools libraries in the nvhpc images are built below `-O2` while the
-   gcc and oneapi ones are not. `h5cc -showconfig | grep -i flags` inside each
-   image settles it in seconds.
+   its default `-g -O2` when `CFLAGS` is **unset**, so the autotools libraries in
+   the nvhpc images may be built below `-O2`.~~ **Closed 2026-09-03: not a
+   problem.** The NVIDIA compilers optimise by default, so an absent `-O` does
+   not leave them unoptimised the way it would leave gcc at `-O0`. The concern
+   was reasoning about autoconf's behaviour without the compiler's own default in
+   view. `apptainer exec <img> h5cc -showconfig` would confirm it from the image
+   for anyone who wants it in writing, but nothing depends on that.
 
 1. **Repo boundary.** This plan keeps everything in one repo and makes the boundary visible
    through directories (`bench/`, `sites/`, `containers/apps/`), which is what

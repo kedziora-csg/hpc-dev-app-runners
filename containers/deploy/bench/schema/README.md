@@ -288,6 +288,7 @@ Which batch system, and how a job reaches it.
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `kind` | `pbspro` \| `slurm` | yes |  | Selects sites/<site>/job.tmpl's directive dialect. Only pbspro is exercised today; slurm is named so the enum rejects a typo rather than accepting an unimplemented value silently. |
+| `place` | string |  | matches `/^[a-z]+(:[a-z]+)*$/` | The scheduler's placement policy, emitted as its own directive because it is job-wide rather than per-chunk -- PBS spells it `-l place=scatter:excl`. Distinct from node.select, which describes ONE chunk and cannot express `spread these chunks across distinct hosts and let nobody else on them`. Omit it where the queue's default is already what you want: Derecho's main queue allocates whole nodes, so only a queue that does not needs this stated. |
 | `queue` | string | yes |  | Default queue. An experiment's defaults.queue overrides it, and so does BENCH_QUEUE in the environment. |
 | `submit` | string | yes | matches `/^[a-z][a-z0-9_.-]*$/` | The submission command, qsub or sbatch. |
 | `walltime_max` | string |  | matches `/^[0-9]{1,3}:[0-5][0-9]:[0-5][0-9]$/` | The longest walltime this queue accepts. bench/validate refuses a longer request at submit time instead of letting the scheduler reject it after the fact. |

@@ -392,6 +392,37 @@ case "${sel}" in
     *) bad "node.select did not reach the select directive" "${sel:-<no job.pbs>}" ;;
 esac
 
+# scheduler.place is job-wide, so it is its own directive rather than part of
+# the select chunk -- and absent where the site does not state one, so a site
+# that is happy with the queue's default generates exactly what it did before.
+grep -q '^#PBS -l place=' "${d}/job.pbs" \
+    && bad "a site with no scheduler.place emitted a place directive" \
+           "$(grep '^#PBS -l place' "${d}/job.pbs")" \
+    || ok "no scheduler.place emits no place directive"
+
+sed 's|^  queue: main|  queue: main\
+  place: scatter:excl|' ../sites/derecho.yaml > "${TMP}/placed.yaml"
+mkdir -p "${TMP}/psite/derecho"
+cp "${TMP}/placed.yaml" "${TMP}/psite/derecho.yaml"
+sed "s|^NCAR_HPC_ROOT=.*|NCAR_HPC_ROOT='${HERE}/../ncar-hpc'|" \
+    ../sites/derecho/site.sh > "${TMP}/psite/derecho/site.sh"
+( cd "${TMP}/psite" && python3 -c "
+import sys
+sys.path.insert(0, '${HERE}')
+from benchlib import sitefile
+sf = sitefile.load('derecho.yaml')
+text = open('derecho/site.sh').read()
+open('derecho/site.sh', 'w').write(sitefile.splice(text, sitefile.render(sf)))
+" ) 2>/dev/null
+rm -rf "${TMP}/pl.d"
+BENCH_SITE_CONF="${TMP}/psite/derecho/site.sh" ./submit derecho-hpcg --dry-run \
+    --results-dir "${TMP}/pl.d" >/dev/null 2>&1
+want "scheduler.place becomes its own directive" "#PBS -l place=scatter:excl" \
+     "$(grep -h '^#PBS -l place' "${TMP}/pl.d"/*/job.pbs 2>/dev/null | head -1)"
+want "and does not leak into the select chunk" \
+     "#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1" \
+     "$(grep -h '^#PBS -l select' "${TMP}/pl.d"/*/job.pbs 2>/dev/null | head -1)"
+
 # The job names its profile outright, and PBS runs it from its own spool
 # directory -- so a relative path, which is how anyone would type
 # $BENCH_SITE_CONF on a login node, would resolve to nothing once the job

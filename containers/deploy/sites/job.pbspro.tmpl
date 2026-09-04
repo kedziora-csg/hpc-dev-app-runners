@@ -4,7 +4,7 @@
 #PBS -j oe
 #PBS -q @QUEUE@
 #PBS -l walltime=@WALLTIME@
-#PBS -l select=@NODES@:ncpus=@NCPUS@:mpiprocs=@MPIPROCS@:ompthreads=1@NODE_SELECT@
+@PLACE_DIRECTIVE@#PBS -l select=@NODES@:ncpus=@NCPUS@:mpiprocs=@MPIPROCS@:ompthreads=1@NODE_SELECT@
 #PBS -o @RESULTS_DIR@/job.log
 
 #-------------------------------------------------------------------------------
