@@ -11,13 +11,13 @@
 # A binary built for a newer microarchitecture than the host dies with a bare
 # `Illegal instruction` -- SIGILL, exit 132, on every rank, with no output and no
 # hint of the cause.  It happens three hours into a queue, and it looks like an
-# operating-system problem rather than what it is.  The plan's section 4 asks the
-# site to declare what it can run precisely so that becomes one line before the
-# first cell instead.
+# operating-system problem rather than what it is.  The plan's section 4 asks a
+# cluster to declare what it can run precisely so that becomes one line before
+# the first cell instead.
 #
 # It is deliberately a CHECK and not an input.  The image was built in CI long
-# before any site profile was read, so a site cannot influence what it contains
-# -- only refuse to measure it.
+# before any profile was read, so a cluster cannot influence what it contains --
+# only refuse to measure it.
 #
 # WHAT IT CAN AND CANNOT SEE
 #
@@ -38,8 +38,8 @@
 #
 #   binary vs HOST     a measurement against a measurement.  This is the one
 #                      that decides whether to run: it is what SIGILLs.
-#   host vs SITE FILE  a measurement against a claim.  A disagreement means
-#                      sites/<site>.yaml is wrong, which is worth saying out
+#   host vs THE FILE   a measurement against a claim.  A disagreement means the
+#                      cluster description is wrong, which is worth saying out
 #                      loud but is not a reason to refuse this job.
 #-------------------------------------------------------------------------------
 
@@ -85,7 +85,7 @@ _arch_declared_level () {
 # arch_check <launcher> <binary> [outfile]
 #
 # Writes the full report to <outfile> (default cpu_features.txt) and one or two
-# lines to stdout.  Sets ARCH_VERDICT to ok | over-built | site-mismatch |
+# lines to stdout.  Sets ARCH_VERDICT to ok | over-built | claim-mismatch |
 # unknown.  Returns 1 only for over-built, and only when the operator has not
 # said to proceed anyway with BENCH_ALLOW_ARCH_MISMATCH=1.
 #-------------------------------------------------------------------------------
@@ -150,10 +150,11 @@ arch_check () {
     want_level="$(_arch_declared_level "${BENCH_TARGET_ARCH:-}")"
     if [ -n "${BENCH_TARGET_ARCH:-}" ] && [ "${want_level}" -gt 0 ] 2>/dev/null; then
         if [ "${host_level}" -ne "${want_level}" ]; then
-            ARCH_VERDICT="site-mismatch"
-            echo "note      sites/${BENCH_SITE}.yaml says node.target_arch: ${BENCH_TARGET_ARCH},"
+            ARCH_VERDICT="claim-mismatch"
+            echo "note      sites/${BENCH_SITE}/${BENCH_CLUSTER}.yaml says"
+            echo "          node.target_arch: ${BENCH_TARGET_ARCH},"
             echo "          but this node reports $(_arch_level_name "${host_level}")."
-            echo "          The job is fine; the site description is not.  Results built"
+            echo "          The job is fine; the description is not.  Results built"
             echo "          on the declared value -- an app's microarchitecture override"
             echo "          -- would be aimed at the wrong CPU."
             return 0

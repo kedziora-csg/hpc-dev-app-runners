@@ -80,7 +80,7 @@ result_set valid true
 result_set warm true
 result_metric gflops 12.83
 emit && {
-    assert_json "schema and timestamp are added"      'r["schema"] == 1 and "timestamp" in r'
+    assert_json "schema and timestamp are added"      'r["schema"] == 2 and "timestamp" in r'
     assert_json "a padded count is still a number, not a string" \
                 'r["nodes"] == 2 and not isinstance(r["nodes"], str)'
     assert_json "wall_s keeps its fraction"           'abs(r["wall_s"] - 71.42) < 1e-9'

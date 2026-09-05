@@ -42,7 +42,7 @@
 # questions collapse into one.  Which node type you are on decides which sweep
 # is meaningful, which is the argument for sub-clusters in one sentence.
 schema: 1
-site: casper
+cluster: casper
 
 defaults:
   nodes: 2

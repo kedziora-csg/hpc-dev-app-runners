@@ -1,31 +1,44 @@
 #!/bin/bash
 #===============================================================================
-# sites/casper/site.sh -- what a job needs to know about this machine.
+# sites/ncar/casper/cluster.sh -- what a job needs to know about Casper.
 #
-# UNVERIFIED.  The generated block below comes from ../casper.yaml, which was
-# written from PBS/OSU_casper.pbs rather than from a job that ran.  Read that
-# file's header before trusting anything here, and see bench/sitegen.
-#
-# Sourced by every PBS script here, before anything else.  It has two halves:
+# Sourced by every PBS script here, before anything else.  It has two halves,
+# and the split is the point:
 #
 #   THE PART YOU EDIT is four paths -- where the checkout is, where the images
 #   are, where results go, which scratch.  Those are properties of the OPERATOR.
+#   They differ between two people on the same machine, and nothing can work
+#   them out for you.
 #
-#   THE GENERATED PART, between the markers, is a property of the MACHINE and is
-#   written from ../casper.yaml by bench/sitegen.  Edit the YAML, not the block.
+#   THE GENERATED PART, between the markers below, is everything that is a
+#   property of the MACHINE: the scheduler dialect, the module bootstrap, the
+#   node geometry, the container bind list and the host-MPI recipe.  It is
+#   written by bench/sitegen from TWO files -- ../../ncar.yaml, which holds
+#   what every NCAR cluster shares, and ../casper.yaml, which holds what
+#   makes Casper itself -- and bench/test_bench.sh fails while it is stale.
+#   Edit the YAML, not the block.
 #
 # HOW TO USE IT
 #
-#   Working inside the checkout?  Nothing to do -- the paths are worked out from
-#   where this file itself lives.
+#   Working inside the checkout?  Nothing to do.  A job submitted from anywhere
+#   under the repository finds this file by walking up, and works out the paths
+#   from where this file itself lives.
 #
-#   Submitting from anywhere on the machine?  Copy this file to
-#   ~/.config/hpcdev/site.sh and set NCAR_HPC_ROOT below to your clone.  That
-#   path holds ONE site and does not say which, so a copy is used only for the
-#   site it names: keep the copy for whichever machine you mostly work on, and
-#   the others are still found by walking up from the checkout with no setup.
-#   $BENCH_SITE_CONF overrides both, and is refused if it names a profile for a
-#   different machine.
+#   Want to submit from anywhere on the machine?  Copy this file to
+#   ~/.config/hpcdev/cluster.sh and set NCAR_HPC_ROOT below to your clone.
+#
+#   That path holds ONE cluster and does not say which, so a copy is used only
+#   for the cluster it names -- asking for another passes it over and finds the
+#   checkout's own profile instead.  So keep the copy for the machine you mostly
+#   work on; the others still work with no setup.  $BENCH_SITE_CONF overrides
+#   both, and is refused if it names a profile for a different cluster.
+#
+#   A copy outside the checkout goes stale silently -- sitegen --check only sees
+#   the one in the repository.  Re-copy it after a description changes.
+#
+#   Want a one-off change?  Every generated setting honours an existing value,
+#   so `BENCH_QUEUE=develop bench/submit ...` wins over the file, and an EMPTY
+#   value switches an optional setting off: `BENCH_PLACE= bench/submit ...`.
 #===============================================================================
 
 
@@ -33,15 +46,24 @@
 # SETTINGS -- this is the part you edit.
 #-------------------------------------------------------------------------------
 
-# The clone: the directory containing libexec/ and PBS/.  Leave blank inside the
-# checkout; set it when this file lives outside one.
+# The clone: the directory containing libexec/ and PBS/.
+#
+# Leave blank when this file is inside the checkout -- it is then worked out from
+# this file's own location, which is always right and survives cloning the
+# repository somewhere new.  Set it when the file lives outside a checkout
+# (~/.config/hpcdev/cluster.sh), because there is then nothing to work it out
+# from.
 NCAR_HPC_ROOT="${NCAR_HPC_ROOT:-}"
+#NCAR_HPC_ROOT=/glade/derecho/scratch/${USER}/demo_github_actions/containers/deploy/ncar-hpc
 
-# Where the .sif images live.
+# Where the .sif images live.  Separate from the harness because images are big
+# and often kept on a different filesystem from the code.
 BENCH_IMAGE_DIR="${BENCH_IMAGE_DIR:-}"
 
-# Where results directories are created.  Blank means the directory the job was
-# submitted from.
+# Where results directories are created.  Blank means "the directory the job was
+# submitted from", so you submit where you want the output.  Point it at scratch
+# to collect every run in one place instead:
+#BENCH_RESULTS_ROOT=${SCRATCH}/hpcdev-bench
 BENCH_RESULTS_ROOT="${BENCH_RESULTS_ROOT:-}"
 
 # Big, fast, purgeable space, for apps that stage large input trees.
@@ -49,12 +71,12 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 
 
 #-------------------------------------------------------------------------------
-# THE MACHINE -- generated.  Nothing below this line to the closing marker is
-# hand-maintained; ../casper.yaml is where these values are decided.
+# THE MACHINE -- generated.  Nothing between the markers is hand-maintained;
+# ../../ncar.yaml and ../casper.yaml are where these values are decided.
 #-------------------------------------------------------------------------------
 # >>> BEGIN GENERATED -- bench/sitegen
 #
-# Written from sites/casper.yaml.  Do not edit between the markers: the next
+# Written from sites/ncar.yaml + sites/ncar/casper.yaml.  Do not edit between the markers: the next
 # `bench/sitegen casper --write` overwrites it, and bench/test_bench.sh
 # fails while it is stale.  Change the YAML instead.
 #
@@ -66,7 +88,8 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # NCAR Casper high-throughput nodes: 1 x 64-core AMD EPYC 9554 (Genoa), SMT on. The crhtc pool also holds 36-core Cascade Lake nodes -- see the header.
 
 #-- identity and scheduler -----------------------------------------------
-[ -n "${BENCH_SITE+set}" ] || BENCH_SITE='casper'
+[ -n "${BENCH_SITE+set}" ] || BENCH_SITE='ncar'
+[ -n "${BENCH_CLUSTER+set}" ] || BENCH_CLUSTER='casper'
 [ -n "${BENCH_SCHEDULER+set}" ] || BENCH_SCHEDULER='pbspro'
 [ -n "${BENCH_SUBMIT+set}" ] || BENCH_SUBMIT='qsub'
 [ -n "${BENCH_QUEUE+set}" ] || BENCH_QUEUE='casper'
@@ -116,6 +139,8 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # compiler, and the tag in the image name is what names which.
 bench_site_compiler_module () {
     case "$1" in
+        aocc    ) echo 'aocc' ;;
+        clang   ) echo 'clang' ;;
         gcc     ) echo 'gcc' ;;
         gcc14   ) echo 'gcc/14.3.0' ;;
         nvhpc   ) echo 'nvhpc' ;;
@@ -183,7 +208,7 @@ bench_site_modules () {
     } >/dev/null 2>&1
 }
 
-export BENCH_SITE BENCH_SCHEDULER BENCH_SUBMIT BENCH_QUEUE
+export BENCH_SITE BENCH_CLUSTER BENCH_SCHEDULER BENCH_SUBMIT BENCH_QUEUE
 export BENCH_CORES_PER_NODE BENCH_SMT BENCH_TOPOLOGY_MODE
 export BENCH_CONTAINER_RUNTIME BENCH_BINDS BENCH_BINDS_IF_PRESENT
 export BENCH_BIND_MAP BENCH_LIB_DIRS
@@ -194,15 +219,20 @@ export BENCH_WALLTIME_MAX BENCH_SOCKETS BENCH_SMT_STRIDE BENCH_CORES_PER_L3 BENC
 #-------------------------------------------------------------------------------
 # Defaults for anything left blank above.  Nothing here needs editing.
 #-------------------------------------------------------------------------------
-_SITE_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_CLUSTER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ -z "${NCAR_HPC_ROOT}" ] && [ -d "${_SITE_HERE}/../../ncar-hpc/libexec" ]; then
-    NCAR_HPC_ROOT="$(cd "${_SITE_HERE}/../../ncar-hpc" && pwd)"
+# sites/<site>/<cluster>/ is three levels below containers/deploy/, which is
+# where ncar-hpc/ and bench/ are.
+if [ -z "${NCAR_HPC_ROOT}" ] && [ -d "${_CLUSTER_HERE}/../../../ncar-hpc/libexec" ]; then
+    NCAR_HPC_ROOT="$(cd "${_CLUSTER_HERE}/../../../ncar-hpc" && pwd)"
 fi
 
 : "${BENCH_IMAGE_DIR:=${NCAR_HPC_ROOT}/libexec}"
 : "${BENCH_RESULTS_ROOT:=${PBS_O_WORKDIR:-$(pwd)}}"
 
+# bench/ is a sibling of ncar-hpc/, not a child: it is cluster-agnostic, and
+# ncar-hpc/ is not.  A generated job script names runner.sh outright, so this is
+# for the hand-qsub path, which has only the profile to go on.
 if [ -z "${BENCH_ROOT:-}" ] && [ -d "${NCAR_HPC_ROOT}/../bench" ]; then
     BENCH_ROOT="$(cd "${NCAR_HPC_ROOT}/../bench" && pwd)"
 fi

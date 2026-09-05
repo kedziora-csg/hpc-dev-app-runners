@@ -1,0 +1,89 @@
+# NCAR -- the site, and what every cluster in it has in common.
+#
+# WHY THIS FILE EXISTS
+#
+# Before it, sixteen values were identical between derecho.yaml and casper.yaml,
+# and they were not identical by coincidence.  `oneapi` maps to the module named
+# `intel` because that is what NCAR calls it, not because Derecho does.  The
+# environment comes up through `ncarenv` on both.  `/glade` is one filesystem
+# mounted on both.  Every one of those was edited twice and would eventually
+# have been edited once, leaving the other copy behind -- which is the failure
+# this phase removed from five PBS scripts, reappearing one level up.
+#
+# HOW THE TWO LEVELS COMBINE
+#
+# A cluster file names its site and states what differs.  bench/sitegen merges
+# the two before generating anything, so the flat block a job sources is exactly
+# as it was; the split is in how a machine is DESCRIBED, not in what a job
+# reads.
+#
+#   scalars   the cluster's value wins
+#   lists     the site's entries first, then the cluster's
+#   maps      merged key by key, the cluster's value winning per key
+#
+# So `container.binds` here holds what both machines mount, and each cluster
+# adds its own.  There is deliberately no way to REMOVE an inherited entry: a
+# site-level value that some cluster must not have is a sign it was never a site
+# value, and moving it down is the honest fix.
+#
+# WHAT IS NOT HERE
+#
+# `mpi:` -- which MPI families a cluster can host, and by which overlay recipe.
+# That is the least shared and most consequential thing in the description:
+# Casper has no Cray PALS and therefore no mpich at all, and a family inherited
+# by accident would be a cluster claiming to run an image it cannot.  The few
+# duplicated lines are the price of stating availability once per cluster,
+# explicitly, and never by inheritance.
+#
+# `node:` -- geometry belongs to a node type, not to a machine, which is what
+# the subclusters: map under each cluster is for.
+schema: 1
+site: ncar
+
+# PBS Pro on every NCAR cluster.  A site that mixed schedulers would state this
+# per cluster instead; nothing stops it.
+scheduler:
+  kind: pbspro
+  submit: qsub
+
+modules:
+  # The NCAR environment, and the container runtime every cluster here uses.
+  # Order is the content: `module reset` after loading ncarenv is not redundant,
+  # because ncarenv changes MODULEPATH and reset then applies the site defaults
+  # visible under the NEW path.  A cluster appends what it needs beyond this.
+  bootstrap:
+    - module --force purge
+    - module load ncarenv/25.10
+    - module reset
+    - module load apptainer
+
+  # Container compiler tag to NCAR module name.  `oneapi` maps to `intel`
+  # because the site-default intel module IS the oneAPI toolchain; gcc14 is
+  # pinned to 14.3.0 to match a container's gcc exactly rather than following
+  # whatever the bare `gcc` module currently defaults to.
+  compiler_map:
+    oneapi: intel
+    gcc14: gcc/14.3.0
+    gcc: gcc
+    nvhpc: nvhpc
+    aocc: aocc
+    clang: clang
+
+container:
+  runtime: apptainer
+
+  # GLADE is one filesystem, mounted on every NCAR cluster.  /local_scratch is
+  # node-local NVMe and is likewise present throughout.
+  binds: [/glade, /local_scratch]
+
+  # GPFS is needed by any host MPI whose ROMIO carries the GPFS ADIO backend,
+  # which NCAR's Open MPI does.  Conditional because apptainer treats a missing
+  # bind SOURCE as fatal: binding it unconditionally would turn "this node has
+  # no GPFS" into "the job will not start".
+  binds_if_present: [/usr/lpp/mmfs]
+
+  # Not /usr/lib64 onto itself, which would replace the container's entire
+  # system library tree.  It goes to a name of its own and is named again at the
+  # end of each cluster's lib_dirs.
+  bind_map:
+    /usr/lib64: /host_lib64

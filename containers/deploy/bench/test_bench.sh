@@ -50,12 +50,12 @@ want () { # want <description> <expected> <actual>
 # Default to Derecho, which is what the hand-written cases below assume, and
 # override per file where an experiment names a different machine -- a second
 # site is exactly the thing that made a single pinned profile wrong.
-export BENCH_SITE_CONF="${HERE}/../sites/derecho/site.sh"
+export BENCH_SITE_CONF="${HERE}/../sites/ncar/derecho/cluster.sh"
 
-conf_for () { # conf_for <experiment.yaml> -- the profile that file's site: names
-    local site
-    site="$(sed -n 's/^site:[[:space:]]*//p' "$1" | head -1)"
-    echo "${HERE}/../sites/${site:-derecho}/site.sh"
+conf_for () { # conf_for <experiment.yaml> -- the profile that file's cluster: names
+    local cluster
+    cluster="$(sed -n 's/^cluster:[[:space:]]*//p' "$1" | head -1)"
+    echo "${HERE}"/../sites/*/"${cluster:-derecho}"/cluster.sh
 }
 
 # A directory of empty files standing in for the .sif set, so the image check
@@ -71,7 +71,7 @@ echo
 
 #-- the two YAML readers agree, file by file -----------------------------------
 echo "yaml readers"
-for f in experiments/*.yaml ../sites/*.yaml ../../../scripts/app.d/*/app.yaml; do
+for f in experiments/*.yaml ../sites/*.yaml ../sites/*/*.yaml ../../../scripts/app.d/*/app.yaml; do
     python3 - "$f" <<'PY' && ok "$(basename "$(dirname "$f")")/$(basename "$f"): PyYAML == built-in reader" \
                           || bad "$(basename "$(dirname "$f")")/$(basename "$f"): the two readers disagree"
 import sys
@@ -123,14 +123,14 @@ echo
 echo "profile search"
 ( export XDG_CONFIG_HOME="${TMP}/xdg"
   mkdir -p "${XDG_CONFIG_HOME}/hpcdev"
-  cp ../sites/derecho/site.sh "${XDG_CONFIG_HOME}/hpcdev/site.sh"
+  cp ../sites/ncar/derecho/cluster.sh "${XDG_CONFIG_HOME}/hpcdev/cluster.sh"
   unset BENCH_SITE_CONF
 
   # Asking for derecho: the copy matches and is used.
   got="$(python3 -c 'import sys
 sys.path.insert(0, ".")
-from benchlib import site
-print(site.find_conf("derecho"))' 2>&1)"
+from benchlib import cluster
+print(cluster.find_conf("derecho"))' 2>&1)"
   case "${got}" in
       "${XDG_CONFIG_HOME}"/*) echo "  ok    a matching ~/.config copy is used" ;;
       *) echo "  FAIL  a matching ~/.config copy was skipped"; echo "        ${got}" ;;
@@ -140,41 +140,44 @@ print(site.find_conf("derecho"))' 2>&1)"
   # the checkout's own casper profile.
   got="$(python3 -c 'import sys
 sys.path.insert(0, ".")
-from benchlib import site
-print(site.find_conf("casper"))' 2>&1)"
+from benchlib import cluster
+print(cluster.find_conf("casper"))' 2>&1)"
   case "${got}" in
-      *"/sites/casper/site.sh") echo "  ok    a ~/.config copy for another site is skipped" ;;
+      *"/casper/cluster.sh") echo "  ok    a ~/.config copy for another cluster is skipped" ;;
       *) echo "  FAIL  a Derecho ~/.config copy answered a Casper request"; echo "        ${got}" ;;
   esac
 
   # Naming the wrong profile outright is explicit, and still refused: an
   # override may say WHERE a profile is, never which machine it describes.
-  out="$(BENCH_SITE_CONF="${XDG_CONFIG_HOME}/hpcdev/site.sh" ./validate casper-hpcg 2>&1)"
+  out="$(BENCH_SITE_CONF="${XDG_CONFIG_HOME}/hpcdev/cluster.sh" ./validate casper-hpcg 2>&1)"
   case "${out}" in
-      *"describes 'derecho'"*) echo "  ok    an explicitly named wrong-site profile is refused" ;;
-      *) echo "  FAIL  BENCH_SITE_CONF pointing at another site was accepted" ;;
+      *"describes cluster 'derecho'"*)
+          echo "  ok    an explicitly named wrong-cluster profile is refused" ;;
+      *) echo "  FAIL  BENCH_SITE_CONF pointing at another cluster was accepted" ;;
   esac
 ) | tee "${TMP}/search.out"
 pass=$((pass + $(grep -c '^  ok ' "${TMP}/search.out")))
 fail=$((fail + $(grep -c '^  FAIL' "${TMP}/search.out")))
 
-#-- the site description, and the profile generated from it --------------------
-# sites/<site>.yaml is the single statement of what a machine is; the generated
-# block of sites/<site>/site.sh is what every job actually sources.  Nothing
-# else compares them, so a stale profile would go on describing the machine as
-# it was and no job would notice.
+#-- the descriptions, and the profiles generated from them ---------------------
+# sites/<site>.yaml and sites/<site>/<cluster>.yaml together are the single
+# statement of what a machine is; the generated block of cluster.sh is what
+# every job actually sources.  Nothing else compares them, so a stale profile
+# would go on describing the machine as it was and no job would notice -- and
+# it goes stale when EITHER file changes, which a hand-written profile could
+# never have caught.
 echo
-echo "site descriptions"
+echo "cluster descriptions"
 ./sitegen --check >/dev/null 2>&1 \
-    && ok "every sites/<site>/site.sh matches its .yaml" \
-    || bad "a site profile is stale -- run ./sitegen --write" "$(./sitegen --check 2>&1)"
+    && ok "every cluster.sh matches the two files it is generated from" \
+    || bad "a cluster profile is stale -- run ./sitegen --write" "$(./sitegen --check 2>&1)"
 
 # The generated block is spliced between markers, so regenerating must be a
 # no-op and the hand-edited settings above it must survive untouched.  If they
 # did not, a regeneration would silently discard an operator's paths.
-before="$(sed '/BEGIN GENERATED/,$d' ../sites/derecho/site.sh)"
+before="$(sed '/BEGIN GENERATED/,$d' ../sites/ncar/derecho/cluster.sh)"
 ./sitegen derecho --write >/dev/null 2>&1
-after="$(sed '/BEGIN GENERATED/,$d' ../sites/derecho/site.sh)"
+after="$(sed '/BEGIN GENERATED/,$d' ../sites/ncar/derecho/cluster.sh)"
 want "regenerating leaves the hand-edited half alone" "${before}" "${after}"
 ./sitegen --check >/dev/null 2>&1
 want "regenerating is idempotent" 0 "$?"
@@ -182,8 +185,12 @@ want "regenerating is idempotent" 0 "$?"
 # Rules the schema cannot state, plus the generator's own refusal to quote a
 # value it cannot safely write.  Each case is a file that is individually
 # well-formed and still describes a machine no job could run on.
-site_case () { # site_case <description> <ok|reject> <yaml>
-    printf '%s\n' "$3" > "${TMP}/site.yaml"
+# Written into a throwaway sites/ tree, because a cluster file is only half a
+# description now: load() must find the site file its `site:` key names.
+cluster_case () { # cluster_case <description> <ok|reject> <yaml>
+    mkdir -p "${TMP}/desc/sites/ncar"
+    printf 'schema: 1\nsite: ncar\n' > "${TMP}/desc/sites/ncar.yaml"
+    printf '%s\n' "$3" > "${TMP}/desc/sites/ncar/testville.yaml"
     out="$(python3 -c 'import sys
 sys.path.insert(0, ".")
 from benchlib import BenchError, sitefile
@@ -191,12 +198,13 @@ try:
     sitefile.render(sitefile.load(sys.argv[1]))
     print("ok")
 except BenchError:
-    print("reject")' "${TMP}/site.yaml" 2>&1)"
+    print("reject")' "${TMP}/desc/sites/ncar/testville.yaml" 2>&1)"
     want "$1" "$2" "${out}"
 }
 
-site_base='schema: 1
-site: testville
+cluster_base='schema: 1
+site: ncar
+cluster: testville
 scheduler: {kind: pbspro, submit: qsub, queue: main}
 modules:
   bootstrap: [module load apptainer]
@@ -206,34 +214,36 @@ container: {runtime: apptainer, binds: [/glade]}
 mpi:
   openmpi: {launcher: openmpi, overlay: host-openmpi}'
 
-site_case "a good site description is accepted" ok "${site_base}"
-site_case "an unknown key is config-invalid" reject "${site_base}
+cluster_case "a good site description is accepted" ok "${cluster_base}"
+cluster_case "an unknown key is config-invalid" reject "${cluster_base}
 bogus: 1"
-site_case "a scheduler nobody implemented is refused" reject \
-    "$(printf '%s\n' "${site_base}" | sed 's/kind: pbspro/kind: lsf/')"
-site_case "an mpi family with no module mapping is refused" reject \
-    "$(printf '%s\n' "${site_base}" | sed 's/mpi_map: {openmpi: openmpi}/mpi_map: {}/')"
-site_case "a module mapping for a family mpi: omits is refused" reject \
-    "$(printf '%s\n' "${site_base}" | sed 's/mpi_map: {openmpi: openmpi}/mpi_map: {openmpi: openmpi, mpich: ""}/')"
-site_case "the Cray shim under the wrong launcher is refused" reject \
-    "$(printf '%s\n' "${site_base}" | sed 's/overlay: host-openmpi/overlay: cray-mpich-abi/')"
-site_case "cores_per_l3 larger than the node is refused" reject \
-    "$(printf '%s\n' "${site_base}" | sed 's/{cores: 64, smt: 1}/{cores: 64, smt: 1, cores_per_l3: 128}/')"
-site_case "an unknown MPI family is refused" reject \
-    "$(printf '%s\n' "${site_base}" | sed 's/  openmpi: {launcher/  intelmpi: {launcher/;s/mpi_map: {openmpi: openmpi}/mpi_map: {intelmpi: impi}/')"
+cluster_case "a scheduler nobody implemented is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/kind: pbspro/kind: lsf/')"
+cluster_case "an mpi family with no module mapping is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/mpi_map: {openmpi: openmpi}/mpi_map: {}/')"
+cluster_case "a module mapping for a family mpi: omits is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/mpi_map: {openmpi: openmpi}/mpi_map: {openmpi: openmpi, mpich: ""}/')"
+cluster_case "the Cray shim under the wrong launcher is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/overlay: host-openmpi/overlay: cray-mpich-abi/')"
+cluster_case "cores_per_l3 larger than the node is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/{cores: 64, smt: 1}/{cores: 64, smt: 1, cores_per_l3: 128}/')"
+cluster_case "an unknown MPI family is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/  openmpi: {launcher/  intelmpi: {launcher/;s/mpi_map: {openmpi: openmpi}/mpi_map: {intelmpi: impi}/')"
+cluster_case "a description with no cluster: is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed '/^cluster: /d')"
 
 # The generator writes into a shell file every job sources, so a value it cannot
 # spell safely is refused rather than quoted.  Quoting arbitrary text correctly
 # is the kind of thing that works until the day it does not.
-site_case "a value carrying a quote is refused, not quoted" reject \
-    "${site_base%$'\n'*}
+cluster_case "a value carrying a quote is refused, not quoted" reject \
+    "${cluster_base%$'\n'*}
   openmpi: {launcher: openmpi, overlay: host-openmpi, env: {X: \"a'\\\"b\"}}"
 
 #-- exit codes are the interface -----------------------------------------------
 echo
 echo "exit codes"
 base='schema: 1
-site: derecho
+cluster: derecho
 defaults: {nodes: 1}
 images: {list: [leap-oneapi-mpich-hpcg.sif]}
 apps: [{name: hpcg}]
@@ -337,7 +347,7 @@ want "two OMP variants give six distinctly named cells" "6 6" "${names}"
 # choice of queue, memory or processor.  Hardcoding `ompthreads=1` as the end of
 # the line broke three tests the first time somebody added `mem=` to the site
 # file, which is a test being wrong rather than a change being wrong.
-sel_suffix="$( . "${HERE}/../sites/derecho/site.sh" >/dev/null 2>&1
+sel_suffix="$( . "${HERE}/../sites/ncar/derecho/cluster.sh" >/dev/null 2>&1
                printf '%s' "${BENCH_NODE_SELECT:+:${BENCH_NODE_SELECT}}" )"
 
 echo
@@ -386,11 +396,11 @@ want "exclusive: false asks only for the cores the cells use" \
 # the first Casper run did.  So the selector has to reach the directive.
 # A site with node.select REMOVED must get no suffix at all -- built here
 # rather than assumed of derecho.yaml, which now has one.
-sed '/^  select: /d' ../sites/derecho.yaml > "${TMP}/nosel.yaml"
+sed '/^  select: /d' ../sites/ncar/derecho.yaml > "${TMP}/nosel.yaml"
 mkdir -p "${TMP}/nosel/derecho"
 cp "${TMP}/nosel.yaml" "${TMP}/nosel/derecho.yaml"
 sed "s|^NCAR_HPC_ROOT=.*|NCAR_HPC_ROOT='$(cd ../ncar-hpc && pwd)'|" \
-    ../sites/derecho/site.sh > "${TMP}/nosel/derecho/site.sh"
+    ../sites/ncar/derecho/cluster.sh > "${TMP}/nosel/derecho/site.sh"
 python3 -c "
 import sys; sys.path.insert(0, '${HERE}')
 from benchlib import sitefile
@@ -407,7 +417,7 @@ want "no node.select appends nothing" \
 rm -rf "${TMP}/sel.d"
 # casper-hpcg names the openmpi third of the same image set, so the stand-in
 # files created at the top of this script already cover it.
-BENCH_SITE_CONF="${HERE}/../sites/casper/site.sh" ./submit \
+BENCH_SITE_CONF="${HERE}/../sites/ncar/casper/cluster.sh" ./submit \
     "${HERE}/experiments/casper-hpcg.yaml" --dry-run \
     --results-dir "${TMP}/sel.d" >/dev/null 2>&1
 sel="$(grep -h '^#PBS -l select' "${TMP}/sel.d"/*/job.pbs 2>/dev/null | head -1)"
@@ -425,11 +435,11 @@ grep -q '^#PBS -l place=' "${d}/job.pbs" \
     || ok "no scheduler.place emits no place directive"
 
 sed 's|^  queue: main|  queue: main\
-  place: scatter:excl|' ../sites/derecho.yaml > "${TMP}/placed.yaml"
+  place: scatter:excl|' ../sites/ncar/derecho.yaml > "${TMP}/placed.yaml"
 mkdir -p "${TMP}/psite/derecho"
 cp "${TMP}/placed.yaml" "${TMP}/psite/derecho.yaml"
 sed "s|^NCAR_HPC_ROOT=.*|NCAR_HPC_ROOT='${HERE}/../ncar-hpc'|" \
-    ../sites/derecho/site.sh > "${TMP}/psite/derecho/site.sh"
+    ../sites/ncar/derecho/cluster.sh > "${TMP}/psite/derecho/site.sh"
 ( cd "${TMP}/psite" && python3 -c "
 import sys
 sys.path.insert(0, '${HERE}')
@@ -489,13 +499,13 @@ rm -f "${d}/results.jsonl"
 # A per-site job.tmpl wins over the shared one and can carry directives no site
 # file mentions, so removing a key from the YAML would appear to do nothing.
 # That override is announced rather than left to be discovered.
-cp ../sites/job.pbspro.tmpl ../sites/derecho/job.tmpl
+cp ../sites/job.pbspro.tmpl ../sites/ncar/derecho/job.tmpl
 rm -rf "${TMP}/fork.d"
 out="$(./submit derecho-hpcg --dry-run --results-dir "${TMP}/fork.d" 2>&1)"
-rm -f ../sites/derecho/job.tmpl
+rm -f ../sites/ncar/derecho/job.tmpl
 case "${out}" in
-    *"a per-site template, overriding"*) ok "a forked job.tmpl announces itself" ;;
-    *) bad "a per-site template overrode the shared one silently" ;;
+    *"a per-cluster template, overriding"*) ok "a forked job.tmpl announces itself" ;;
+    *) bad "a per-cluster template overrode the shared one silently" ;;
 esac
 rm -rf "${TMP}/nofork.d"
 ./submit derecho-hpcg --dry-run --results-dir "${TMP}/nofork.d" 2>&1 | grep -q "per-site template" \
@@ -516,11 +526,11 @@ mkdir -p "${TMP}/elsewhere"
   XDG_CONFIG_HOME="${TMP}/no-such-config" python3 -c "
 import sys
 sys.path.insert(0, '${HERE}')
-from benchlib import site
-print(site.find_conf('derecho'))" 2>&1 ) > "${TMP}/anywhere.out" 2>&1
+from benchlib import cluster
+print(cluster.find_conf('derecho'))" 2>&1 ) > "${TMP}/anywhere.out" 2>&1
 case "$(cat "${TMP}/anywhere.out")" in
-    *"/sites/derecho/site.sh") ok "the profile is found from outside the checkout" ;;
-    *) bad "running from another directory cannot find the site profile" \
+    *"/derecho/cluster.sh") ok "the profile is found from outside the checkout" ;;
+    *) bad "running from another directory cannot find the cluster profile" \
            "$(cat "${TMP}/anywhere.out")" ;;
 esac
 
@@ -589,7 +599,7 @@ want "runner.sh refuses to run without a site profile" 1 "$?"
 # libraries.  It still fails afterwards for want of an image and a `module`
 # command, which is fine -- the assertion is about which failure comes first.
 out="$(bash -c '. "$1" >/dev/null 2>&1; exec ./runner.sh' _ \
-       "${HERE}/../sites/derecho/site.sh" 2>&1)"
+       "${HERE}/../sites/ncar/derecho/cluster.sh" 2>&1)"
 case "${out}" in
     *"no site profile has been sourced"*)
         bad "the site profile's functions did not survive the exec into runner.sh" \

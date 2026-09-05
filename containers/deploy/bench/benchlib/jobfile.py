@@ -50,7 +50,7 @@ def select_size(exp, job):
     give me the node.  So the two are not max()ed together.
     """
     if exp.defaults["exclusive"]:
-        return exp.site.cores_per_node, exp.site.cores_per_node
+        return exp.cluster.cores_per_node, exp.cluster.cores_per_node
     ranks = max(c.placement["ranks_per_node"] for c in job.cells)
     cpus = max(c.placement["ranks_per_node"] * c.placement["threads"]
                for c in job.cells)
@@ -99,14 +99,14 @@ def job_env(exp, job, results_dir, profile=None):
         "# configuration: the job never reads the experiment YAML, and reading",
         "# this directory never requires it either.",
         "",
-        "BENCH_SITE=%s" % _sh(exp.site.name),
+        "BENCH_SITE=%s" % _sh(exp.cluster.name),
         "BENCH_EXPERIMENT=%s" % _sh(exp.name),
         "BENCH_JOB_KEY=%s" % _sh(job.key),
         "BENCH_PROFILE=%s" % _sh(profile or ""),
-        "BENCH_HARNESS=%s" % _sh(exp.site.bench_root),
+        "BENCH_HARNESS=%s" % _sh(exp.cluster.bench_root),
         "",
         "RESULTS_DIR=%s" % _sh(results_dir),
-        "container_img=%s" % _sh(exp.site.image_path(job.image)),
+        "container_img=%s" % _sh(exp.cluster.image_path(job.image)),
         "",
         "APP=%s" % _sh(job.app["name"]),
         "APP_ARGS=%s" % _sh(job.app.get("args", "")),
@@ -148,13 +148,13 @@ def job_record(exp, job, results_dir, profile=None):
         "schema": 1,
         "generated": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "experiment": {"name": exp.name, "path": os.path.abspath(exp.path)},
-        "site": {"name": exp.site.name, "conf": exp.site.conf,
-                 "cores_per_node": exp.site.cores_per_node,
-                 "smt": exp.site.smt, "node_source": exp.site.node_source},
+        "site": {"name": exp.cluster.name, "conf": exp.cluster.conf,
+                 "cores_per_node": exp.cluster.cores_per_node,
+                 "smt": exp.cluster.smt, "node_source": exp.cluster.node_source},
         "profile": profile,
         "job": {"key": job.key, "nodes": job.nodes, "walltime": job.walltime,
                 "repeats": job.repeats, "results_dir": results_dir},
-        "image": {"sif": job.image, "path": exp.site.image_path(job.image)},
+        "image": {"sif": job.image, "path": exp.cluster.image_path(job.image)},
         "app": {"name": job.app["name"],
                 "label": job.app.get("label") or job.app["name"],
                 "args": job.app.get("args", ""),
@@ -196,15 +196,15 @@ def write(exp, job, results_dir, template_path, account, profile=None):
         # rather than passed as a separate -l, because a resource that chooses
         # a node belongs to the chunk being described: `-l cpu_type=...` on its
         # own is a job-wide resource and does not mean the same thing.
-        "NODE_SELECT": (":" + exp.site.node_select) if exp.site.node_select else "",
+        "NODE_SELECT": (":" + exp.cluster.node_select) if exp.cluster.node_select else "",
         # A whole directive line, or nothing at all.  Its own -l because place is
         # job-wide: PBS reads it as how to spread the chunks and who else may
         # share them, which is not something a chunk can say about itself.
-        "PLACE_DIRECTIVE": ("#PBS -l place=%s\n" % exp.site.place
-                            if exp.site.place else ""),
+        "PLACE_DIRECTIVE": ("#PBS -l place=%s\n" % exp.cluster.place
+                            if exp.cluster.place else ""),
         "RESULTS_DIR": results_dir,
-        "SITE_CONF": exp.site.conf,
-        "BENCH_ROOT": exp.site.bench_root,
+        "SITE_CONF": exp.cluster.conf,
+        "BENCH_ROOT": exp.cluster.bench_root,
         "JOB_ENV": env_path,
         "EXPERIMENT": exp.path,
     })

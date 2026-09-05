@@ -8,7 +8,7 @@
 #     ../validate derecho-osu
 #     ../submit   derecho-osu --account <PROJECT>
 schema: 1
-site: derecho
+cluster: derecho
 
 defaults:
   nodes: 2

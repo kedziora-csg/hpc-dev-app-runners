@@ -101,7 +101,7 @@ test:
 	@echo
 	@./test_results.sh
 	@echo
-	@./test_site.sh
+	@./test_cluster.sh
 	@echo
 	@./test_app_contract.sh
 	@echo

@@ -16,7 +16,7 @@ All NCAR-specific deployment files are located under [containers/deploy/ncar-hpc
 
 * [containers/deploy/bench/](../bench/) — the benchmark runner. `submit` and `validate` expand a declarative experiment on the login node; `runner.sh` is the in-job sweep, with no site and no application in it; `collect` turns the resulting `results.jsonl` files into a table or a runnable configuration. Nothing here names Derecho.
 * [containers/deploy/bench/env.sh](../bench/env.sh) — source it, or add that one line to `~/.bashrc`, and `validate`, `submit`, `collect` and `sitegen` work by name from any directory. Then a run is: make a directory where you want the output, `cd` into it, `submit <experiment> --account <PROJECT>`. It sets `PATH` and deliberately nothing else — exporting `NCAR_HPC_ROOT` or `BENCH_ROOT` would be honoured by every clone's `site.sh` and would silently drive one checkout's jobs at another's images. `bench_env_show` says which checkout you are typing at.
-* [containers/deploy/sites/](../sites/) — what one machine is. `derecho.yaml` and `casper.yaml` describe the machines: scheduler dialect, module bootstrap, node geometry, container binds and the host-MPI recipe. `derecho/site.sh` is the file every job actually sources — four hand-edited paths that belong to you, plus a block generated from the YAML by `bench/sitegen`, so nothing on a compute node parses YAML and no value is written down twice. `job.pbspro.tmpl` is the scheduler-directive skeleton `submit` generates from, shared by every PBS site. Adding a machine is one more YAML and one more `site.sh`.
+* [containers/deploy/sites/](../sites/) — what one machine is, in three levels. `ncar.yaml` is the **site**: the module naming conventions, the `ncarenv` bootstrap, GLADE, the container runtime — everything every NCAR machine shares. `ncar/derecho.yaml` and `ncar/casper.yaml` are the **clusters**, holding only what differs: scheduler dialect, module bootstrap, node geometry, container binds and the host-MPI recipe. `ncar/derecho/cluster.sh` is the file every job actually sources — four hand-edited paths that belong to you, plus a block `bench/sitegen` generates by merging those two YAMLs, so nothing on a compute node parses YAML and no value is written down twice. `job.pbspro.tmpl` is the scheduler-directive skeleton `submit` generates from, shared by every PBS site. Adding a machine is one more cluster YAML and one more `cluster.sh`; adding an organisation is one more site YAML.
 
 * **Template-Driven Builds**: 
   The deployment uses a Singularity definition template, [containers/deploy/ncar-hpc/libexec/Deffile](containers/deploy/ncar-hpc/libexec/Deffile).
@@ -103,18 +103,18 @@ qsub PBS/OSU_casper.pbs
 ### Step 4.2a: Running a Job From Anywhere
 
 The PBS scripts get their paths from a **site profile**,
-`containers/deploy/sites/derecho/site.sh`, rather than from the directory you
+`containers/deploy/sites/ncar/derecho/cluster.sh`, rather than from the directory you
 submitted from. So a run can live wherever you want its results.
 
 **Submitting from inside the checkout: nothing to set up.** The scripts walk up
-from the submission directory, find `sites/derecho/site.sh`, and work the paths
+from the submission directory, find `sites/ncar/derecho/cluster.sh`, and work the paths
 out from where that file itself lives.
 
 **Submitting from anywhere else: one copy, one edited line.**
 
 ```bash
 mkdir -p ~/.config/hpcdev
-cp <checkout>/containers/deploy/sites/derecho/site.sh ~/.config/hpcdev/
+cp <checkout>/containers/deploy/sites/ncar/derecho/cluster.sh ~/.config/hpcdev/
 $EDITOR ~/.config/hpcdev/site.sh     # set NCAR_HPC_ROOT to your clone
 ```
 
@@ -126,11 +126,11 @@ Alternatively, name the file outright and skip the copy — this always uses the
 repository's current version:
 
 ```bash
-export BENCH_SITE_CONF=<checkout>/containers/deploy/sites/derecho/site.sh
+export BENCH_SITE_CONF=<checkout>/containers/deploy/sites/ncar/derecho/cluster.sh
 ```
 
 The scripts look in three places, first one found wins: `$BENCH_SITE_CONF`, then
-`~/.config/hpcdev/site.sh`, then `sites/<site>/site.sh` walking up from the
+`~/.config/hpcdev/cluster.sh`, then `sites/*/<cluster>/cluster.sh` walking up from the
 submission directory.
 
 **What the profile sets:**

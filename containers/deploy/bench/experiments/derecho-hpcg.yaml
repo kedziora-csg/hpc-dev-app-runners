@@ -11,7 +11,7 @@
 # flat job.env into each results directory, which is both what the job sources
 # and the record of what that job was asked to do.
 schema: 1
-site: derecho
+cluster: derecho
 
 # No default account on purpose: this is a billable allocation, and qsub
 # refusing is better than someone else's project being charged.  Pass

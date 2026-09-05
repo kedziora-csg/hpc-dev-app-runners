@@ -5,10 +5,10 @@ Phases 0–4 implemented (see §10) and **verified on both clusters**: Derecho, 
 Casper as of 2026-09-03. Casper describes one node type, the EPYC 9554
 high-throughput nodes, which is the type the scheduler gives when the request
 names none.
-**Phase 4.5 proposed and next**: what this document calls a *site* is a cluster,
-and the missing outer level (NCAR) and inner level (node type) are one change,
-which must land before phase 5. **Phase 4.6** follows it: Slurm, for TACC, which
-is both a second site and a second scheduler.**
+**Phase 4.5 half built**: the site/cluster rename landed 2026-09-05 -- NCAR is
+the site, Derecho and Casper are clusters of it -- and sub-clusters (node types)
+are the remaining half. **Phase 4.6** follows: Slurm, for TACC, which is both a
+second site and a second scheduler.**
 
 This document proposes the concrete interfaces that `SeparateConcerns.md` and
 `SeparationAnalysis.md` gesture at but do not specify. Those two argued *that* the
@@ -1016,7 +1016,7 @@ Each phase is independently useful and independently revertible.
 | **2** | App contract: `/container/app.d/<app>/{app.yaml,prepare,launch,extract}` installed by `build_<app>.sh`; `libexec/app_contract.sh` drives it; runner stops knowing about `hpcg.dat`; `bench/collect` ranks by the app's declared `primary_fom` and `better:` | The structural change. Every HPCG string is gone from the PBS script. Proven by adding OSU as the second app with no runner edit — deliberately unlike HPCG (no input file, flags via `launch`, results on stdout), and `libexec/test_app_contract.sh` exercises both off-cluster. |
 | **3** | `bench/{submit,runner.sh}` + YAML config + generated job scripts; **JSON Schema for both YAML formats + `bench validate` with stable exit codes** (§6); rename to `App_benchmarker_derecho.pbs`; retire `submit_placement_matrix.sh` | The rename lands here, after it is true. Schema and `validate` come now, not at phase 6 — they pay for themselves in human use and are what make agent authoring viable later. |
 | **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. **Built — see below.** |
-| **4.5** | Rename the middle level: **site → cluster**, and introduce the three-level model site (NCAR) / cluster (Derecho, Casper) / sub-cluster (node type). Merges §11.6 | The name is wrong now and every value it governs is being written twice. Must precede 5, which builds an image for a "named machine" — naming it correctly is a prerequisite, not a follow-up. |
+| **4.5** | Rename the middle level: **site → cluster**, and introduce the three-level model site (NCAR) / cluster (Derecho, Casper) / sub-cluster (node type). Merges §11.6. **Rename built; sub-clusters not yet — see below.** | The name is wrong now and every value it governs is being written twice. Must precede 5, which builds an image for a "named machine" — naming it correctly is a prerequisite, not a follow-up. |
 | **4.6** | A second scheduler: Slurm, for TACC. Named the PBS assumptions and the Slurm shape; **implement when there is an account to test against** | The abstraction is half there already — per-scheduler templates, an `srun` arm in `mpi_launch_flags`, `scheduler.kind`. What is missing is three places that still assume PBS in code. Designing the rest from a manual is how the Casper node type came out wrong twice. |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9); carry `app_march_flags` through as a per-app build-arg (§3) | CI now validates the contract on every app build. The microarchitecture override belongs here because this is where an app image is built for a *named machine* rather than for everyone. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
@@ -1474,6 +1474,80 @@ scheduler-independent question, namely "did this job have the node to itself and
 how were its chunks spread". Renaming them at the same time as the phase 4.5
 results-format change would avoid a second format bump.
 
+### Phase 4.5, as built so far
+
+The rename landed 2026-09-05; sub-clusters have not. They were planned as two
+commits on one branch for a reason that held up: the first is a rename with no
+behaviour change and is mechanically checkable, the second is new capability.
+
+**The layout, in full.** Directories nest and the profile is renamed, which was
+the more disruptive of the two options considered and was chosen deliberately:
+
+```
+sites/
+  job.pbspro.tmpl            per SCHEDULER, not per machine
+  ncar.yaml                  the SITE
+  ncar/
+    derecho.yaml             a CLUSTER
+    casper.yaml
+    derecho/cluster.sh       the operator's paths + the generated block
+    casper/cluster.sh
+```
+
+`sites/ncar.yaml` now holds the sixteen values that were identical between the
+two cluster files, and each cluster states only what differs. Derecho's own file
+is down to its Cray paths, its queue, its geometry and its MPI recipes; Casper's
+to its queue, its Genoa geometry, `/proc` and Open MPI.
+
+**One schema, checked twice.** `schema/site.json` became `schema/cluster.json`
+and describes the complete thing. Each FILE is checked against it for shape --
+which catches a typo in the file it was made in -- and the MERGED result is
+checked for completeness in `benchlib/sitefile.py`, because neither half could
+satisfy that alone. Nothing in the schema says `required` any more.
+
+**The merge rules are three lines and they matter.** Scalars take the cluster's
+value; lists take the site's entries then the cluster's, deduplicated; maps
+merge key by key. So `container.binds` reads as "what NCAR mounts, then what this
+machine adds", which is exactly how somebody would say it aloud. There is
+deliberately no way to REMOVE an inherited value: a site value some cluster must
+not have was never a site value, and moving it down is the honest fix.
+
+**`mpi:` is not inherited, on purpose.** It is the least shared and most
+consequential part of a description -- Casper has no Cray PALS and therefore no
+mpich at all -- and a family inherited by accident would be a cluster claiming
+to run an image it cannot. Three duplicated lines are the price of stating
+availability once per cluster, explicitly.
+
+**Vocabulary, everywhere it was wrong.** An experiment says `cluster:` not
+`site:`. `BENCH_SITE` is now `ncar` and `BENCH_CLUSTER` is the machine, both
+exported and both recorded, so results can be grouped either way without a
+reader having to know that `derecho` implies NCAR. `benchlib/site.py` became
+`benchlib/cluster.py`, `exp.site` became `exp.cluster`,
+`libexec/test_site.sh` became `test_cluster.sh`, and `--site` became
+`--cluster`.
+
+**The results format went to schema 2**, because `site` used to hold what is now
+the cluster. A reader seeing schema 1 should treat that row's `site` as its
+cluster; the rows already on disk are not rewritten.
+
+**The profile search grew a level and lost none of its guarantees.** It globs
+`sites/*/<cluster>/cluster.sh`, because an experiment names only its cluster and
+repeating the site in every experiment would be one more thing to keep in step.
+Two sites owning a cluster of the same name is refused by name rather than
+resolved by guessing. A `~/.config/hpcdev/site.sh` from before the rename is
+still honoured, since no rename here can reach a copy in somebody's home
+directory.
+
+**What is left.** `subclusters:` is declared in the schema so a file can be
+written against it, and nothing reads it yet. That is the second commit: each
+entry overriding `node:` -- including the `select` this project learned the hard
+way is not optional -- and an experiment key naming which one it wants. Casper's
+Cascade Lake and Genoa entries are the first two, and its file already records
+both measurements in its header waiting for them.
+
+All 181 checks pass across the five suites, and a dry-run submission from an
+unrelated directory produces the same job script it did before the rename.
+
 ---
 
 ## 11. Open questions
@@ -1573,36 +1647,6 @@ All four DECISIONs are answered — see §12. What remains open:
    Whether it is worth *reducing* is a separate question — `apptainer instance`,
    or staging the `.sif` on node-local NVMe — and nothing needs it yet, since it
    does not touch the figure of merit.
-
-8. **How big a difference is a real difference?** Two independent Derecho
-   sweeps, 2026-09-04 and 2026-09-05, on different nodes and from different
-   directories, give the first measurement of this harness's own resolution:
-
-   | placement | run-to-run agreement across the six images |
-   |---|---|
-   | `pureMPI` 128 x 1 | within **1%** (worst 0.6%) |
-   | `ccd` 16 x 8 | within **4%** |
-   | `numa` 8 x 16 | within **2%** |
-
-   That is the number needed to read the tables honestly. The 2% by which
-   `oneapi` leads at `ccd` is inside the noise of that cell; the 1.5% by which
-   MPICH leads OpenMPI at `pureMPI` is not, because `pureMPI` repeats to under
-   1%. Threaded cells are the noisier ones, which is what one would expect of a
-   bandwidth-bound code sharing memory controllers.
-
-   Two conclusions follow. Any claim about a difference smaller than a cell's
-   own reproducibility needs more repeats, not more confidence — `repeats: 3`
-   was chosen before there was any evidence about what it buys, and this is the
-   first evidence. And the harness should probably say this itself: `collect`
-   knows the spread within a cell but has no way to know the spread BETWEEN
-   runs, so comparing two results directories of the same experiment is a
-   feature it does not have and could.
-
-   The second sweep also confirmed something not asked of it. It ran on the
-   `main` queue with no `place` directive in the job script, and `run.meta`
-   records `pbs_place scatter:exclhost` read back from `qstat -f` -- so that
-   queue allocates whole hosts exclusively by default, and `scheduler.place`
-   is correctly absent for Derecho rather than merely untried.
 
 ---
 

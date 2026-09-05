@@ -1,40 +1,59 @@
-"""sitefile -- read sites/<site>.yaml and render the generated half of site.sh.
+"""sitefile -- read a site and a cluster description, merge them, render site.sh.
 
 THE PROBLEM THIS SOLVES
 
-A site's constants have several consumers and only some of them go through
+A cluster's constants have several consumers and only some go through
 bench/submit.  The generated jobs do; the hand-qsub entry point does not, and
 neither does the factory's Placement_derecho.pbs, the three legacy PBS scripts,
 or the off-cluster test suites.  So "bench/submit reads the YAML and writes the
 values into job.env" would have left every other caller reading a literal
-written into the shell, which is the duplication the site contract exists to
-remove.
+written into the shell, which is the duplication the contract exists to remove.
 
-The one file all of those already source is sites/<site>/site.sh.  So the YAML
-is the authority and site.sh is generated FROM it, into a marked block; the
-per-operator paths above the marker are never touched.  Every consumer keeps
+The one file all of those source is sites/<site>/<cluster>/cluster.sh.  So the
+YAML is the authority and cluster.sh is generated FROM it, into a marked block;
+the per-operator paths above the marker are never touched.  Every consumer keeps
 sourcing one bash file, no compute node parses YAML, and there is no defensive
 default anywhere -- a value exists once.
 
+THREE LEVELS, TWO FILES
+
+    site      NCAR            sites/ncar.yaml
+    cluster   Derecho         sites/ncar/derecho.yaml
+    node type the CPU nodes   subclusters: within the cluster file
+
+The site holds what every cluster of it shares, which was sixteen values
+duplicated between Derecho and Casper before this existed.  Both files are
+checked against schema/cluster.json -- a site file is a partial cluster
+description -- and are merged before anything is generated, so the flat block a
+job sources is unchanged by the split.  The hierarchy is in how a machine is
+DESCRIBED, not in what a job reads.
+
+    scalars   the cluster's value wins
+    lists     the site's entries first, then the cluster's, deduplicated
+    maps      merged key by key, the cluster's value winning per key
+
+There is deliberately no way to REMOVE an inherited value.  A site-level value
+that some cluster must not have was never a site value, and moving it down is
+the honest fix; a subtraction mechanism would let the two files disagree in a
+way no reader could follow.
+
 WHY GENERATED RATHER THAN COMPARED
 
-The alternative was to keep both files hand-written and fail a test when they
-disagree.  That is a real design and it has one advantage: nothing is ever
-rewritten under the operator.  It also means every change is two edits, and the
-test only tells you they diverged, never which one is right.  Generation makes
-the question unaskable.  The precedent is already here: schema/README.md is
-generated from the schemas by schemadoc, with --check failing the suite when it
-is stale, and this follows that pattern exactly.
+The alternative was to keep cluster.sh hand-written and fail a test when it
+disagreed with the YAML.  That is a real design with one advantage: nothing is
+ever rewritten under the operator.  It also means every change is two edits, and
+the test only tells you they diverged, never which one is right.  Generation
+makes the question unaskable.  The precedent is here already: schema/README.md
+is generated from the schemas by schemadoc, with --check failing the suite when
+it is stale.
 
 WHAT DOES NOT COME FROM THE YAML
 
 The body of each MPI overlay recipe.  Which of Cray's two library directories
-carries the MPICH ABI, and why OPAL_PREFIX has to be pinned when the container
-ships an OpenMPI of its own, are arguments rather than data; they stay as code
+carries the MPICH ABI, and why OPAL_PREFIX must be pinned when the container
+ships an Open MPI of its own, are arguments rather than data; they stay as code
 in libexec/make_apptainer_launcher.sh.  The YAML names WHICH recipe a family
-uses and supplies its binds, its library path and its environment.  That is the
-line the plan draws in section 4 ("overlay: selects the launcher recipe in
-libexec/") and it is the right one.
+uses and supplies its binds, its library path and its environment.
 """
 
 import os
@@ -68,55 +87,194 @@ VAR_REF = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
 FAMILIES = ("mpich", "mpich3", "openmpi")
 
 
-class SiteFile(object):
-    def __init__(self, path, data):
-        self.path = path
-        self.data = data
-        self.name = data["site"]
+class ClusterFile(object):
+    """One cluster, as described by a site file and a cluster file together."""
+
+    def __init__(self, path, site_path, data):
+        self.path = path                # the cluster file
+        self.site_path = site_path      # the site file it inherited from
+        self.data = data                # the merged description
+        self.name = data["cluster"]
+        self.site = data["site"]
 
     @property
     def verified(self):
         return self.data.get("verified", True)
 
 
-def find(name, start=None):
-    """sites/<name>.yaml, walking up from `start` the way find_conf does.
+def sites_dir(start=None):
+    """The nearest `sites/` above `start`, or above this code if there is none.
 
-    Deliberately the same search as benchlib.site.find_conf's last resort, so a
-    checkout cannot end up describing one site and generating another.
+    The second is what lets the tools run from any directory: they know which
+    checkout they belong to even when nobody is standing in it.
     """
-    here = os.path.abspath(start or os.getcwd())
-    while True:
-        candidate = os.path.join(here, "sites", name + ".yaml")
+    from_here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for origin in (start or os.getcwd(), from_here):
+        here = os.path.abspath(origin)
+        while True:
+            candidate = os.path.join(here, "sites")
+            if os.path.isdir(candidate):
+                return candidate
+            parent = os.path.dirname(here)
+            if parent == here:
+                break
+            here = parent
+    raise BenchError("no sites/ directory above %s or %s"
+                     % (start or os.getcwd(), from_here), EXIT_CONFIG)
+
+
+def find(name, start=None):
+    """sites/<site>/<cluster>.yaml, searched across every site.
+
+    Globbed rather than requiring the caller to name the site, because an
+    experiment names the cluster it wants and repeating the site in every
+    experiment would be one more thing to keep in step.  Two sites owning a
+    cluster of the same name is possible and is refused by name rather than
+    resolved by guessing.
+    """
+    root = sites_dir(start)
+    found = []
+    for site in sorted(os.listdir(root)):
+        candidate = os.path.join(root, site, name + ".yaml")
         if os.path.isfile(candidate):
-            return candidate
-        parent = os.path.dirname(here)
-        if parent == here:
-            raise BenchError(
-                "no site description for %r" % name, EXIT_CONFIG,
-                ["looked for sites/%s.yaml above %s" % (name, start or os.getcwd()),
-                 "a site needs both: sites/%s.yaml (the machine) and" % name,
-                 "sites/%s/site.sh (this operator's paths)" % name])
-        here = parent
+            found.append(candidate)
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        known = []
+        for site in sorted(os.listdir(root)):
+            d = os.path.join(root, site)
+            if os.path.isdir(d):
+                known += ["%s/%s" % (site, f[:-5])
+                          for f in sorted(os.listdir(d)) if f.endswith(".yaml")]
+        raise BenchError(
+            "no description for cluster %r" % name, EXIT_CONFIG,
+            ["looked for sites/*/%s.yaml under %s" % (name, root),
+             "clusters described here: " + (", ".join(known) or "none")])
+    raise BenchError(
+        "cluster %r is described by more than one site" % name, EXIT_CONFIG,
+        ["    " + p for p in found] +
+        ["cluster names must be unique across sites, because an experiment",
+         "names only the cluster.  Rename one of them."])
 
 
 def load(name_or_path, start=None):
+    """Load a cluster, merge its site into it, and check the result.
+
+    Checking happens twice for a reason: each file alone must have no unknown
+    keys, which catches a typo in the file it was made in; and the merged
+    description must be complete, which neither file could satisfy on its own.
+    """
     path = name_or_path
     if not os.path.isfile(path):
         path = find(name_or_path, start)
+    cluster = _read(path)
+
+    if "cluster" not in cluster:
+        raise BenchError("%s describes no cluster" % path, EXIT_CONFIG,
+                         ["a cluster file needs a `cluster:` key naming itself;",
+                          "without one this is a site file, and site files are",
+                          "loaded through the cluster that names them"])
+
+    site_name = cluster.get("site")
+    if not site_name:
+        raise BenchError("%s names no site" % path, EXIT_CONFIG,
+                         ["add `site: <name>`, and put what every cluster of",
+                          "that site shares in sites/<name>.yaml"])
+
+    site_path = os.path.join(sites_dir(os.path.dirname(path)), site_name + ".yaml")
+    if not os.path.isfile(site_path):
+        raise BenchError("%s names site %r, which has no description"
+                         % (path, site_name), EXIT_CONFIG,
+                         ["expected " + site_path])
+    site = _read(site_path)
+    if site.get("cluster"):
+        raise BenchError("%s has a `cluster:` key" % site_path, EXIT_CONFIG,
+                         ["that key is what marks a file as describing ONE",
+                          "cluster, so a site file must not carry it"])
+
+    data = merge(site, cluster)
+    problems = complete_checks(data, path, site_path)
+    problems.extend(cross_checks(data))
+    if problems:
+        raise BenchError("%s (merged with %s) is not a usable description"
+                         % (path, site_path), EXIT_CONFIG, problems)
+    return ClusterFile(path, site_path, data)
+
+
+def _read(path):
+    """Parse one description file and check its SHAPE, not its completeness."""
     try:
         data = yamlish.load(path)
     except (yamlish.YamlError, OSError) as exc:
         raise BenchError("cannot read %s" % path, EXIT_CONFIG, [str(exc)])
     if not isinstance(data, dict):
         raise BenchError("%s is not a mapping" % path, EXIT_CONFIG)
-
-    problems = schema_mod.validate(data, "site")
-    problems.extend(cross_checks(data))
+    problems = schema_mod.validate(data, "cluster")
     if problems:
-        raise BenchError("%s does not satisfy bench/schema/site.json" % path,
+        raise BenchError("%s does not satisfy bench/schema/cluster.json" % path,
                          EXIT_CONFIG, problems)
-    return SiteFile(path, data)
+    return data
+
+
+def merge(site, cluster):
+    """The site's description with the cluster's laid over it.
+
+    Scalars: the cluster wins.  Lists: the site's entries then the cluster's,
+    deduplicated, order preserved -- so a bind list reads as "what NCAR mounts,
+    then what this machine adds".  Maps: merged key by key, recursively.
+    """
+    out = dict(site)
+    for key, value in cluster.items():
+        if key not in out:
+            out[key] = value
+        elif isinstance(out[key], dict) and isinstance(value, dict):
+            out[key] = merge(out[key], value)
+        elif isinstance(out[key], list) and isinstance(value, list):
+            seen, joined = set(), []
+            for item in list(out[key]) + list(value):
+                marker = repr(item)
+                if marker not in seen:
+                    seen.add(marker)
+                    joined.append(item)
+            out[key] = joined
+        else:
+            out[key] = value
+    return out
+
+
+# What a description must have once both halves are in hand.  Kept here rather
+# than in the schema because the schema checks each file alone, where neither
+# could satisfy this.
+REQUIRED = (
+    ("schema", None),
+    ("site", None),
+    ("cluster", None),
+    ("scheduler", ("kind", "submit", "queue")),
+    ("modules", ("bootstrap",)),
+    ("node", ("cores", "smt")),
+    ("container", ("runtime", "binds")),
+    ("mpi", None),
+)
+
+
+def complete_checks(data, cluster_path, site_path):
+    """Keys that must exist after merging, and where each could have come from."""
+    out = []
+    for key, subkeys in REQUIRED:
+        if key not in data:
+            out.append("no %s: -- state it in %s or in %s"
+                       % (key, os.path.basename(cluster_path),
+                          os.path.basename(site_path)))
+            continue
+        for subkey in subkeys or ():
+            if subkey not in (data[key] or {}):
+                out.append("no %s.%s: -- state it in %s or in %s"
+                           % (key, subkey, os.path.basename(cluster_path),
+                              os.path.basename(site_path)))
+    if data.get("mpi") is not None and not data["mpi"]:
+        out.append("mpi: is empty, so this cluster can host no container at all")
+    return out
 
 
 def cross_checks(data):
@@ -126,7 +284,7 @@ def cross_checks(data):
     describe a machine no job could run on.
     """
     out = []
-    if not isinstance(data.get("site"), str):
+    if not isinstance(data.get("cluster"), str):
         return out                          # the schema already said so
 
     mpi = data.get("mpi") or {}
@@ -277,19 +435,19 @@ def _case(fname, mapping, families, default="", comment=None):
     return lines
 
 
-def source_label(name):
-    """How the block names the file it came from.
+def source_label(sf):
+    """How the block names the files it came from.
 
     One definition because the label is INSIDE the generated text: sitegen and
     validate rendering it differently would make every profile look stale to one
     of them.
     """
-    return "sites/%s.yaml" % name
+    return "sites/%s.yaml + sites/%s/%s.yaml" % (sf.site, sf.site, sf.name)
 
 
 def render(sf, source_rel=None):
     """The generated block, marker to marker, ending in a newline."""
-    source_rel = source_rel or source_label(sf.name)
+    source_rel = source_rel or source_label(sf)
     d = sf.data
     sched, mods = d["scheduler"], d["modules"]
     node, cont, mpi = d["node"], d["container"], d["mpi"]
@@ -313,7 +471,12 @@ def render(sf, source_rel=None):
     out.append("")
 
     out.append("#-- identity and scheduler " + "-" * 47)
+    # Two names, because there are two levels.  BENCH_SITE is the organisation
+    # whose conventions the module names and GLADE belong to; BENCH_CLUSTER is
+    # the machine.  Both reach every result row, so a row can be grouped either
+    # way without anyone having to know that `derecho` implies NCAR.
     out.append(_assign("BENCH_SITE", d["site"], "site"))
+    out.append(_assign("BENCH_CLUSTER", d["cluster"], "cluster"))
     out.append(_assign("BENCH_SCHEDULER", sched["kind"], "scheduler.kind"))
     out.append(_assign("BENCH_SUBMIT", sched["submit"], "scheduler.submit"))
     out.append(_assign("BENCH_QUEUE", sched["queue"], "scheduler.queue"))
@@ -430,7 +593,7 @@ def render(sf, source_rel=None):
     out.append("}")
     out.append("")
 
-    out.append("export BENCH_SITE BENCH_SCHEDULER BENCH_SUBMIT BENCH_QUEUE")
+    out.append("export BENCH_SITE BENCH_CLUSTER BENCH_SCHEDULER BENCH_SUBMIT BENCH_QUEUE")
     out.append("export BENCH_CORES_PER_NODE BENCH_SMT BENCH_TOPOLOGY_MODE")
     out.append("export BENCH_CONTAINER_RUNTIME BENCH_BINDS BENCH_BINDS_IF_PRESENT")
     out.append("export BENCH_BIND_MAP BENCH_LIB_DIRS")

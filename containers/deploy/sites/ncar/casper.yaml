@@ -1,27 +1,29 @@
-# Casper -- the second cluster, and the reason the site contract exists.
+# Casper -- a cluster of the NCAR site, and the reason this file has a header
+# this long.
+#
+# What NCAR clusters share is one level up in ../ncar.yaml.  What is here is
+# Casper: a different scheduler queue, no Cray anything, and hardware that is
+# not one kind of thing.
 #
 # WHICH CASPER THIS DESCRIBES, AND HOW WE FOUND OUT
 #
-# Casper is not one machine.  Its hardware table lists at least six distinct
-# core counts across four processor generations.  This file describes ONE node
-# type, and which one was settled by the machine rather than by us.
+# Casper is not one machine.  `pbsnodes` reports seven processor types across
+# its pools, and the high-throughput pool alone holds 64 Genoa, 50 Cascade Lake
+# and 4 Skylake nodes.
 #
 # The first run (2026-09-03) asked for `ncpus=8` with no processor selector and
 # landed on crhtc67, 73, 79 and 80 -- all AMD EPYC 9554, 64 cores, ONE socket,
-# 8 cores per L3, one NUMA domain.  We had described the 36-core two-socket
-# Xeon Gold 6240 nodes, having probed crhtc55 and taken the `crhtc` prefix to
-# name one node type.  It does not: the high-throughput pool holds at least
-# both, and a request that does not say which gets whichever is free.
-#
-# So the node: block below is the EPYC 9554 nodes, measured from that run's
-# topology.json.  The Cascade Lake measurement is kept here because it is the
-# other half of the same lesson, and phase 4.5 is where both get described at
-# once:
+# 8 cores per L3, one NUMA domain.  We had described the 36-core two-socket Xeon
+# Gold 6240 nodes, having probed crhtc55 and taken the `crhtc` prefix to name one
+# node type.  It does not.  So node.select now carries `cpu_type=genoa` and the
+# geometry below is the nodes that actually answer.
 #
 #     crhtc55  36 cores  2 sockets  18 cores/L3  2 NUMA   Xeon Gold 6240
 #     crhtc73  64 cores  1 socket    8 cores/L3  1 NUMA   EPYC 9554
 #
-# WHAT THAT RUN PROVED, AND WHAT IT DID NOT
+# Describing both at once is what the subclusters: map is for.
+#
+# WHAT THE FIRST RUN PROVED, AND WHAT IT DID NOT
 #
 # Proved: the module bootstrap works; the host Open MPI displaces the
 # container's for all three compilers; the binds are sufficient; /proc plus
@@ -40,22 +42,6 @@
 # that.  That is section 4's argument for probing rather than hardcoding,
 # demonstrated rather than asserted.
 #
-#   - the queue is `casper`
-#   - the host MPI is Open MPI, reached through ${NCAR_ROOT_OPENMPI}, and Lmod
-#     rebuilds it against whichever compiler the image names.  Note the version
-#     is not uniform: gcc14 and nvhpc resolved to openmpi/5.0.8, oneapi to
-#     5.0.9, so a comparison across those images is also a comparison across two
-#     host MPI versions
-#   - /proc must be bound, and UCX_POSIX_USE_PROC_LINK=n set, or the UCX POSIX
-#     transport tries to read other ranks' /proc links and is refused by the
-#     container namespace
-#   - GPFS (/usr/lpp/mmfs) is bound and its lib/ is on the library path: NCAR's
-#     Open MPI carries ROMIO's GPFS backend and libmpi has a hard NEEDED on
-#     libgpfs.so
-#   - mpich is deliberately ABSENT.  Casper has no Cray PALS and no Cray MPICH
-#     ABI shim, so neither Derecho recipe applies, and the runner refuses such an
-#     image by name rather than queueing one that cannot run
-#
 # A NOTE ON THESE NODES AND MEASUREMENT
 #
 # High-throughput nodes are shared by design -- the documentation describes them
@@ -64,33 +50,22 @@
 # you cannot see or subtract.  The first run also showed the second cost of
 # sharing: asking for 8 ncpus on an SMT node gets 8 LOGICAL CPUs, so every rank
 # was pinned to a single SMT sibling rather than a whole core, and the placement
-# checker warned on all nine runs.  So this is the right place to verify that the
-# harness runs on Casper, and the wrong place to produce numbers meant to be
-# compared with Derecho's.  Comparable numbers need whole nodes.
+# checker warned on all nine runs.  Comparable numbers need whole nodes.
 schema: 1
-site: casper
+site: ncar
+cluster: casper
 description: "NCAR Casper high-throughput nodes: 1 x 64-core AMD EPYC 9554 (Genoa), SMT on. The crhtc pool also holds 36-core Cascade Lake nodes -- see the header."
 verified: true
 
 scheduler:
-  kind: pbspro
-  submit: qsub
   queue: casper
   walltime_max: "24:00:00"
 
 modules:
+  # Beyond the site bootstrap.  Casper is a GPU cluster and its jobs want the
+  # CUDA runtime; Derecho's CPU nodes do not.
   bootstrap:
-    - module --force purge
-    - module load ncarenv/25.10
-    - module reset
-    - module load apptainer
     - module load cuda
-
-  compiler_map:
-    oneapi: intel
-    gcc14: gcc/14.3.0
-    gcc: gcc
-    nvhpc: nvhpc
 
   mpi_map:
     openmpi: openmpi
@@ -110,10 +85,6 @@ node:
   # with the run while describing the wrong nodes -- see the header.
   target_arch: x86-64-v4
   # How to ask for these nodes.  Verified working in a select line, 2026-09-03.
-  # Without it the request names no processor and the high-throughput pool --
-  # 64 Genoa, 50 Cascade Lake, 4 Skylake -- hands back whichever is free, which
-  # is how the first run measured hardware this file did not describe.
-  #
   # cpu_type only, not the node's Qlist tag: those name EXECUTION queues, and on
   # Casper a job is submitted to the `casper` routing queue which assigns one.
   # Selecting on Qlist would fight the router rather than direct it.
@@ -121,18 +92,20 @@ node:
   topology: probe
 
 container:
-  runtime: apptainer
-  # /proc is bound here and not on Derecho: UCX's POSIX transport reads other
-  # ranks' /proc links, which the container namespace otherwise refuses.
-  binds: [/glade, /local_scratch, /proc]
-  binds_if_present: [/usr/lpp/mmfs, /run, /var/run]
-  bind_map:
-    /usr/lib64: /host_lib64
+  # Added to the site's /glade and /local_scratch.  /proc is bound here and not
+  # on Derecho: UCX's POSIX transport reads other ranks' /proc links, which the
+  # container namespace otherwise refuses.
+  binds: [/proc]
+  binds_if_present: [/run, /var/run]
   lib_dirs:
     - ${NCAR_ROOT_OPENMPI}/lib
     - /usr/lpp/mmfs/lib
     - /usr/lib64
 
+# mpich is deliberately ABSENT.  Casper has no Cray PALS and no Cray MPICH ABI
+# shim, so neither Derecho recipe applies, and the runner refuses such an image
+# by name rather than queueing one that cannot run.  That is exactly why `mpi:`
+# is never inherited from the site.
 mpi:
   openmpi:
     launcher: openmpi
@@ -140,10 +113,7 @@ mpi:
     env:
       UCX_POSIX_USE_PROC_LINK: n
     notes: |
-      UNVERIFIED through bench/.  OSU_casper.pbs ran an Open MPI container this
-      way and worked, but it hand-wrote its launcher rather than going through
-      make_apptainer_launcher, so the host-openmpi recipe has never been
-      exercised here.  The first thing to check in a job log is the '# mpi'
-      header line of report_placement: it names the library that actually
-      initialised, and a container OpenMPI that failed to be displaced shows up
-      there rather than as an error.
+      Verified 2026-09-03.  Note the host Open MPI version is not uniform across
+      compilers here: gcc14 and nvhpc resolved to openmpi/5.0.8, oneapi to
+      5.0.9, so a comparison across those images is also a comparison across two
+      MPI versions.  Derecho gave 5.0.9 for all three.

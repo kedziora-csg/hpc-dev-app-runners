@@ -1,16 +1,17 @@
 #!/bin/bash
 #-------------------------------------------------------------------------------
-# runner.sh -- the sweep, with no site and no application in it.
+# runner.sh -- the sweep, with no cluster and no application in it.
 #
 # Sourced by nothing; RUN, either by a generated job script (bench/submit) or by
 # the hand-qsub entry point (ncar-hpc/PBS/App_benchmarker_derecho.pbs).  Both do
-# the same three things first -- source the site profile, bring up the modules,
+# the same three things first -- source the cluster profile, bring up the modules,
 # hand over -- so both get the same sweep.
 #
 # WHAT IT EXPECTS TO ALREADY BE TRUE
 #
-#   the site profile is sourced       NCAR_HPC_ROOT, BENCH_IMAGE_DIR,
-#                                     BENCH_RESULTS_ROOT, BENCH_SITE are set
+#   the cluster profile is sourced    NCAR_HPC_ROOT, BENCH_IMAGE_DIR,
+#                                     BENCH_RESULTS_ROOT, BENCH_SITE and
+#                                     BENCH_CLUSTER are set
 #   the module environment is up      bench_site_modules has run
 #
 # WHERE THE SWEEP COMES FROM
@@ -64,16 +65,17 @@
 #-------------------------------------------------------------------------------
 
 #-------------------------------------------------------------------------------
-# 1. The site profile must already be sourced.  This script does not look for
+# 1. The cluster profile must already be sourced.  This script does not look for
 #    one: which profile is in force is a decision that belongs to whoever
 #    submitted the job, and a runner that quietly found a different one would
 #    produce results in a directory nobody is watching.
 #-------------------------------------------------------------------------------
 [ -d "${NCAR_HPC_ROOT:-}/libexec" ] || {
-    echo "runner.sh: no site profile has been sourced." >&2
+    echo "runner.sh: no cluster profile has been sourced." >&2
     echo "  NCAR_HPC_ROOT=${NCAR_HPC_ROOT:-<unset>}" >&2
     echo "  Run this through a generated job script (bench/submit) or through" >&2
-    echo "  ncar-hpc/PBS/App_benchmarker_derecho.pbs; both source sites/<site>/site.sh" >&2
+    echo "  ncar-hpc/PBS/App_benchmarker_derecho.pbs; both source the cluster" >&2
+    echo "  profile, sites/<site>/<cluster>/cluster.sh," >&2
     echo "  first.  It is not meant to be qsub'd directly." >&2
     exit 1
 }
@@ -83,8 +85,8 @@
 # job.tmpl and the hand-qsub script both source the profile and then `exec` this
 # script.  Exported VARIABLES cross an exec; shell FUNCTIONS do not.  So
 # NCAR_HPC_ROOT arrives and bench_site_mpi_overlay does not, and the first thing
-# to notice is make_apptainer_launcher.sh refusing to load with "no site profile
-# has been sourced" -- after the queue wait, in a job that had already printed
+# to notice is make_apptainer_launcher.sh refusing to load with "no cluster
+# profile has been sourced" -- after the queue wait, in a job that had already printed
 # its node list.  That is what the first Casper submission hit.
 #
 # Re-sourcing rather than `export -f` in the generated block: exported functions
@@ -99,14 +101,14 @@
 # runner.sh runnable by hand for debugging.
 if ! command -v bench_site_mpi_overlay >/dev/null 2>&1; then
     _conf="${BENCH_SITE_CONF:-}"
-    [ -n "${_conf}" ] || _conf="${NCAR_HPC_ROOT}/../sites/${BENCH_SITE:-}/site.sh"
+    [ -n "${_conf}" ] || _conf="$(echo "${NCAR_HPC_ROOT}"/../sites/*/"${BENCH_CLUSTER:-}"/cluster.sh)"
     if [ -f "${_conf}" ]; then
         . "${_conf}" || { echo "runner.sh: cannot source ${_conf}" >&2; exit 1; }
     fi
     command -v bench_site_mpi_overlay >/dev/null 2>&1 || {
-        echo "runner.sh: the site profile defines no bench_site_* functions." >&2
+        echo "runner.sh: the cluster profile defines no bench_site_* functions." >&2
         echo "  tried: ${_conf}" >&2
-        echo "  That block is generated -- run: bench/sitegen ${BENCH_SITE:-<site>} --write" >&2
+        echo "  That block is generated -- run: bench/sitegen ${BENCH_CLUSTER:-<cluster>} --write" >&2
         exit 1
     }
 fi
@@ -176,7 +178,7 @@ img_os="${img_tag%%-*}"
 echo "image     ${img_tag}.sif  (os=${img_os} compiler=${comp_family} mpi=${mpi_family})"
 load_host_modules "${comp_family}" "${mpi_family}" || exit 1
 
-launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST:-${BENCH_SITE}}-${mpi_family}.sh"
+launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST:-${BENCH_CLUSTER}}-${mpi_family}.sh"
 make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" || exit 1
 
 REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
@@ -352,6 +354,7 @@ stats () {
 record_common () {
     result_reset
     result_set  site           "${BENCH_SITE}"
+    result_set  cluster        "${BENCH_CLUSTER}"
     result_set  job_id         "${PBS_JOBID:-none}"
     result_set  nodes          "${NNODES}"
     result_str  experiment     "${BENCH_EXPERIMENT:-}"

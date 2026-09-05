@@ -1,0 +1,117 @@
+# Derecho -- a cluster of the NCAR site.
+#
+# What NCAR clusters have in common is one level up, in ../ncar.yaml: the
+# scheduler dialect, the ncarenv bootstrap, the compiler module names, GLADE and
+# the container runtime.  What is here is what makes Derecho itself -- an HPE
+# Cray EX, which is the source of everything below that Casper does not have.
+#
+#     ../../bench/sitegen derecho --write     regenerate derecho/cluster.sh
+#     ../../bench/sitegen --check             fail if that file is stale
+#
+# Nothing on a compute node reads this file.  sitegen merges it with the site
+# file and writes the generated block of derecho/cluster.sh, which is the one
+# file every job sources -- the hand-qsub path, the generated jobs, the
+# factory's Placement_derecho.pbs and the off-cluster test suites alike.
+#
+# What is NOT here is the four per-operator paths -- where the checkout is,
+# where the images are, where results go, which scratch.  Those are a property
+# of the person, not of the machine, and stay hand-edited in cluster.sh.
+schema: 1
+site: ncar
+cluster: derecho
+description: "NCAR Derecho: 2 x AMD EPYC 7763 (Milan) per CPU node, SMT on, HPE Cray EX with Slingshot 11"
+verified: true
+
+scheduler:
+  queue: main
+  walltime_max: "12:00:00"
+
+modules:
+  # Cray MPICH ships in the default ncarenv, so there is nothing to load for it.
+  # An empty value is a decision; an absent family is one this cluster cannot
+  # host at all, which is what `mpi:` below states.
+  mpi_map:
+    openmpi: openmpi
+    mpich: ""
+    mpich3: ""
+
+  # An openmpi module left loaded by a previous image puts its own mpiexec and
+  # libraries ahead of Cray PALS and the MPICH ABI shim, which is a silently
+  # wrong run rather than a failure.
+  unload_when:
+    mpich: [openmpi]
+    mpich3: [openmpi]
+
+# Fallbacks, not measurements.  The job probes lscpu on the compute node and
+# topology.json carries that answer; these are only what can be known before
+# there is a node to ask, which is when an illegal ranks x threads is still
+# cheap to reject.
+node:
+  cores: 128
+  smt: 2
+  sockets: 2
+  smt_stride: 128         # block layout: sibling of CPU c is c + 128
+  cores_per_l3: 8         # one Milan CCD, 32 MB
+  cores_per_numa: 16      # NPS4: 8 NUMA domains across 128 cores
+  target_arch: x86-64-v3  # Zen 3: AVX2, no AVX-512
+  topology: probe
+  # Appended to the select chunk: `mem` is a per-chunk resource like ncpus, so
+  # it goes here rather than being a key of its own.  Required by the queues
+  # that do not hand out whole nodes by default; harmless on the ones that do.
+  select: mem=230GB
+
+container:
+  # Added to the site's /glade and /local_scratch.  All four are Cray: this is
+  # what an HPE Cray EX has and an ordinary cluster does not.
+  binds: [/run, /var/run, /opt/cray, /etc/cray]
+
+  # In this order, after whatever the MPI overlay prepends.  A * entry is a glob
+  # and takes its newest match, because these directories carry a version number
+  # that changes under us at every system update.  ${NCAR_ROOT_LIBFABRIC} is what
+  # the module says; the glob under it is the same tree found the hard way, kept
+  # because a standalone call that never loaded the module still has to resolve
+  # libfabric.
+  lib_dirs:
+    - /opt/cray/pe/lib64
+    - /opt/cray/pals/*/lib
+    - ${NCAR_ROOT_LIBFABRIC}/lib64
+    - /opt/cray/libfabric/*/lib64
+    - /usr/lpp/mmfs/lib
+    - /usr/lib64
+
+# Stated here and never inherited: which families a cluster can host is the one
+# thing an accident of inheritance must not decide.  See ../ncar.yaml.
+mpi:
+  mpich:
+    launcher: pals
+    overlay: cray-mpich-abi
+    env:
+      MPICH_SMP_SINGLE_COPY_MODE: NONE
+      MPICH_VERSION_DISPLAY: 1
+    notes: |
+      Verified 2026-09-04: libmpi.so.12 resolves under lib-abi-mpich for all
+      three compilers.  MPICH_SMP_SINGLE_COPY_MODE=NONE because XPMEM/CMA
+      single-copy needs ptrace visibility across ranks that the container
+      namespace does not have.  MPICH_VERSION_DISPLAY=1 so the job log states
+      which MPI actually initialised, which is the fastest way to catch the shim
+      not taking effect.
+
+  mpich3:
+    launcher: pals
+    overlay: cray-mpich-abi
+    env:
+      MPICH_SMP_SINGLE_COPY_MODE: NONE
+      MPICH_VERSION_DISPLAY: 1
+
+  openmpi:
+    launcher: openmpi
+    overlay: host-openmpi
+    env:
+      UCX_POSIX_USE_PROC_LINK: n
+      OMPI_MCA_btl_vader_single_copy_mechanism: none
+    notes: |
+      Verified 2026-09-04: openmpi/5.0.9 rebuilt by Lmod against each image's
+      compiler.  Open MPI is not part of the MPICH ABI Compatibility Initiative,
+      so there is no cross-implementation shim: the container's Open MPI must
+      version match the host's, and it bootstraps over PMIx and must agree with
+      what PALS serves.

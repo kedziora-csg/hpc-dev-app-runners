@@ -1,6 +1,6 @@
-"""site -- read sites/<site>/site.sh the way a job reads it.
+"""cluster -- read sites/<site>/<cluster>/cluster.sh the way a job reads it.
 
-The site profile is bash, and it stays bash: it is sourced by every PBS script
+The cluster profile is bash, and it stays bash: it is sourced by every PBS script
 before anything else, and it carries one function as well as its settings.  So
 the host side sources it too, in a subshell, and reads the exported values back.
 That is a deliberate choice over re-declaring the same paths in Python:
@@ -11,20 +11,21 @@ That is a deliberate choice over re-declaring the same paths in Python:
   - sourcing exercises the same file the job will, so a broken profile fails at
     submit time rather than after a queue wait.
 
-Sourcing is safe: site.sh only assigns and defines.  `bench_site_modules` is
+Sourcing is safe: cluster.sh only assigns and defines.  `bench_site_modules` is
 declared there, never called, so no `module` command runs on the host.
 
 WHERE THE VALUES COME FROM NOW
 
-Everything below the hand-edited paths is generated into site.sh from
-sites/<site>.yaml by bench/sitegen -- see benchlib/sitefile.py for why that
-direction and not the other.  So this module has no constants of its own: it
+Everything below the hand-edited paths is generated into cluster.sh by merging
+sites/<site>.yaml with sites/<site>/<cluster>.yaml -- see benchlib/sitefile.py
+for why that direction and not the other.  So this module has no constants of its own: it
 reads what the profile exports, and a profile that exports nothing is an error
 rather than an occasion to assume Derecho.  The host used to keep its own copy
 of the node geometry, which meant three files stating 128 cores and nothing
 comparing them.
 """
 
+import glob
 import os
 import subprocess
 
@@ -33,7 +34,7 @@ from . import BenchError, EXIT_ERROR
 # Read back after sourcing.  Every one is exported by site.sh itself, so adding
 # a name to this list is not enough -- the profile has to export it, which for
 # everything except the four paths means adding it to sitefile.render.
-EXPORTED = ("BENCH_SITE", "NCAR_HPC_ROOT", "BENCH_IMAGE_DIR",
+EXPORTED = ("BENCH_SITE", "BENCH_CLUSTER", "NCAR_HPC_ROOT", "BENCH_IMAGE_DIR",
             "BENCH_RESULTS_ROOT", "BENCH_SCRATCH", "BENCH_ROOT",
             "BENCH_SCHEDULER", "BENCH_SUBMIT", "BENCH_QUEUE",
             "BENCH_WALLTIME_MAX", "BENCH_CORES_PER_NODE", "BENCH_SMT",
@@ -41,9 +42,17 @@ EXPORTED = ("BENCH_SITE", "NCAR_HPC_ROOT", "BENCH_IMAGE_DIR",
             "BENCH_PLACE")
 
 
-class Site(object):
+class Cluster(object):
+    """One machine you can submit to, and the site it belongs to.
+
+    `name` is the cluster -- derecho -- and `site` is the organisation whose
+    conventions it inherits -- ncar.  Both reach every result row, so rows can be
+    grouped either way without a reader having to know that derecho implies NCAR.
+    """
+
     def __init__(self, name, conf, values):
-        self.name = values.get("BENCH_SITE") or name
+        self.name = values.get("BENCH_CLUSTER") or name
+        self.site = values.get("BENCH_SITE") or ""
         self.conf = conf
         self.root = values.get("NCAR_HPC_ROOT", "")
         self.image_dir = values.get("BENCH_IMAGE_DIR", "")
@@ -73,11 +82,9 @@ class Site(object):
                  % (values.get("BENCH_CORES_PER_NODE") or "<unset>",
                     values.get("BENCH_SMT") or "<unset>"),
                  "these come from the generated block of site.sh, written from",
-                 "sites/%s.yaml by bench/sitegen.  A profile without one is" % self.name,
+                 "the cluster's YAML by bench/sitegen.  A profile without one is",
                  "either older than sitegen or a hand-made copy:",
-                 "    bench/sitegen %s --write        regenerate it" % self.name,
-                 "    cp sites/%s/site.sh ~/.config/hpcdev/   refresh your copy"
-                 % self.name])
+                 "    bench/sitegen %s --write     regenerate it" % self.name])
         self.node_source = self.conf
 
     def image_path(self, sif):
@@ -114,14 +121,14 @@ def _int(text):
         return 0
 
 
-def profile_site(conf):
-    """The site a profile names, or "" if it cannot be read.
+def profile_cluster(conf):
+    """The cluster a profile names, or "" if it cannot be read.
 
     Cheap enough to do while searching: the profile only assigns and defines, so
     sourcing it costs one subshell and no `module` command runs.
     """
     try:
-        return _exported(conf, ("BENCH_SITE",)).get("BENCH_SITE", "")
+        return _exported(conf, ("BENCH_CLUSTER",)).get("BENCH_CLUSTER", "")
     except (OSError, subprocess.CalledProcessError):
         return ""
 
@@ -129,20 +136,20 @@ def profile_site(conf):
 def find_conf(name, start=None):
     """The site profile, looked for the same three places a PBS script looks.
 
-    $BENCH_SITE_CONF, then ~/.config/hpcdev/site.sh, then sites/<site>/site.sh
-    walking up from `start`.  Keeping the order identical to the one inlined in
-    the PBS scripts is the point: the host and the job must never disagree about
-    which profile is in force.
+    $BENCH_SITE_CONF, then ~/.config/hpcdev/cluster.sh, then
+    sites/*/<cluster>/cluster.sh walking up from `start`.  Keeping the order
+    identical to the one inlined in the PBS scripts is the point: the host and
+    the job must never disagree about which profile is in force.
 
-    THE ~/.config COPY HOLDS ONE SITE
+    THE ~/.config COPY HOLDS ONE CLUSTER
 
-    That path has no site in it, so a copy made for one machine used to answer a
-    request for another -- and because a Site takes its name from the profile it
-    read, an experiment saying `site: casper` would run Derecho's core count,
-    paths and MPI recipe without a word.  So the copy is now accepted only if it
-    names the site being asked for, and is otherwise skipped so the search falls
-    through to the checkout's own profile.  Working on two machines needs no
-    setup beyond having both described.
+    That path has no cluster in it, so a copy made for one machine used to
+    answer a request for another -- and because a Cluster takes its name from
+    the profile it read, an experiment saying `cluster: casper` would run
+    Derecho's core count, paths and MPI recipe without a word.  So the copy is
+    accepted only if it names the cluster being asked for, and is otherwise
+    skipped so the search falls through to the checkout's own profile.  Working
+    on two machines needs no setup beyond having both described.
     """
     named = os.environ.get("BENCH_SITE_CONF")
     if named and os.path.isfile(named):
@@ -150,8 +157,13 @@ def find_conf(name, start=None):
 
     home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
         os.path.expanduser("~"), ".config")
-    candidate = os.path.join(home, "hpcdev", "site.sh")
-    if os.path.isfile(candidate) and profile_site(candidate) in (name, ""):
+    candidate = os.path.join(home, "hpcdev", "cluster.sh")
+    if not os.path.isfile(candidate):
+        # The name this file had before phase 4.5.  Still honoured, because it
+        # is a copy in somebody's home directory that no rename here can reach.
+        legacy = os.path.join(home, "hpcdev", "site.sh")
+        candidate = legacy if os.path.isfile(legacy) else candidate
+    if os.path.isfile(candidate) and profile_cluster(candidate) in (name, ""):
         return candidate
 
     # Walking up from where you are, then from where THIS CODE is.
@@ -170,18 +182,21 @@ def find_conf(name, start=None):
     raise BenchError(
         "cannot find a site profile for %r" % name, EXIT_ERROR,
         ["looked for: $BENCH_SITE_CONF, "
-         "${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh,",
-         "            sites/%s/site.sh above %s" % (name, start or os.getcwd()),
-         "            and sites/%s/site.sh above %s" % (name, from_here),
-         "a ~/.config copy for a DIFFERENT site is skipped, not used"])
+         "${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/cluster.sh,",
+         "            sites/*/%s/cluster.sh above %s" % (name, start or os.getcwd()),
+         "            and sites/*/%s/cluster.sh above %s" % (name, from_here),
+         "a ~/.config copy for a DIFFERENT cluster is skipped, not used"])
 
 
 def _walk_up(name, origin):
-    """sites/<name>/site.sh in `origin` or any directory above it, or None."""
+    """sites/*/<name>/cluster.sh in `origin` or above it, or None.
+
+    Globbed over the site level because an experiment names only its cluster.
+    """
     here = os.path.abspath(origin)
     while True:
-        candidate = os.path.join(here, "sites", name, "site.sh")
-        if os.path.isfile(candidate):
+        for candidate in sorted(glob.glob(
+                os.path.join(here, "sites", "*", name, "cluster.sh"))):
             return candidate
         parent = os.path.dirname(here)
         if parent == here:
@@ -208,18 +223,19 @@ def load(name, start=None):
     # machine it describes.  Running Derecho's core count and bind list under a
     # Casper experiment produces results that are wrong in a way no reader could
     # detect afterwards, so it is refused rather than reported.
-    found = values.get("BENCH_SITE") or ""
+    found = values.get("BENCH_CLUSTER") or ""
     if found and found != name:
         raise BenchError(
-            "%s describes %r, but %r was asked for" % (conf, found, name),
+            "%s describes cluster %r, but %r was asked for" % (conf, found, name),
             EXIT_ERROR,
             ["this profile was found via $BENCH_SITE_CONF" if
              os.environ.get("BENCH_SITE_CONF") else
              "this profile was found by searching upwards",
-             "point BENCH_SITE_CONF at sites/%s/site.sh, or unset it and let" % name,
+             "point BENCH_SITE_CONF at that cluster's cluster.sh, or unset it",
+             "and let" ,
              "the search find the checkout's own profile"])
 
-    site = Site(name, conf, values)
+    site = Cluster(name, conf, values)
     if not site.root or not os.path.isdir(os.path.join(site.root, "libexec")):
         raise BenchError("%s does not point NCAR_HPC_ROOT at a checkout with "
                          "libexec/" % conf, EXIT_ERROR,

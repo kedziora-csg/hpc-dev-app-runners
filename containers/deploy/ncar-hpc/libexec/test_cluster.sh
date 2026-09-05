@@ -1,13 +1,13 @@
 #!/bin/bash
 #-------------------------------------------------------------------------------
-# test_site.sh -- the shell that consumes a site profile, checked with no cluster.
+# test_cluster.sh -- the shell that consumes a cluster profile, with no cluster.
 #
-#     ./test_site.sh
+#     ./test_cluster.sh
 #
-# What this covers is the seam phase 4 introduced: sites/<site>.yaml is the only
-# statement of a machine's binds, library path, module maps and MPI recipes, and
-# make_apptainer_launcher.sh / probe_topology.sh read them from the profile
-# bench/sitegen generates.  Before, those values were literals in the shell; the
+# What this covers is the seam phase 4 introduced: the site and cluster YAMLs
+# together are the only statement of a machine's binds, library path, module
+# maps and MPI recipes, and make_apptainer_launcher.sh / probe_topology.sh read
+# them from the profile bench/sitegen generates.  Before, those values were literals in the shell; the
 # risk now is different and worth testing for directly:
 #
 #   the launcher is still correct   the same binds, the same LD_LIBRARY_PATH
@@ -16,12 +16,12 @@
 #   a missing profile FAILS         rather than falling back to Derecho's paths
 #                                   on a machine that is not Derecho, which is
 #                                   the whole reason there are no defaults
-#   an unsupported family FAILS     a site that lists no mpich cannot host an
+#   an unsupported family FAILS     a cluster that lists no mpich cannot host an
 #                                   mpich image, and says so
 #   ${VAR} entries stay literal     a lib_dirs entry naming a module's variable
 #                                   must survive the profile being sourced
 #
-# It runs against a SYNTHETIC site, not against derecho/site.sh, so it asserts
+# It runs against a SYNTHETIC profile, not against Derecho's, so it asserts
 # behaviour rather than restating Derecho's values -- a test that copied them
 # would pass whatever they became.
 #-------------------------------------------------------------------------------
@@ -35,15 +35,16 @@ ok   () { echo "  ok    $1"; pass=$((pass + 1)); }
 bad  () { echo "  FAIL  $1"; shift; [ $# -gt 0 ] && printf '        %s\n' "$@"; fail=$((fail + 1)); }
 want () { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected: $2" "got:      $3"; fi }
 
-echo "site profile consumers"
+echo "cluster profile consumers"
 echo
 
 #-- a synthetic machine, with real directories so the existence tests bite -----
 mkdir -p "${TMP}/fs"/{bound,optional,libs,usrlib,mpi/lib,cray/lib-abi-mpich,vers/9.9/lib}
 : > "${TMP}/fs/image.sif"
 
-cat > "${TMP}/site.sh" <<EOF
-BENCH_SITE='testville'
+cat > "${TMP}/cluster.sh" <<EOF
+BENCH_SITE='ncar'
+BENCH_CLUSTER='testville'
 BENCH_CONTAINER_RUNTIME='apptainer'
 BENCH_BINDS='${TMP}/fs/bound'
 BENCH_BINDS_IF_PRESENT='${TMP}/fs/optional ${TMP}/fs/absent'
@@ -68,7 +69,7 @@ EOF
 # state.
 run () { bash -c "
     set -u
-    . '${TMP}/site.sh'
+    . '${TMP}/cluster.sh'
     export TEST_MODULE_ROOT='${TMP}/fs/mpi'
     export CRAY_MPICH_DIR='${TMP}/fs/cray'
     . '${HERE}/make_apptainer_launcher.sh'
@@ -144,17 +145,17 @@ want "openmpi bound"   "--map-by ppr:16:node:pe=8 --bind-to core" \
 want "openmpi trap"    "-N 16"                        "$(run "mpi_launch_flags openmpi 16 1 trap")"
 
 run "mpi_launch_flags nosuch 1 1 bound" >/dev/null 2>&1
-want "a family the site does not list is refused" 1 "$?"
+want "a family the cluster does not list is refused" 1 "$?"
 
 #-- refusing, rather than guessing ----------------------------------------------
 echo
 echo "no profile, no defaults"
 
-# The point of generating site.sh rather than keeping literals in the shell: a
-# machine with no profile must fail, not quietly run with another machine's
+# The point of generating cluster.sh rather than keeping literals in the shell:
+# a machine with no profile must fail, not quietly run with another machine's
 # paths.
 bash -c "set -u; . '${HERE}/make_apptainer_launcher.sh'" >/dev/null 2>&1
-want "sourcing the launcher without a site profile fails" 1 "$?"
+want "sourcing the launcher without a cluster profile fails" 1 "$?"
 
 out="$(run "bench_site_mpi_overlay () { echo ''; }
             make_apptainer_launcher '${TMP}/o2.sh' '${TMP}/fs/image.sif' mpich")"
@@ -174,7 +175,7 @@ topo () { bash -c "
     echo \"\${TOPO_CORES_PER_NODE} \${TOPO_SMT} \${TOPO_CORES_PER_L3} \${TOPO_SOURCE}\""; }
 
 want "the fallback comes from the profile" "64 2 4 fallback:site-profile:testville" \
-     "$(topo ". '${TMP}/site.sh'")"
+     "$(topo ". '${TMP}/cluster.sh'")"
 
 # Not Derecho's 128: with nothing to go on the fallback must describe a machine
 # no real placement fits, so the caller notices instead of accepting a geometry

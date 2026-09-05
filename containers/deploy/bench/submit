@@ -12,7 +12,7 @@
     --results-dir DIR    where the per-job directories go
     --dry-run            write job.pbs/job.env/job.json, print the qsub, stop
     --force              reuse a results directory that already holds results
-    --site NAME          override the site named in the experiment
+    --cluster NAME       override the cluster named in the experiment
 
 WHAT EACH JOB IS GIVEN
 
@@ -46,43 +46,41 @@ from benchlib import (BenchError, EXIT_CONTRACT, EXIT_ERROR, EXIT_IMAGE,
 from benchlib import checks, experiment as exp_mod, jobfile
 
 
-def template_for(site):
+def template_for(cluster):
     """The job script skeleton, most specific first.
 
-        sites/<site>/job.tmpl        this site needs directives of its own
-        sites/job.<scheduler>.tmpl   the default for every site on that scheduler
+        <cluster>/job.tmpl           this cluster needs directives of its own
+        sites/job.<scheduler>.tmpl   the default for every cluster on that
+                                     scheduler
 
-    Most sites need no template of their own.  A PBS Pro directive block is the
-    same on Derecho as it is on Casper -- the queue, the node count and the
+    Most clusters need no template of their own.  A PBS Pro directive block is
+    the same on Derecho as it is on Casper -- the queue, the node count and the
     walltime are substituted, and everything else a site needs it already gets
     from its profile.  So the shared one is the normal case and a per-site file
-    is the exception, which is the opposite of how this started.  A Slurm site
-    is then one new sites/job.slurm.tmpl rather than one per machine.
+    is the exception, which is the opposite of how this started.  A Slurm
+    cluster is then one new sites/job.slurm.tmpl rather than one per machine.
 
     A profile copied to ~/.config/hpcdev/ has no template beside it, so the
     checkout is searched too: the template belongs to the harness, and making
     every operator copy two files would be a second thing to keep in step.
     """
-    roots = [os.path.dirname(site.conf)]
-    if site.bench_root:
-        roots.append(os.path.join(os.path.dirname(site.bench_root), "sites",
-                                  site.name))
-    candidates = [os.path.join(d, "job.tmpl") for d in roots]
-
-    if site.bench_root:
-        shared = os.path.join(os.path.dirname(site.bench_root), "sites")
-        candidates.append(os.path.join(shared, "job.%s.tmpl" % site.scheduler))
-    candidates.append(os.path.join(os.path.dirname(site.conf), os.pardir,
-                                   "job.%s.tmpl" % site.scheduler))
+    candidates = [os.path.join(os.path.dirname(cluster.conf), "job.tmpl")]
+    if cluster.bench_root:
+        shared = os.path.join(os.path.dirname(cluster.bench_root), "sites")
+        candidates.append(os.path.join(shared, "job.%s.tmpl" % cluster.scheduler))
+    # Beside the profile, two levels up: sites/<site>/<cluster>/ -> sites/.
+    candidates.append(os.path.join(os.path.dirname(cluster.conf),
+                                   os.pardir, os.pardir,
+                                   "job.%s.tmpl" % cluster.scheduler))
 
     for candidate in candidates:
         if os.path.isfile(candidate):
             return candidate
-    raise BenchError("no job template for site %r" % site.name, EXIT_ERROR,
+    raise BenchError("no job template for cluster %r" % cluster.name, EXIT_ERROR,
                      ["looked for, in order:"] +
                      ["    " + os.path.normpath(c) for c in candidates] +
                      ["scheduler is %r, from the generated block of %s"
-                      % (site.scheduler or "<unset>", site.conf)])
+                      % (cluster.scheduler or "<unset>", cluster.conf)])
 
 
 def main():
@@ -90,7 +88,7 @@ def main():
         description="Expand an experiment into jobs and submit them.")
     ap.add_argument("name", help="experiment name or path")
     ap.add_argument("--account", help="scheduler project to charge (required to submit)")
-    ap.add_argument("--site", help="override the site named in the experiment")
+    ap.add_argument("--cluster", help="override the cluster named in the experiment")
     ap.add_argument("--profile", help="run only the cell this profile names")
     ap.add_argument("--images", help="override the image list (space separated)")
     ap.add_argument("--nodes", type=int, help="override defaults.nodes")
@@ -102,7 +100,7 @@ def main():
                     help="reuse a results directory that already holds results")
     args = ap.parse_args()
 
-    exp = exp_mod.load(args.name, args.site)
+    exp = exp_mod.load(args.name, args.cluster)
     if args.nodes:
         exp.defaults["nodes"] = args.nodes
     if args.walltime:
@@ -121,7 +119,7 @@ def main():
 
     # Check the world before queueing anything.  A missing .sif is a job that
     # waits in a queue to print one line and exit.
-    image_results = checks.images(exp.site, sorted({j.image for j in jobs}))
+    image_results = checks.images(exp.cluster, sorted({j.image for j in jobs}))
     missing = [r for r in image_results if r.state == "missing"]
     if missing:
         print("error: these .sif images do not exist:", file=sys.stderr)
@@ -129,10 +127,10 @@ def main():
             print("    %s" % result.detail, file=sys.stderr)
         target = (exp.data["images"].get("from_make") or "derecho")
         print("  build them with:  cd %s/libexec && make %s"
-              % (exp.site.root, target), file=sys.stderr)
+              % (exp.cluster.root, target), file=sys.stderr)
         return EXIT_IMAGE
 
-    contract_results = checks.contracts(exp.site,
+    contract_results = checks.contracts(exp.cluster,
                                         [(j.image, j.app["name"]) for j in jobs])
     missing = [r for r in contract_results if r.state == "missing"]
     if missing:
@@ -148,17 +146,18 @@ def main():
     # A relative --results-dir would put the log somewhere nobody looks and send
     # the results after it.
     root = os.path.abspath(
-        args.results_dir or os.path.join(exp.site.results_root, exp.name))
-    template = template_for(exp.site)
+        args.results_dir or os.path.join(exp.cluster.results_root, exp.name))
+    template = template_for(exp.cluster)
     # A per-site job.tmpl silently overrides the shared one and can carry
     # directives no site file mentions, so it is never left unsaid: removing a
     # key from the YAML changes nothing if a forked template hardcodes it.
-    shared = os.path.join(os.path.dirname(exp.site.bench_root), "sites",
-                          "job.%s.tmpl" % exp.site.scheduler)
+    shared = os.path.join(os.path.dirname(exp.cluster.bench_root), "sites",
+                          "job.%s.tmpl" % exp.cluster.scheduler)
     site_template = os.path.abspath(template) != os.path.abspath(shared)
 
     print("experiment : %s" % exp.path)
-    print("site       : %s   (%s)" % (exp.site.name, exp.site.conf))
+    print("cluster    : %s of site %s   (%s)"
+          % (exp.cluster.name, exp.cluster.site, exp.cluster.conf))
     print("account    : %s" % (account or "<none: dry run>"))
     print("nodes      : %d    walltime: %s    repeats: %d"
           % (exp.defaults["nodes"], exp.defaults["walltime"], exp.defaults["repeats"]))
@@ -167,13 +166,13 @@ def main():
     # generated file to answer.
     print("queue      : %s%s"
           % (exp.defaults["queue"],
-             "    place: %s" % exp.site.place if exp.site.place else ""))
+             "    place: %s" % exp.cluster.place if exp.cluster.place else ""))
     print("results    : %s" % root)
     if site_template:
         print("template   : %s" % template)
-        print("             ^ a per-site template, overriding sites/job.%s.tmpl."
-              % exp.site.scheduler)
-        print("               Directives in it are NOT described by any site file.")
+        print("             ^ a per-cluster template, overriding sites/job.%s.tmpl."
+              % exp.cluster.scheduler)
+        print("               Directives in it are NOT described by any YAML.")
     if args.profile:
         print("profile    : %s" % args.profile)
     print("jobs       : %d  (%d cell(s), %d run(s))"
@@ -222,7 +221,7 @@ def main():
         return EXIT_ERROR
     else:
         print("when the jobs finish:")
-        print("    %s/collect %s --best" % (exp.site.bench_root, root))
+        print("    %s/collect %s --best" % (exp.cluster.bench_root, root))
     return EXIT_OK
 
 
