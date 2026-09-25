@@ -474,6 +474,24 @@ want "and does not leak into the select chunk" \
      "#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1${sel_suffix}" \
      "$(grep -h '^#PBS -l select' "${TMP}/pl.d"/*/job.pbs 2>/dev/null | head -1)"
 
+# The order a job actually does it in: profile first, then job.env.  job.env is
+# sourced AFTER the profile, so anything identity-shaped in it wins -- which is
+# how `site: derecho` reached 54 rows from a profile that said `ncar`.  The
+# profile asserting its identity did not help, because the override came later
+# and from a file the operator never reads.  So job.env must not mention them.
+grep -qE "^BENCH_(SITE|CLUSTER)=" "${d}/job.env" \
+    && bad "job.env carries an identity variable" \
+           "$(grep -E '^BENCH_(SITE|CLUSTER)=' "${d}/job.env")" \
+    || ok "job.env states no identity, so it cannot override the profile"
+
+idout="$(bash -c '
+    . "$1" >/dev/null 2>&1
+    . "$2"
+    echo "site=${BENCH_SITE} cluster=${BENCH_CLUSTER}"
+' _ "${HERE}/../sites/ncar/derecho/cluster.sh" "${d}/job.env" 2>&1)"
+want "profile then job.env leaves the identity the profile set" \
+     "site=ncar cluster=derecho" "${idout}"
+
 # The job names its profile outright, and PBS runs it from its own spool
 # directory -- so a relative path, which is how anyone would type
 # $BENCH_SITE_CONF on a login node, would resolve to nothing once the job

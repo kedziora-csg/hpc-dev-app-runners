@@ -99,7 +99,14 @@ def job_env(exp, job, results_dir, profile=None):
         "# configuration: the job never reads the experiment YAML, and reading",
         "# this directory never requires it either.",
         "",
-        "BENCH_SITE=%s" % _sh(exp.cluster.name),
+        # No BENCH_SITE or BENCH_CLUSTER here, deliberately.  Identity comes
+        # from the cluster profile and from nowhere else.  This file used to
+        # carry `BENCH_SITE`, and runner.sh sources it AFTER the profile, so it
+        # silently overrode what the profile had just asserted -- which is how
+        # `site: derecho` reached 54 result rows on a profile that plainly said
+        # `BENCH_SITE='ncar'`.  Two files stating identity, one overriding the
+        # other, is the duplication this whole phase exists to remove.  job.json
+        # records both names for the reader; only the profile sets them.
         "BENCH_EXPERIMENT=%s" % _sh(exp.name),
         "BENCH_JOB_KEY=%s" % _sh(job.key),
         "BENCH_PROFILE=%s" % _sh(profile or ""),
@@ -148,9 +155,10 @@ def job_record(exp, job, results_dir, profile=None):
         "schema": 1,
         "generated": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "experiment": {"name": exp.name, "path": os.path.abspath(exp.path)},
-        "site": {"name": exp.cluster.name, "conf": exp.cluster.conf,
-                 "cores_per_node": exp.cluster.cores_per_node,
-                 "smt": exp.cluster.smt, "node_source": exp.cluster.node_source},
+        "site": exp.cluster.site,
+        "cluster": {"name": exp.cluster.name, "conf": exp.cluster.conf,
+                    "cores_per_node": exp.cluster.cores_per_node,
+                    "smt": exp.cluster.smt, "node_source": exp.cluster.node_source},
         "profile": profile,
         "job": {"key": job.key, "nodes": job.nodes, "walltime": job.walltime,
                 "repeats": job.repeats, "results_dir": results_dir},

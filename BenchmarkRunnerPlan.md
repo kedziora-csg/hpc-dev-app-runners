@@ -1555,21 +1555,37 @@ itself.** Derecho, 2026-09-24: eighteen cells, fifty-four runs, every placement
 and `BENCH_CLUSTER` came out right. `BENCH_SITE` did not: every row says
 `site: derecho` where it should say `ncar`.
 
-The cause is the interaction of two earlier decisions. The generated block
-honours any value already in the environment, which is what makes
-`BENCH_QUEUE=main bench/submit ...` work. And the rename changed what
-`BENCH_SITE` MEANS -- from the machine to the organisation. So a login shell
-still exporting `BENCH_SITE=derecho` was not holding a typo; it was holding
-last week's correct value, which is exactly why nobody would think to clear it.
-PBS carried it into the job and the profile deferred to it.
+The cause was `bench/submit` writing it, and the first diagnosis was wrong.
 
-The fix is a distinction the generated block did not previously make.
-**Identity is asserted, not offered.** `BENCH_SITE` and `BENCH_CLUSTER` are now
-plain assignments; everything else keeps its override. They are not settings --
-they are what the file says it describes, and honouring an inherited value there
-can only mislabel results. Nothing legitimately overrides them: the PBS scripts
-use `BENCH_CLUSTER` to CHOOSE a profile before sourcing one, which is unaffected,
-and `--cluster` picks which profile to load rather than what it says.
+It looked like an inherited environment variable: the generated block honours a
+value already set, which is what makes `BENCH_QUEUE=main bench/submit ...` work,
+and the rename changed what `BENCH_SITE` MEANS -- from the machine to the
+organisation -- so a shell still exporting last week's correct value would have
+produced exactly this. That reading was plausible, and wrong. Re-running with a
+clean environment produced the same wrong label.
+
+The real cause is one line in `benchlib/jobfile.py`. `job.env` carried
+`BENCH_SITE=<cluster name>`, and the rename's mechanical pass changed
+`exp.site.name` to `exp.cluster.name` on the right-hand side while leaving the
+variable it was written into called `BENCH_SITE`. So the file stated the cluster
+name under the site's name. `runner.sh` sources `job.env` AFTER the profile, so
+it overrode what the profile had just asserted -- which is why asserting harder
+in the profile changed nothing.
+
+Two fixes, and the second is the one that mattered.
+
+**Identity is asserted, not offered.** `BENCH_SITE` and `BENCH_CLUSTER` are
+plain assignments in the generated block; every other setting keeps its
+override. They are not settings -- they are what the file says it describes.
+This is sound on its own and it is not what was broken here.
+
+**`job.env` states no identity at all.** Not a corrected value: none. The
+profile is where identity comes from, and a second file repeating it -- sourced
+later, and never read by an operator -- is the same duplication this phase
+exists to remove, with the added property that one silently wins. `job.json`
+records both names for the reader; only the profile sets them. The test for it
+sources the two files in the order a job does, because the values were never the
+problem and the ordering always was.
 
 Worth noting what the failure was not. The run was correct in every respect that
 affects a number -- the right machine, the right geometry, the right binds, the
