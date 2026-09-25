@@ -1693,6 +1693,27 @@ All four DECISIONs are answered — see §12. What remains open:
    or staging the `.sif` on node-local NVMe — and nothing needs it yet, since it
    does not touch the figure of merit.
 
+9. **Hardware cores are not schedulable cores.** The whole-node Casper sweep was
+   written, submitted and never ran. It asked for `ncpus=64`, because
+   `probe_topology` reads `lscpu` and an EPYC 9554 has 64 physical cores; the
+   documentation says two of them are reserved for the operating system, so PBS
+   appears to advertise 62. A request no node can satisfy does not fail — it
+   queues indefinitely, which is a worse failure than a rejection because
+   nothing anywhere says why.
+
+   The harness has no notion of this distinction. `node.cores` feeds two
+   different things: the geometry check, which asks "is this a legal rank/thread
+   product for the hardware", and the `select=` directive, which asks "what may
+   I request". Those are the same number on Derecho and differ by two on
+   Casper's Genoa nodes, and probably differ elsewhere.
+
+   The fix belongs with sub-clusters, since it is a property of a node type: an
+   entry needs its schedulable CPU count beside its hardware geometry, taken
+   from `resources_available.ncpus` rather than from `lscpu`. `bench/validate`
+   could then refuse a whole-node request that exceeds it, before the queue
+   swallows it. Until then, Casper stays on partial-node plumbing checks, which
+   is all that cluster has ever been used for.
+
 ---
 
 ## 12. Decision log
