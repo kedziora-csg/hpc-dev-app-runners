@@ -66,7 +66,7 @@ _topo_set_fallback () {
     TOPO_SMT_LAYOUT="block"
 
     if [ -n "${BENCH_CORES_PER_NODE:-}" ]; then
-        TOPO_SOURCE="${TOPO_FALLBACK_SOURCE}:${BENCH_SITE:-unknown}"
+        TOPO_SOURCE="${TOPO_FALLBACK_SOURCE}:${BENCH_CLUSTER:-unknown}"
         TOPO_CORES_PER_NODE="${BENCH_CORES_PER_NODE}"
         TOPO_SMT="${BENCH_SMT:-1}"
         TOPO_SOCKETS="${BENCH_SOCKETS:-1}"

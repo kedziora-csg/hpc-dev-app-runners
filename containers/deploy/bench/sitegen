@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""sitegen -- turn sites/<site>.yaml into the generated block of site.sh.
+"""sitegen -- merge a site and a cluster description into cluster.sh.
 
-    sitegen                      check every site described in this checkout
+    sitegen                      check every cluster described in this checkout
     sitegen derecho              print what the block would be
-    sitegen derecho --write      write it into sites/derecho/site.sh
-    sitegen --check              exit 1 if any site.sh block is stale
+    sitegen derecho --write      write it into sites/ncar/derecho/cluster.sh
+    sitegen --check              exit 1 if any cluster.sh block is stale
     sitegen --all --write        regenerate every one
 
 WHY THIS EXISTS
 
-sites/<site>.yaml is the authority for everything about a machine that is not a
-path.  But the consumers of those values are shell: the runner, the hand-qsub
+sites/<site>.yaml and sites/<site>/<cluster>.yaml together are the authority for
+everything about a machine that is not a path.  But the consumers of those values are shell: the runner, the hand-qsub
 entry point, the factory's Placement_derecho.pbs, three legacy PBS scripts and
 two off-cluster test suites.  Only some of them go through bench/submit, so
 expanding the YAML at submit time would have reached some callers and left the
 rest reading a literal.  The one file all of them source is site.sh, so that is
 what gets generated.
 
-The hand-edited part of site.sh -- where the checkout is, where the images are,
+The hand-edited part of cluster.sh -- where the checkout is, where the images are,
 where results go, which scratch -- is above the marker and is never touched.
 That split is not arbitrary: those four are properties of the OPERATOR, and
 everything this tool writes is a property of the MACHINE.  One of them belongs
@@ -27,6 +27,8 @@ WHAT --check IS FOR
 
 The same job schemadoc --check does for schema/README.md: make a stale
 generated file a test failure rather than a surprise.  test_bench.sh runs it.
+A cluster whose SITE file changed is stale too, which is the case a
+hand-written cluster.sh could never have caught.
 """
 
 import argparse
@@ -45,23 +47,32 @@ SITES_DIR = os.path.join(os.path.dirname(HERE), "sites")
 
 
 def described():
-    """Every sites/<name>.yaml in this checkout, by name."""
-    return sorted(os.path.basename(p)[:-5]
-                  for p in glob.glob(os.path.join(SITES_DIR, "*.yaml")))
+    """Every cluster described in this checkout, by name.
+
+    A cluster is sites/<site>/<cluster>.yaml.  sites/<site>.yaml is the site it
+    belongs to and is never generated from on its own -- it has no cluster.sh,
+    because a site is not a thing you submit to.
+    """
+    out = []
+    for path in sorted(glob.glob(os.path.join(SITES_DIR, "*", "*.yaml"))):
+        out.append(os.path.basename(path)[:-5])
+    return sorted(out)
 
 
-def target(name):
-    return os.path.join(SITES_DIR, name, "site.sh")
+def target(sf):
+    """sites/<site>/<cluster>/cluster.sh, beside the cluster's own YAML."""
+    return os.path.join(os.path.dirname(sf.path), sf.name, "cluster.sh")
 
 
 def block_for(name):
-    sf = sitefile.load(os.path.join(SITES_DIR, name + ".yaml"))
+    sf = sitefile.load(name)
     if sf.name != name:
         raise BenchError(
-            "sites/%s.yaml says site: %s" % (name, sf.name), EXIT_CONFIG,
-            ["the filename and the site: key name the same machine, and both",
-             "are used to find things -- an experiment's site: key reaches the",
-             "YAML by filename and sites/<site>/site.sh by the key"])
+            "sites/%s/%s.yaml says cluster: %s" % (sf.site, name, sf.name),
+            EXIT_CONFIG,
+            ["the filename and the cluster: key name the same machine, and",
+             "both are used to find things -- an experiment's cluster: key",
+             "reaches the YAML by filename and cluster.sh by the key"])
     return sf, sitefile.render(sf)
 
 
@@ -75,33 +86,34 @@ def check_one(name, verbose=True):
             print("        " + line, file=sys.stderr)
         return 1
 
-    path = target(name)
+    path = target(sf)
     if not os.path.isfile(path):
         print("  FAIL  %s: no %s" % (name, os.path.relpath(path, SITES_DIR)),
               file=sys.stderr)
-        print("        the machine is described but no operator profile exists;",
+        print("        the cluster is described but no operator profile exists;",
               file=sys.stderr)
         print("        create it with: sitegen %s --write" % name, file=sys.stderr)
         return 1
 
     current = sitefile.split(io.open(path, encoding="utf-8").read())[1]
     if current is None:
-        print("  FAIL  %s: site.sh has no generated block" % name, file=sys.stderr)
+        print("  FAIL  %s: cluster.sh has no generated block" % name, file=sys.stderr)
         print("        run: sitegen %s --write" % name, file=sys.stderr)
         return 1
     if current != block:
-        print("  FAIL  %s: site.sh is stale -- run sitegen %s --write"
+        print("  FAIL  %s: cluster.sh is stale -- run sitegen %s --write"
               % (name, name), file=sys.stderr)
         return 1
     if verbose:
         note = "" if sf.verified else "   (UNVERIFIED)"
-        print("  ok    %s: site.sh matches sites/%s.yaml%s" % (name, name, note))
+        print("  ok    %s: cluster.sh matches %s%s"
+              % (name, sitefile.source_label(sf), note))
     return 0
 
 
 def write_one(name):
     sf, block = block_for(name)
-    path = target(name)
+    path = target(sf)
     if os.path.isfile(path):
         text = io.open(path, encoding="utf-8").read()
     else:
@@ -116,38 +128,39 @@ def write_one(name):
     print("wrote the generated block of %s (%d lines)"
           % (os.path.relpath(path, SITES_DIR), block.count("\n")))
     if not sf.verified:
-        print("  note: sites/%s.yaml is marked verified: false -- nothing in it"
-              % name)
+        print("  note: %s is marked verified: false -- nothing in it"
+              % os.path.relpath(sf.path, SITES_DIR))
         print("        has been confirmed by a job that actually ran.")
     return EXIT_OK
 
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Generate the machine half of sites/<site>/site.sh from "
-                    "sites/<site>.yaml.")
-    ap.add_argument("site", nargs="?", help="site name (default: all described)")
-    ap.add_argument("--all", action="store_true", help="every described site")
+        description="Generate the machine half of cluster.sh by merging "
+                    "sites/<site>.yaml with sites/<site>/<cluster>.yaml.")
+    ap.add_argument("site", nargs="?", metavar="CLUSTER",
+                    help="cluster name (default: all described)")
+    ap.add_argument("--all", action="store_true", help="every described cluster")
     ap.add_argument("--write", action="store_true",
-                    help="splice the block into site.sh instead of printing it")
+                    help="splice the block into cluster.sh instead of printing it")
     ap.add_argument("--check", action="store_true",
-                    help="exit 1 if any site.sh block is stale")
+                    help="exit 1 if any cluster.sh block is stale")
     args = ap.parse_args()
 
     names = described()
     if not names:
-        print("no sites/*.yaml in %s" % SITES_DIR, file=sys.stderr)
+        print("no sites/*/*.yaml in %s" % SITES_DIR, file=sys.stderr)
         return EXIT_ERROR
     if args.site:
         if args.site not in names:
-            print("no sites/%s.yaml (have: %s)" % (args.site, ", ".join(names)),
+            print("no cluster %r (have: %s)" % (args.site, ", ".join(names)),
                   file=sys.stderr)
             return EXIT_CONFIG
         names = [args.site]
 
     if args.check or (not args.write and not args.site):
         bad = sum(check_one(name) for name in names)
-        print("%d site(s) checked, %d stale" % (len(names), bad))
+        print("%d cluster(s) checked, %d stale" % (len(names), bad))
         return 1 if bad else EXIT_OK
 
     if args.write:

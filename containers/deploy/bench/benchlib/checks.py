@@ -62,10 +62,10 @@ def _which(name):
     return None
 
 
-def images(site, names):
+def images(cluster, names):
     out = []
     for sif in names:
-        path = site.image_path(sif)
+        path = cluster.image_path(sif)
         if os.path.isfile(path):
             out.append(Result(sif, "ok", path))
         else:
@@ -73,7 +73,7 @@ def images(site, names):
     return out
 
 
-def contracts(site, pairs):
+def contracts(cluster, pairs):
     """pairs: (sif, app_name).  An absolute app name is a bare executable."""
     if not have_apptainer():
         return [Result("%s in %s" % (app, sif), "unchecked",
@@ -82,7 +82,7 @@ def contracts(site, pairs):
 
     out = []
     for sif, app in sorted(set(pairs)):
-        path = site.image_path(sif)
+        path = cluster.image_path(sif)
         if not os.path.isfile(path):
             continue                    # already reported by images()
         target = app if app.startswith("/") else "%s/%s/app.yaml" % (APP_D, app)
@@ -174,8 +174,8 @@ class Preflight(object):
 
 def preflight(exp, jobs):
     """The gate both `bench validate` and `bench submit` apply.  See ONE GATE."""
-    image_results = images(exp.site, sorted({j.image for j in jobs}))
-    contract_results = contracts(exp.site,
+    image_results = images(exp.cluster, sorted({j.image for j in jobs}))
+    contract_results = contracts(exp.cluster,
                                  [(j.image, j.app["name"]) for j in jobs])
     seen, app_problems = app_contracts(j.app["name"] for j in jobs)
 

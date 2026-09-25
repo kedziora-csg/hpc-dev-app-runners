@@ -6,7 +6,8 @@ reader -- human or model -- working with a limited amount of context at a time.
 
     yamlish     read the YAML we write, with or without PyYAML
     schema      validate against bench/schema/*.json
-    site        read sites/<site>/site.sh the same way a job does
+    cluster     read sites/<site>/<cluster>/cluster.sh the way a job does
+    sitefile    merge a site and a cluster description, generate cluster.sh
     experiment  load an experiment, expand its matrix into jobs and cells
     jobfile     render a job script, job.env and job.json
 

@@ -22,7 +22,7 @@
 #
 # FIELDS
 #
-#     top level     site job_id nodes repeat wall_s exit valid warm
+#     top level     site cluster job_id nodes repeat wall_s exit valid warm
 #     image.        sif digest os compiler mpi
 #     app.          name version scale app_dir_override
 #     placement.    name ranks_per_node threads mpiexec_flags verdict
@@ -144,7 +144,10 @@ result_metrics_from_file () {
 result_emit () {
     local out="$1" rec place
 
-    rec="{\"schema\":1"
+    # 2 since phase 4.5: `site` used to hold the CLUSTER name.  A reader that
+    # sees schema 1 should treat that row's `site` as its cluster and its site
+    # as unknown, which is what bench/collect does.
+    rec="{\"schema\":2"
     rec="${rec},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
     [ -n "${_R_TOP}"   ] && rec="${rec},${_R_TOP}"
     [ -n "${_R_IMAGE}" ] && rec="${rec},\"image\":{${_R_IMAGE}}"

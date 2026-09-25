@@ -45,7 +45,7 @@ import os
 
 from . import BenchError, EXIT_CONFIG, EXIT_GEOMETRY
 from . import schema as schema_mod
-from . import site as site_mod
+from . import cluster as cluster_mod
 from . import yamlish
 
 AXES = ("images", "apps", "placements", "omp_variants")
@@ -96,10 +96,10 @@ class Job(object):
 
 
 class Experiment(object):
-    def __init__(self, path, data, site):
+    def __init__(self, path, data, cluster):
         self.path = path
         self.data = data
-        self.site = site
+        self.cluster = cluster
         self.name = os.path.splitext(os.path.basename(path))[0]
         self.account = data.get("account")
 
@@ -107,7 +107,7 @@ class Experiment(object):
         self.defaults = {
             "nodes": d.get("nodes", 1),
             "walltime": d.get("walltime", "00:30:00"),
-            "queue": d.get("queue") or site.queue,
+            "queue": d.get("queue") or cluster.queue,
             "repeats": d.get("repeats", 1),
             "scale": d.get("scale", "node"),
             "target_seconds": d.get("target_seconds", 60),
@@ -121,12 +121,12 @@ class Experiment(object):
         # than left to the scheduler because qsub rejects the whole submission:
         # a matrix of thirty jobs is refused on the first one, having already
         # written thirty results directories.
-        limit = site.walltime_max
+        limit = cluster.walltime_max
         if limit and _seconds(self.defaults["walltime"]) > _seconds(limit):
             raise BenchError(
                 "walltime %s is longer than %s allows (%s)"
-                % (self.defaults["walltime"], site.name, limit), EXIT_CONFIG,
-                ["scheduler.walltime_max in sites/%s.yaml" % site.name,
+                % (self.defaults["walltime"], cluster.name, limit), EXIT_CONFIG,
+                ["scheduler.walltime_max for cluster %s" % cluster.name,
                  "raise it there if the queue's limit has changed, or ask for less"])
 
 
@@ -155,7 +155,7 @@ def resolve_path(name):
                      ["    " + os.path.splitext(k)[0] for k in known])
 
 
-def load(name, site_name=None, start=None):
+def load(name, cluster_name=None, start=None):
     path = resolve_path(name)
     try:
         data = yamlish.load(path)
@@ -169,8 +169,8 @@ def load(name, site_name=None, start=None):
         raise BenchError("%s fails bench/schema/experiment.json" % path,
                          EXIT_CONFIG, problems)
 
-    site = site_mod.load(site_name or data["site"], start)
-    exp = Experiment(path, data, site)
+    cluster = cluster_mod.load(cluster_name or data["cluster"], start)
+    exp = Experiment(path, data, cluster)
     _check_semantics(exp)
     return exp
 
@@ -233,13 +233,13 @@ def image_list(exp):
     images = exp.data["images"]
     if "list" in images:
         return list(images["list"])
-    return exp.site.make_images(images["from_make"])
+    return exp.cluster.make_images(images["from_make"])
 
 
 def geometry_problem(exp, placement):
     """Why this placement's ranks x threads is not a legal product, or None."""
-    cores = exp.site.cores_per_node
-    smt = exp.site.smt or 1
+    cores = exp.cluster.cores_per_node
+    smt = exp.cluster.smt or 1
     product = placement["ranks_per_node"] * placement["threads"]
     if product in (cores, cores * smt):
         return None

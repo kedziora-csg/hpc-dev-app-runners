@@ -34,8 +34,8 @@
 #
 # Looked for in three places, first one found wins:
 #   1. $BENCH_SITE_CONF                                    named outright
-#   2. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh    your own copy
-#   3. sites/<site>/site.sh, walking up from $PBS_O_WORKDIR
+#   2. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/cluster.sh your own copy
+#   3. sites/*/<cluster>/cluster.sh, walking up from $PBS_O_WORKDIR
 #
 # 3 keeps a submit-from-the-checkout workflow working with no setup at all.
 # 2 is what lets this script be submitted from any directory on the machine.
@@ -44,18 +44,20 @@
 # checkout; $PBS_O_WORKDIR is the only reliable record of where you were.
 #-------------------------------------------------------------------------------
 _find_site_conf () {
-    local from="${1:-$(pwd)}" site="${2:-derecho}" d
+    local from="${1:-$(pwd)}" site="${2:-derecho}" d p
 
     [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ] && {
         printf '%s' "${BENCH_SITE_CONF}"; return 0; }
 
-    d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/site.sh"
+    d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/cluster.sh"
     [ -f "${d}" ] && { printf '%s' "${d}"; return 0; }
 
     d="$(cd "${from}" 2>/dev/null && pwd)" || return 1
     while [ -n "${d}" ] && [ "${d}" != "/" ]; do
-        [ -f "${d}/sites/${site}/site.sh" ] && {
-            printf '%s' "${d}/sites/${site}/site.sh"; return 0; }
+        # Globbed over the site level: a job names its cluster, not its site.
+        for p in "${d}"/sites/*/"${site}"/cluster.sh; do
+            [ -f "${p}" ] && { printf '%s' "${p}"; return 0; }
+        done
         d="$(dirname "${d}")"
     done
     return 1
@@ -64,10 +66,11 @@ _find_site_conf () {
 _site_conf="$(_find_site_conf "${PBS_O_WORKDIR:-$(pwd)}" "${BENCH_SITE:-derecho}")"
 if [ -z "${_site_conf}" ]; then
     echo "cannot find a site profile for '${BENCH_SITE:-derecho}'." >&2
-    echo "  looked for: \$BENCH_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/site.sh," >&2
-    echo "              and sites/<site>/site.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
+    echo "  looked for: \$BENCH_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/cluster.sh," >&2
+    echo "              and sites/*/<cluster>/cluster.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
     echo "  to submit from outside the checkout, copy" >&2
-    echo "  containers/deploy/sites/derecho/site.sh to ~/.config/hpcdev/ and set" >&2
+    echo "  containers/deploy/sites/ncar/derecho/cluster.sh to" >&2
+    echo "  ~/.config/hpcdev/cluster.sh and set" >&2
     echo "  NCAR_HPC_ROOT in it." >&2
     exit 1
 fi

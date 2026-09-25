@@ -71,8 +71,8 @@
 #
 # Looked for in three places, first one found wins:
 #   1. $BENCH_SITE_CONF                                    named outright
-#   2. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/site.sh    your own copy
-#   3. sites/<site>/site.sh, walking up from $PBS_O_WORKDIR
+#   2. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/cluster.sh your own copy
+#   3. sites/*/<cluster>/cluster.sh, walking up from $PBS_O_WORKDIR
 #
 # 3 keeps a submit-from-the-checkout workflow working with no setup at all.
 # 2 is what lets this script be submitted from any directory on the machine.
@@ -85,40 +85,43 @@
 # that checkout even if the operator also has a ~/.config copy pointing
 # elsewhere.  Here, where a person typed the qsub, the search is the point.
 #-------------------------------------------------------------------------------
-_profile_site () { ( . "$1" >/dev/null 2>&1; printf '%s' "${BENCH_SITE:-}" ); }
+_profile_cluster () { ( . "$1" >/dev/null 2>&1; printf '%s' "${BENCH_CLUSTER:-}" ); }
 
-_find_site_conf () {
-    local from="${1:-$(pwd)}" site="${2:-derecho}" d
+_find_cluster_conf () {
+    local from="${1:-$(pwd)}" cluster="${2:-derecho}" d p
 
     [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ] && {
         printf '%s' "${BENCH_SITE_CONF}"; return 0; }
 
-    # A ~/.config copy holds ONE site and its path does not say which, so it
-    # answers only for the site being asked for.  Otherwise the search falls
+    # A ~/.config copy holds ONE cluster and its path does not say which, so it
+    # answers only for the cluster being asked for.  Otherwise the search falls
     # through to the checkout, which has a profile per machine.  Without this a
     # Derecho copy answers a Casper job and the run is silently wrong: the core
     # count, the bind list and the host-MPI recipe would all be the other
     # machine's, and nothing in the results would say so.
-    d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/site.sh"
-    [ -f "${d}" ] && [ "$(_profile_site "${d}")" = "${site}" ] && {
+    d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/cluster.sh"
+    [ -f "${d}" ] && [ "$(_profile_cluster "${d}")" = "${cluster}" ] && {
         printf '%s' "${d}"; return 0; }
 
     d="$(cd "${from}" 2>/dev/null && pwd)" || return 1
     while [ -n "${d}" ] && [ "${d}" != "/" ]; do
-        [ -f "${d}/sites/${site}/site.sh" ] && {
-            printf '%s' "${d}/sites/${site}/site.sh"; return 0; }
+        # Globbed over the site level: a job names its cluster, not its site.
+        for p in "${d}"/sites/*/"${cluster}"/cluster.sh; do
+            [ -f "${p}" ] && { printf '%s' "${p}"; return 0; }
+        done
         d="$(dirname "${d}")"
     done
     return 1
 }
 
-_site_conf="$(_find_site_conf "${PBS_O_WORKDIR:-$(pwd)}" "${BENCH_SITE:-derecho}")"
+_site_conf="$(_find_cluster_conf "${PBS_O_WORKDIR:-$(pwd)}" "${BENCH_CLUSTER:-derecho}")"
 if [ -z "${_site_conf}" ]; then
-    echo "cannot find a site profile for '${BENCH_SITE:-derecho}'." >&2
-    echo "  looked for: \$BENCH_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/site.sh," >&2
-    echo "              and sites/<site>/site.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
+    echo "cannot find a cluster profile for '${BENCH_CLUSTER:-derecho}'." >&2
+    echo "  looked for: \$BENCH_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/cluster.sh," >&2
+    echo "              and sites/*/<cluster>/cluster.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
     echo "  to submit from outside the checkout, copy" >&2
-    echo "  containers/deploy/sites/derecho/site.sh to ~/.config/hpcdev/ and set" >&2
+    echo "  containers/deploy/sites/ncar/derecho/cluster.sh to ~/.config/hpcdev/" >&2
+    echo "  as cluster.sh, and set" >&2
     echo "  NCAR_HPC_ROOT in it." >&2
     exit 1
 fi

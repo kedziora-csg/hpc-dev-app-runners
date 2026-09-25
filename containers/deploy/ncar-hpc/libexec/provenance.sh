@@ -156,7 +156,12 @@ emit_provenance () {
     {
         printf '# %-16s %s\n' schema        1
         printf '# %-16s %s\n' date          "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        printf '# %-16s %s\n' site          "${BENCH_SITE:-${NCAR_HOST:-unknown}}"
+        # Two names, because there are two levels: the site is the
+        # organisation whose module names and filesystems these are, the
+        # cluster is the machine.  A reader can group by either without having
+        # to know that `derecho` implies NCAR.
+        printf '# %-16s %s\n' site          "${BENCH_SITE:-unknown}"
+        printf '# %-16s %s\n' cluster       "${BENCH_CLUSTER:-${NCAR_HOST:-unknown}}"
         printf '# %-16s %s\n' host          "$(hostname -s 2>/dev/null)"
         printf '# %-16s %s\n' job_id        "${PBS_JOBID:-${SLURM_JOB_ID:-none}}"
         printf '# %-16s %s\n' harness_sha   "$(harness_sha)"

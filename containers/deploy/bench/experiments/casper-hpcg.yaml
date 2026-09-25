@@ -1,48 +1,42 @@
-# HPCG on Casper's high-throughput Genoa nodes.
+# HPCG on Casper's high-throughput Genoa nodes -- a plumbing check, on purpose.
 #
-# The plumbing check this file used to be has served its purpose: the run of
-# 2026-09-03 proved the module bootstrap, the host Open MPI displacement, the
-# binds and the whole record-and-collect path work on Casper.  What it could not
-# do is mean anything, for two reasons that are now both fixable.
+# WHAT THIS IS FOR
 #
-#   it did not choose its hardware   the request named no processor, and the
-#                                    high-throughput pool -- 64 Genoa, 50
-#                                    Cascade Lake, 4 Skylake -- handed back
-#                                    Genoa.  sites/casper.yaml now carries
-#                                    node.select: cpu_type=genoa, so the nodes
-#                                    are the ones it describes.
-#   it shared its nodes              asking for 8 of 64 CPUs got 8 LOGICAL CPUs
-#                                    beside other people's work: every rank was
-#                                    pinned to one SMT sibling rather than a
-#                                    whole core, and the checker warned on all
-#                                    nine runs.  exclusive: true now claims the
-#                                    node.
+# Confirming that the harness runs on Casper: the module bootstrap, the host
+# Open MPI displacing the container's, the binds, /proc plus
+# UCX_POSIX_USE_PROC_LINK=n, the app contract, the placement checker and the
+# whole record-and-collect path.  All of that was proved on 2026-09-03 and this
+# file exists to keep proving it.
 #
-# The cost is queue time.  These nodes are shared by design, so the scheduler
-# has to drain other people's small jobs from two of them before this starts.
-# That is the price of a number anybody can compare.
+# It does NOT produce numbers to compare with Derecho's, and it is written so
+# nobody mistakes it for a file that does.  `exclusive: false` lets the job
+# share a node, which is how these nodes are meant to be used -- the
+# documentation describes them as being for tasks using one or two CPUs.  A
+# co-tenant's work lands in the timings as noise that cannot be seen or
+# subtracted, and asking for 8 CPUs of an SMT node gets 8 LOGICAL CPUs, so every
+# rank is pinned to one SMT sibling rather than a whole core and the placement
+# checker warns on every run.  Both of those are correct reports of a shared
+# node, and both are why these are not measurements.
+#
+# WHY NOT WHOLE NODES
+#
+# A whole-node version of this file was written and never ran.  It asked for
+# `ncpus=64` because probe_topology reports 64 physical cores, and PBS appears
+# to advertise only 62 allocatable CPUs on these nodes -- the documentation says
+# two are reserved for the operating system.  A request no node can satisfy does
+# not fail; it queues forever.  Confirm with:
+#
+#     pbsnodes -a | awk '/cpu_type = genoa/{f=1} f&&/resources_available.ncpus/{print;exit}'
+#
+# That gap is not this file's to fix.  The geometry check derives legal
+# rank/thread products from the HARDWARE core count, and what a job may ask for
+# is the SCHEDULABLE count, which can be smaller.  A node type needs to state
+# both -- see the sub-cluster work in the plan.
 #
 #     ../validate casper-hpcg              expand it, check it, submit nothing
 #     ../submit   casper-hpcg --account <PROJECT>
-#
-# THE PLACEMENTS
-#
-# An EPYC 9554 is single-socket, 64 cores, 8 cores per L3, one NUMA domain over
-# the whole node.  So two of Derecho's three questions survive and the third
-# does not:
-#
-#   pureMPI  64 x 1   one rank per core
-#   ccx       8 x 8   one rank per last-level cache, 8 cores -- the same
-#                     question Derecho's `ccd` cell asks of a Milan CCD
-#   (numa)            would be 1 x 64, the whole node: degenerate on a
-#                     single-domain part, so it is not asked
-#
-# Note this is NOT the reasoning that applies to Casper's Cascade Lake nodes,
-# where the cache and the NUMA domain are both the 18-core socket and the two
-# questions collapse into one.  Which node type you are on decides which sweep
-# is meaningful, which is the argument for sub-clusters in one sentence.
 schema: 1
-site: casper
+cluster: casper
 
 defaults:
   nodes: 2
@@ -51,21 +45,32 @@ defaults:
   scale: node
   target_seconds: 60
 
+  # Share the node.  See the header: this buys a job that starts in minutes and
+  # costs any claim that the timings mean something.
+  exclusive: false
+
+  # 8 of the node's cores, which the geometry check refuses by default and is
+  # right to: on a node held exclusively a smaller product does not idle the
+  # spare cores, it crowds every rank onto the lowest-numbered ones.  Here the
+  # job is not holding the node, so it asks for eight and gets eight.
+  allow_undersubscribed: true
+
 # The openmpi half of the Derecho set.  Casper has no Cray MPICH ABI shim, so
 # there is no way to give an mpich container the host's MPI here -- which is why
-# sites/casper.yaml lists no mpich family, and why bench/validate refuses an
-# mpich image for this site rather than queueing one that cannot run.
+# the Casper description lists no mpich family, and why bench/validate refuses
+# an mpich image for this cluster rather than queueing one that cannot run.
 images:
   from_make: casper-hpcg
 
 apps:
   - name: hpcg
 
-# ranks_per_node x threads == 64 for both, which is what the geometry check
-# requires of a node held exclusively.
+# One cell, because on a shared slice of a node no placement question can be
+# answered honestly.  The cache-aligned and NUMA-aligned questions the Derecho
+# sweep asks need the whole node, and are worth asking here only once a
+# whole-node request is expressible.
 placements:
-  - {name: pureMPI, ranks_per_node: 64, threads: 1}    # one core per rank
-  - {name: ccx,     ranks_per_node: 8,  threads: 8}    # one L3 per rank, 32 MB
+  - {name: pureMPI, ranks_per_node: 8, threads: 1}
 
 omp_variants:
   - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}

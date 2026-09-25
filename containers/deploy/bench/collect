@@ -345,7 +345,7 @@ def print_table(rows, metrics, show_all):
 
 
 def print_csv(rows, metrics):
-    fields = ["job", "timestamp", "site", "job_id", "nodes",
+    fields = ["job", "timestamp", "site", "cluster", "job_id", "nodes",
               "image.sif", "image.digest", "image.compiler", "image.mpi",
               "app.name", "app.version",
               "placement.name", "placement.ranks_per_node", "placement.threads",

@@ -16,14 +16,14 @@
 # standing in, which is what makes that work without --results-dir.
 #
 # Bash only, because it locates itself through $BASH_SOURCE.  That is the same
-# mechanism sites/<site>/site.sh uses, and bash is the default shell on both
+# mechanism a cluster profile uses, and bash is the default shell on both
 # machines.
 #
 # WHAT IT DELIBERATELY DOES NOT DO
 #
 # It sets PATH and nothing else.  Exporting NCAR_HPC_ROOT or BENCH_ROOT would
-# look helpful and would be a trap: sites/<site>/site.sh honours both if they
-# are already set, so a line in ~/.bashrc naming one clone would silently drive
+# look helpful and would be a trap: every cluster.sh honours both if they are
+# already set, so a line in ~/.bashrc naming one clone would silently drive
 # every other clone's jobs at the first clone's libexec/ and images.  Two
 # checkouts on one filesystem is not a hypothetical here -- this project has
 # had one in ~ and one in scratch at the same time.  So each tool works out its
@@ -31,10 +31,10 @@
 # reach by typing its name.
 #
 # It also does not set BENCH_SITE_CONF.  Derecho and Casper share a home
-# directory, so one ~/.bashrc runs on both, and pinning a site there would point
-# Casper's jobs at Derecho's profile.  Nothing needs it: an experiment names its
-# site, and the search finds that site's profile in the checkout the tool came
-# from.  Set it by hand for the session when you want to override that.
+# directory, so one ~/.bashrc runs on both, and pinning a cluster there would
+# point Casper's jobs at Derecho's profile.  Nothing needs it: an experiment
+# names its cluster, and the search finds that cluster's profile in the checkout
+# the tool came from.  Set it by hand for the session when you want to override that.
 #
 # CROSSED CLONES ARE VISIBLE, NOT PREVENTED
 #
