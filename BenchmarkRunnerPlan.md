@@ -1545,8 +1545,37 @@ way is not optional -- and an experiment key naming which one it wants. Casper's
 Cascade Lake and Genoa entries are the first two, and its file already records
 both measurements in its header waiting for them.
 
-All 181 checks pass across the five suites, and a dry-run submission from an
+All 182 checks pass across the five suites, and a dry-run submission from an
 unrelated directory produces the same job script it did before the rename.
+
+**The first run on the new layout found one defect, and it was in the rename
+itself.** Derecho, 2026-09-24: eighteen cells, fifty-four runs, every placement
+`ok`, and figures agreeing with the two previous sweeps to within 0.2% at
+`pureMPI`. The cluster profile was found at its new path, merged from two files,
+and `BENCH_CLUSTER` came out right. `BENCH_SITE` did not: every row says
+`site: derecho` where it should say `ncar`.
+
+The cause is the interaction of two earlier decisions. The generated block
+honours any value already in the environment, which is what makes
+`BENCH_QUEUE=main bench/submit ...` work. And the rename changed what
+`BENCH_SITE` MEANS -- from the machine to the organisation. So a login shell
+still exporting `BENCH_SITE=derecho` was not holding a typo; it was holding
+last week's correct value, which is exactly why nobody would think to clear it.
+PBS carried it into the job and the profile deferred to it.
+
+The fix is a distinction the generated block did not previously make.
+**Identity is asserted, not offered.** `BENCH_SITE` and `BENCH_CLUSTER` are now
+plain assignments; everything else keeps its override. They are not settings --
+they are what the file says it describes, and honouring an inherited value there
+can only mislabel results. Nothing legitimately overrides them: the PBS scripts
+use `BENCH_CLUSTER` to CHOOSE a profile before sourcing one, which is unaffected,
+and `--cluster` picks which profile to load rather than what it says.
+
+Worth noting what the failure was not. The run was correct in every respect that
+affects a number -- the right machine, the right geometry, the right binds, the
+right MPI, a clean placement verdict on all eighteen cells. Only the label was
+wrong, and it was wrong in a field that exists precisely so results can be
+grouped by organisation. That is a good argument for having added the field.
 
 ---
 

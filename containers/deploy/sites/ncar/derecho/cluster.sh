@@ -80,16 +80,22 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # `bench/sitegen derecho --write` overwrites it, and bench/test_bench.sh
 # fails while it is stale.  Change the YAML instead.
 #
-# Every setting below honours a value already in the environment, so a
+# Every SETTING below honours a value already in the environment, so a
 # one-off `BENCH_QUEUE=develop bench/submit ...` wins over the file.
 # An EMPTY value counts: `BENCH_PLACE= bench/submit ...` switches an
 # optional setting off, which is not the same as leaving it unset.
 #
+# The two IDENTITY variables are the exception: they are assigned, not
+# offered, because they are what this file says it describes rather
+# than something to propose.
+#
 # NCAR Derecho: 2 x AMD EPYC 7763 (Milan) per CPU node, SMT on, HPE Cray EX with Slingshot 11
 
-#-- identity and scheduler -----------------------------------------------
-[ -n "${BENCH_SITE+set}" ] || BENCH_SITE='ncar'
-[ -n "${BENCH_CLUSTER+set}" ] || BENCH_CLUSTER='derecho'
+#-- identity -------------------------------------------------------------
+BENCH_SITE='ncar'
+BENCH_CLUSTER='derecho'
+
+#-- scheduler ------------------------------------------------------------
 [ -n "${BENCH_SCHEDULER+set}" ] || BENCH_SCHEDULER='pbspro'
 [ -n "${BENCH_SUBMIT+set}" ] || BENCH_SUBMIT='qsub'
 [ -n "${BENCH_QUEUE+set}" ] || BENCH_QUEUE='main'

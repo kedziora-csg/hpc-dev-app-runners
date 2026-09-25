@@ -113,6 +113,23 @@ echo "schema reference"
     || bad "schema/undocumented.txt no longer matches the schemas" \
            "$(./schemadoc --missing 2>&1)"
 
+#-- identity is asserted, not offered -------------------------------------------
+# Every generated SETTING honours a value already in the environment; the two
+# identity variables must not.  A shell still exporting BENCH_SITE=derecho from
+# before the site/cluster rename -- where that variable meant the machine, so
+# the value was correct the week before -- put `site: derecho` into all 54 rows
+# of the first Derecho run on the new layout.  Nothing was wrong with the
+# profile, the job or the numbers; only the label.
+echo
+echo "identity"
+idout="$(bash -c '
+    export BENCH_SITE=derecho BENCH_CLUSTER=casper BENCH_QUEUE=develop
+    . "$1" >/dev/null 2>&1
+    echo "site=${BENCH_SITE} cluster=${BENCH_CLUSTER} queue=${BENCH_QUEUE}"
+' _ "${HERE}/../sites/ncar/derecho/cluster.sh" 2>&1)"
+want "an inherited identity is overwritten by the profile" \
+     "site=ncar cluster=derecho queue=develop" "${idout}"
+
 #-- one ~/.config copy must not answer for every machine ------------------------
 # The path ~/.config/hpcdev/site.sh has no site in it, so a copy made for one
 # machine used to answer a request for another -- and a Site takes its name from

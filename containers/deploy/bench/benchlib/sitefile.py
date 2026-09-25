@@ -413,6 +413,15 @@ def _assign(name, value, where):
     return "[ -n \"${%s+set}\" ] || %s='%s'" % (name, name, _safe(value, where))
 
 
+def _assert(name, value, where):
+    """X='value' -- what this description IS, not what it suggests.
+
+    The counterpart to _assign.  Used only for identity, where an inherited
+    value is never a deliberate override and always a mislabel.
+    """
+    return "%s='%s'" % (name, _safe(value, where))
+
+
 def _case(fname, mapping, families, default="", comment=None):
     """A lookup function.  A case statement reads better than N variables and
     survives a family name that is not a legal identifier."""
@@ -458,10 +467,14 @@ def render(sf, source_rel=None):
            "# `bench/sitegen %s --write` overwrites it, and bench/test_bench.sh" % sf.name,
            "# fails while it is stale.  Change the YAML instead.",
            "#",
-           "# Every setting below honours a value already in the environment, so a",
+           "# Every SETTING below honours a value already in the environment, so a",
            "# one-off `BENCH_QUEUE=develop bench/submit ...` wins over the file.",
            "# An EMPTY value counts: `BENCH_PLACE= bench/submit ...` switches an",
-           "# optional setting off, which is not the same as leaving it unset."]
+           "# optional setting off, which is not the same as leaving it unset.",
+           "#",
+           "# The two IDENTITY variables are the exception: they are assigned, not",
+           "# offered, because they are what this file says it describes rather",
+           "# than something to propose."]
     if d.get("description"):
         out += ["#", "# " + d["description"]]
     if not sf.verified:
@@ -470,13 +483,25 @@ def render(sf, source_rel=None):
                 "# Treat every value as a hypothesis until one has."]
     out.append("")
 
-    out.append("#-- identity and scheduler " + "-" * 47)
+    out.append("#-- identity " + "-" * 61)
     # Two names, because there are two levels.  BENCH_SITE is the organisation
     # whose conventions the module names and GLADE belong to; BENCH_CLUSTER is
     # the machine.  Both reach every result row, so a row can be grouped either
     # way without anyone having to know that `derecho` implies NCAR.
-    out.append(_assign("BENCH_SITE", d["site"], "site"))
-    out.append(_assign("BENCH_CLUSTER", d["cluster"], "cluster"))
+    #
+    # ASSIGNED, not offered.  Every other setting below honours a value already
+    # in the environment; these two must not, because they are not settings --
+    # they are what this file says it describes.  Honouring an inherited value
+    # mislabels results as something they are not, and the first Derecho run
+    # after the site/cluster rename did exactly that: a shell still exporting
+    # BENCH_SITE=derecho from the old vocabulary, where that variable meant the
+    # machine, put `site: derecho` into all 54 rows.  That value was not a typo,
+    # it was correct the week before, which is precisely why no operator would
+    # have thought to clear it.
+    out.append(_assert("BENCH_SITE", d["site"], "site"))
+    out.append(_assert("BENCH_CLUSTER", d["cluster"], "cluster"))
+    out.append("")
+    out.append("#-- scheduler " + "-" * 60)
     out.append(_assign("BENCH_SCHEDULER", sched["kind"], "scheduler.kind"))
     out.append(_assign("BENCH_SUBMIT", sched["submit"], "scheduler.submit"))
     out.append(_assign("BENCH_QUEUE", sched["queue"], "scheduler.queue"))
