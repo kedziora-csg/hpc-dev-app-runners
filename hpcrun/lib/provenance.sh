@@ -161,7 +161,7 @@ emit_provenance () {
         # cluster is the machine.  A reader can group by either without having
         # to know that `derecho` implies NCAR.
         printf '# %-16s %s\n' site          "${HPCRUN_SITE:-unknown}"
-        printf '# %-16s %s\n' cluster       "${HPCRUN_CLUSTER:-${NCAR_HOST:-unknown}}"
+        printf '# %-16s %s\n' cluster       "${HPCRUN_CLUSTER:-unknown}"
         printf '# %-16s %s\n' host          "$(hostname -s 2>/dev/null)"
         printf '# %-16s %s\n' job_id        "${PBS_JOBID:-${SLURM_JOB_ID:-none}}"
         printf '# %-16s %s\n' harness_sha   "$(harness_sha)"

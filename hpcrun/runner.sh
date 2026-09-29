@@ -74,10 +74,10 @@
 [ -n "${HPCRUN_CLUSTER:-}" ] && [ -x "${HPCRUN_ROOT:-}/runner.sh" ] || {
     echo "runner.sh: no cluster profile has been sourced." >&2
     echo "  HPCRUN_CLUSTER=${HPCRUN_CLUSTER:-<unset>}  HPCRUN_ROOT=${HPCRUN_ROOT:-<unset>}" >&2
-    echo "  Run this through a generated job script (hpcrun/submit) or through" >&2
-    echo "  sites/ncar/derecho/App_benchmarker_derecho.pbs; both source the cluster" >&2
-    echo "  profile, sites/<site>/<cluster>/cluster.sh," >&2
-    echo "  first.  It is not meant to be qsub'd directly." >&2
+    echo "  Run this through a generated job script (hpcrun/submit) or through a" >&2
+    echo "  cluster's own entry point under sites/<site>/<cluster>/; both source the" >&2
+    echo "  cluster profile, sites/<site>/<cluster>/cluster.sh, first.  It is not" >&2
+    echo "  meant to be qsub'd directly." >&2
     exit 1
 }
 
@@ -179,7 +179,7 @@ img_os="${img_tag%%-*}"
 echo "image     ${img_tag}.sif  (os=${img_os} compiler=${comp_family} mpi=${mpi_family})"
 load_host_modules "${comp_family}" "${mpi_family}" || exit 1
 
-launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST:-${HPCRUN_CLUSTER}}-${mpi_family}.sh"
+launcher="${RESULTS_DIR}/apptainer-launch-${HPCRUN_CLUSTER}-${mpi_family}.sh"
 make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" || exit 1
 
 REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
@@ -193,7 +193,7 @@ cd "${RESULTS_DIR}" || { echo "cannot use RESULTS_DIR=${RESULTS_DIR}"; exit 1; }
 #    lives in.  It is also the only record of what the run actually ran on.
 #-------------------------------------------------------------------------------
 probe_topology "${RESULTS_DIR}/topology.json" \
-    || echo "topology probe failed; falling back to built-in Derecho constants"
+    || echo "topology probe failed; falling back to the cluster profile's node geometry"
 # Explicitly, here, rather than as a side effect of the first placement check.
 # check_placement.sh calls load_topology itself when it reads a report, so the
 # TOPO_* variables used to appear only once the first cell had run -- and

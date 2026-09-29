@@ -50,9 +50,9 @@
 #-------------------------------------------------------------------------------
 
 # Last-resort fallback, used only when lscpu is unavailable AND no topology.json
-# was written.  The numbers come from the site profile -- the node: block of
-# sites/<site>.yaml, generated into site.sh -- and not from this file, which used
-# to state Derecho's geometry itself.  Three files saying 128 cores, with nothing
+# was written.  The numbers come from the cluster profile -- the node: block of
+# the cluster description, generated into cluster.sh -- and not from this file,
+# which used to state Derecho's geometry itself.  Three files saying 128 cores, with nothing
 # comparing them, is how a fallback stops describing the machine it names.
 #
 # Nothing is invented here.  Without a profile the fallback reports a single
@@ -179,7 +179,7 @@ probe_topology () {
 #     1. $PLACEMENT_TOPOLOGY                (explicit override)
 #     2. the argument, as a file or as <dir>/topology.json
 #     3. ./topology.json
-#     4. the built-in Derecho fallback
+#     4. the fallback: the cluster profile's node: block, or one core
 #
 # Rule 2 is what makes a results directory self-describing: hand the checker a
 # report file and it picks up the topology.json written beside it, so a report

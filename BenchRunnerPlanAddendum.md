@@ -697,6 +697,34 @@ harmless because nothing reads the label until phase 5.
 **Checks.** The 184 checks, and `git grep -n -i 'ncar'` over `hpcrun/` and
 `sif/` returns only comments and test data.
 
+### 4.7b, as built (2026-09-29)
+
+Built on the branch `phase-4.7b-site-names`. Every item in the plan above,
+with these differences:
+
+- **`collect`'s default was already done,** in 4.7a: it reads the current
+  directory, which names no site, so the profile's results root is not
+  needed as a default.
+- **The label key is `hpcdev.image_tag`.** Beside it, the `NCAR_BUILD_ENV`
+  that both Deffiles export into the image's environment is now
+  `HPCDEV_BUILD_ENV`. Nothing reads either, in this repository or in an image.
+- **Two messages the plan's table missed,** corrected at the same time:
+  `runner.sh`'s no-profile error named `App_benchmarker_derecho.pbs`, and
+  now names the entry points by pattern; and `probe_topology.sh`'s comments
+  still described a built-in Derecho fallback and a `site.sh`.
+
+**Checked.** All 189 checks pass. What `git grep -i ncar` still finds in
+`hpcrun/` and `sif/` outside the tests is documentation -- comments,
+docstrings and schema descriptions that use NCAR as the example site -- and
+the three items 4.7c removes: `NCAR_ROOT_OPENMPI` in the `host-openmpi`
+recipe, and the `SIF_ENV` default in `sif/Makefile` and
+`wrap_apptainer.sh`. One Casper job, because the launcher's file name
+changed: job 6082958,
+harness `2de5ab6`, clean tree: the launcher is
+`apptainer-launch-casper-openmpi.sh`, `run.meta` records `cluster casper`,
+and all 3 runs exit 0 with the expected `placement=warn` (`partial_core`).
+Results in `/glade/derecho/scratch/kedziora/hpcrun-4.7b-casper`.
+
 ### 4.7c -- the machine description states the image set and the host-MPI root
 
 This step changes behaviour, which is why it is separate from the moves.
