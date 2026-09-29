@@ -1,0 +1,80 @@
+# HPCG on Casper's high-throughput Genoa nodes -- a plumbing check, on purpose.
+#
+# WHAT THIS IS FOR
+#
+# Confirming that the harness runs on Casper: the module bootstrap, the host
+# Open MPI displacing the container's, the binds, /proc plus
+# UCX_POSIX_USE_PROC_LINK=n, the app contract, the placement checker and the
+# whole record-and-collect path.  All of that was proved on 2026-09-03 and this
+# file exists to keep proving it.
+#
+# It does NOT produce numbers to compare with Derecho's, and it is written so
+# nobody mistakes it for a file that does.  `exclusive: false` lets the job
+# share a node, which is how these nodes are meant to be used -- the
+# documentation describes them as being for tasks using one or two CPUs.  A
+# co-tenant's work lands in the timings as noise that cannot be seen or
+# subtracted, and asking for 8 CPUs of an SMT node gets 8 LOGICAL CPUs, so every
+# rank is pinned to one SMT sibling rather than a whole core and the placement
+# checker warns on every run.  Both of those are correct reports of a shared
+# node, and both are why these are not measurements.
+#
+# WHY NOT WHOLE NODES
+#
+# A whole-node version of this file was written and never ran.  It asked for
+# `ncpus=64` because probe_topology reports 64 physical cores, and PBS appears
+# to advertise only 62 allocatable CPUs on these nodes -- the documentation says
+# two are reserved for the operating system.  A request no node can satisfy does
+# not fail; it queues forever.  Confirm with:
+#
+#     pbsnodes -a | awk '/cpu_type = genoa/{f=1} f&&/resources_available.ncpus/{print;exit}'
+#
+# That gap is not this file's to fix.  The geometry check derives legal
+# rank/thread products from the HARDWARE core count, and what a job may ask for
+# is the SCHEDULABLE count, which can be smaller.  A node type needs to state
+# both -- see the sub-cluster work in the plan.
+#
+#     ../validate casper-hpcg              expand it, check it, submit nothing
+#     ../submit   casper-hpcg --account <PROJECT>
+schema: 1
+cluster: casper
+
+defaults:
+  nodes: 2
+  walltime: "00:30:00"
+  repeats: 3
+  scale: node
+  target_seconds: 60
+
+  # Share the node.  See the header: this buys a job that starts in minutes and
+  # costs any claim that the timings mean something.
+  exclusive: false
+
+  # 8 of the node's cores, which the geometry check refuses by default and is
+  # right to: on a node held exclusively a smaller product does not idle the
+  # spare cores, it crowds every rank onto the lowest-numbered ones.  Here the
+  # job is not holding the node, so it asks for eight and gets eight.
+  allow_undersubscribed: true
+
+# The openmpi half of the Derecho set.  Casper has no Cray MPICH ABI shim, so
+# there is no way to give an mpich container the host's MPI here -- which is why
+# the Casper description lists no mpich family, and why hpcrun/validate refuses
+# an mpich image for this cluster rather than queueing one that cannot run.
+images:
+  from_make: casper-hpcg
+
+apps:
+  - name: hpcg
+
+# One cell, because on a shared slice of a node no placement question can be
+# answered honestly.  The cache-aligned and NUMA-aligned questions the Derecho
+# sweep asks need the whole node, and are worth asking here only once a
+# whole-node request is expressible.
+placements:
+  - {name: pureMPI, ranks_per_node: 8, threads: 1}
+
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
+
+sweep:
+  matrix:  [images, apps, placements, omp_variants]
+  per_job: [placements, omp_variants]

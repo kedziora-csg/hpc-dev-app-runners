@@ -6,7 +6,7 @@
 # nothing rather than fail, so a cell that produced no report is recorded as a
 # cell with no metrics.
 #-------------------------------------------------------------------------------
-rundir="${1:-${BENCH_RUNDIR:-.}}"
+rundir="${1:-${HPCRUN_RUNDIR:-.}}"
 cd "${rundir}" 2>/dev/null || exit 0
 
 ls HPCG-Benchmark*.txt >/dev/null 2>&1 || exit 0

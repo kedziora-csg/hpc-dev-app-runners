@@ -13,7 +13,7 @@
 # The last row is the largest message size, which is the one that measures the
 # fabric rather than the software stack.
 #-------------------------------------------------------------------------------
-rundir="${1:-${BENCH_RUNDIR:-.}}"
+rundir="${1:-${HPCRUN_RUNDIR:-.}}"
 cd "${rundir}" 2>/dev/null || exit 0
 [ -f app.out ] || exit 0
 

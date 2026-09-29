@@ -1,8 +1,8 @@
 # HPCG -- High Performance Conjugate Gradient.
 #
-# Only the top-level scalars are read inside the job (by libexec/app_contract.sh,
+# Only the top-level scalars are read inside the job (by hpcrun/lib/app_contract.sh,
 # with a deliberately small reader).  Everything nested is for host-side tools --
-# bench/collect reads primary_fom and the `better:` directions to decide which
+# hpcrun/collect reads primary_fom and the `better:` directions to decide which
 # row wins.
 app: hpcg
 version: "3.1"
@@ -16,6 +16,7 @@ requires:
 
 figures_of_merit:
   gflops: {units: GFLOP/s, better: higher}
+  app_time_s: {units: s, better: lower}
   wall_s: {units: s, better: lower, provided_by: runner}
 
 success_criteria:

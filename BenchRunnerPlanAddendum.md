@@ -599,6 +599,71 @@ is part of the check, not an extra.
   `hpcrun/validate` and `hpcrun/collect` replace the old paths, and sourcing
   `hpcrun/env.sh` puts them on `PATH` the way `bench/env.sh` did.
 
+### 4.7a, as built (2026-09-29)
+
+Built on the branch `phase-4.7a-layout`. Every file in the move list marked
+4.7a moved with `git mv`; nothing tracked is left under `containers/deploy/`,
+which the root `.gitignore` now ignores so that the local output left there
+(images, job logs, `ldd` files) stays out of `git status`. `sif/.gitignore`
+and `sites/.gitignore` replace the two old ignore files.
+
+Where the build differs from the plan above, and why:
+
+- **The operator's setting is `BENCH_ROOT`.** The hand-written part of each
+  `cluster.sh` asks for the clone's `hpcrun/` directly, and works it out from
+  the file's own location when left blank. `BENCH_IMAGE_DIR` defaults to the
+  clone's `sif/`. `NCAR_HPC_ROOT` is gone from every file that is not a
+  document (DECISION 9, as recommended).
+- **The job template has two places, not three.** A cluster's own `job.tmpl`
+  beside its profile, then `${BENCH_ROOT}/templates/`. The old third place,
+  two levels above the profile, existed only because the template lived in
+  `sites/`.
+- **`collect` defaults to the current directory.** Planned for 4.7b, but
+  forced here: its old default, `ncar-hpc/results`, no longer exists. Results
+  land where the job was submitted unless `BENCH_RESULTS_ROOT` says otherwise,
+  so the current directory is the natural default.
+- **The SIF build names NCAR's environment in one variable,** `SIF_ENV` in
+  `sif/Makefile`, defaulting to `../sites/ncar/sif_env.sh`, and
+  `wrap_apptainer.sh` honours the same variable. Step 4.7c replaces the default
+  with the site named by the cluster's image set.
+- **The test driver is `hpcrun/Makefile`:** `make -C hpcrun test`.
+  `test_bench.sh` works from `hpcrun/`, its parent directory, so its relative
+  paths are written from where the tools live.
+
+- **Three names renamed at the same time,** at your request: `BENCH_ROOT` is
+  `HPCRUN_ROOT`, `BENCH_SITE` is `HPCRUN_SITE`, and a copied profile lives in
+  `~/.config/hpcrun/` instead of `~/.config/hpcdev/`. The old directory is not
+  searched, by the same no-fallback rule as `NCAR_HPC_ROOT`. The rest of the
+  `BENCH_` prefix stays, as §6 says; none of the three is used by an app hook
+  inside an image, so no image needs rebuilding. Elsewhere in this document,
+  text written before the rename keeps the old names.
+- **Then every `BENCH_` variable became `HPCRUN_`,** also at your request,
+  reversing §6's "the `BENCH_` prefix stays". §6's reason was the 13
+  variables the runner hands to app hooks, which the hooks inside published
+  images read. So `app_export_geometry` exports those 13 under both names,
+  checked by `test_app_contract.sh`, until every image in use has been rebuilt
+  from the renamed hooks; then the old names can be deleted. The `bench_site_*`
+  shell functions keep their names: they are not environment variables.
+
+**Checked, off the cluster.** All 184 checks pass. A dry-run submission of
+`derecho-hpcg` produces the same `job.pbs`, `job.env` and `job.json` as the old
+layout once paths are normalised; the only differences are comments naming the
+tools. `hpcrun/validate derecho-hpcg` succeeds when run from the repository
+root, and the hand-qsub profile search now finds `sites/ncar/derecho/cluster.sh`
+from the root, where the old layout's search finds nothing.
+
+**Still to check, on the clusters:** `hpcrun/validate` on a Derecho and a
+Casper login node, `make check-images` in `sif/` after moving the images, and
+one real job through each entry point (a hand-submitted
+`App_benchmarker_derecho.pbs` and one `hpcrun/submit` job).
+
+**Found while building it, and left for 4.7b.** `Placement_derecho.pbs`
+still looks for its profile with `BENCH_SITE`, meaning the cluster -- a
+leftover from before phase 4.5, when that variable held the cluster's name.
+It is harmless while `BENCH_SITE` is unset, which is the usual case for a
+fresh job, and wrong if a job inherits `BENCH_SITE=ncar`. It should use
+`BENCH_CLUSTER`, as `App_benchmarker_derecho.pbs` does.
+
 ### 4.7b -- site names out of site-neutral code
 
 Names and messages only, from the table in F3: remove the `NCAR_HOST`

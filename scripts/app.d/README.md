@@ -24,7 +24,7 @@ Installed into the image by `build_<app>.sh`, at `/container/app.d/<app>/`. The
 and mean it.
 
 Fixing an extractor therefore means rebuilding an image, so the runner also
-honours `BENCH_APP_DIR=<host path>` to override — bind-mounted in, for fast
+honours `HPCRUN_APP_DIR=<host path>` to override — bind-mounted in, for fast
 iteration. Results produced that way carry `app_dir_override: true` and are never
 mistaken for reproducible ones. The override path must be under a directory the
 launcher binds (on Derecho, `/glade`), because the hooks run *inside* the
@@ -37,23 +37,23 @@ argument-parsing exercise.
 
 | Variable | Meaning |
 |---|---|
-| `BENCH_APP` | app name |
-| `BENCH_RUNDIR` | private, empty, writable working directory for this cell |
-| `BENCH_NODES` | nodes in this job |
-| `BENCH_RANKS` | total ranks |
-| `BENCH_RANKS_PER_NODE`, `BENCH_THREADS` | the decomposition |
-| `BENCH_PLACEMENT` | placement name (`ccd`, `numa`, …) — labelling only |
-| `BENCH_SCALE` | app-defined size class (`smoke`, `node`, `weak`, `strong`) |
-| `BENCH_TARGET_SECONDS` | how long the run should aim to take |
-| `BENCH_CORES_PER_NODE`, `BENCH_CORES_PER_L3`, `BENCH_CORES_PER_NUMA` | probed topology, for apps that size inputs from cache or memory |
-| `BENCH_SCRATCH` | site scratch, for apps needing large input trees |
+| `HPCRUN_APP` | app name |
+| `HPCRUN_RUNDIR` | private, empty, writable working directory for this cell |
+| `HPCRUN_NODES` | nodes in this job |
+| `HPCRUN_RANKS` | total ranks |
+| `HPCRUN_RANKS_PER_NODE`, `HPCRUN_THREADS` | the decomposition |
+| `HPCRUN_PLACEMENT` | placement name (`ccd`, `numa`, …) — labelling only |
+| `HPCRUN_SCALE` | app-defined size class (`smoke`, `node`, `weak`, `strong`) |
+| `HPCRUN_TARGET_SECONDS` | how long the run should aim to take |
+| `HPCRUN_CORES_PER_NODE`, `HPCRUN_CORES_PER_L3`, `HPCRUN_CORES_PER_NUMA` | probed topology, for apps that size inputs from cache or memory |
+| `HPCRUN_SCRATCH` | site scratch, for apps needing large input trees |
 
 ## Rules
 
-- `prepare` writes into `$BENCH_RUNDIR` and nowhere else. Exit non-zero to
+- `prepare` writes into `$HPCRUN_RUNDIR` and nowhere else. Exit non-zero to
   decline a cell — the runner records it as skipped, with the reason, rather
   than failing the job.
-- `extract` reads only `$BENCH_RUNDIR`, does no network, and prints `key=value`.
+- `extract` reads only `$HPCRUN_RUNDIR`, does no network, and prints `key=value`.
   **Unparseable output is a missing metric, not a failed run**: exit 0 with no
   output.
 - `extract` prints `valid=true|false` when the app can judge its own result. A
@@ -66,13 +66,13 @@ argument-parsing exercise.
 2. Add hooks only where the app needs them.
 3. Install it from `build_<name>.sh` — one `cp -R`, see `build_hpcg.sh`.
 4. Prove it, with no cluster and no container:
-   - `containers/deploy/bench/validate --app app.d/<name>/app.yaml` checks it
-     against `bench/schema/app.json`, which is where a typo in a field name or a
+   - `hpcrun/validate --app app.d/<name>/app.yaml` checks it
+     against `hpcrun/schema/app.json`, which is where a typo in a field name or a
      `primary_fom` naming a metric nothing declares gets caught;
-   - `libexec/test_app_contract.sh` runs every contract here against a stub
+   - `hpcrun/tests/test_app_contract.sh` runs every contract here against a stub
      launcher, so `prepare` and `extract` are exercised as themselves.
-5. Sweep it: name it in a `bench/experiments/*.yaml` and run
-   `bench/validate <experiment>`. Nothing about the app appears in the runner
+5. Sweep it: name it in a `hpcrun/experiments/*.yaml` and run
+   `hpcrun/validate <experiment>`. Nothing about the app appears in the runner
    or in the experiment beyond its name.
 
 If adding an app requires editing the runner, the contract has failed and the
