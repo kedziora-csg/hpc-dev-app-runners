@@ -77,6 +77,9 @@ echo:
 IMAGES ?= $(sort $(derecho_images) $(derecho_hpcg_images))
 
 check-images:
+	@command -v apptainer >/dev/null || { \
+	    echo "check-images: no apptainer on PATH -- \`module load apptainer\` first;" \
+	         "without it every .sif would read as unstamped" >&2 ; exit 1 ; }
 	@for i in $(IMAGES); do \
 	    t="$${i%.sif}" ; \
 	    case "$$t" in *-hpcg) ref="$(GHCR_APPS_REF)" ;; *) ref="$(GHCR_BASE_REF)" ;; esac ; \
