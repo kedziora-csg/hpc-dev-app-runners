@@ -1,0 +1,19 @@
+# Job output, written into whichever directory a job is submitted from.
+# Anchored to the cluster directories so nothing here can match a committed
+# file elsewhere -- hpcrun/tests/fixtures/topology.json in particular.
+/*/*/results/
+/*/*/results.jsonl
+/*/*/run.meta
+/*/*/app.yaml
+/*/*/topology.json
+/*/*/modules.txt
+/*/*/env.txt
+/*/*/launcher.sh
+/*/*/*-launch-*.sh
+/*/*/ldd_*.txt
+/*/*/placement_*.out
+/*/*/run_*/
+/*/*/job.env
+/*/*/job.json
+/*/*/job.pbs
+/*/*/job.log

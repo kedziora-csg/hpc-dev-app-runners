@@ -9,7 +9,8 @@ names none.
 the site, Derecho and Casper are clusters of it -- and sub-clusters (node types)
 are the remaining half. **Phase 4.6** follows: Slurm, for TACC, which is both a
 second site and a second scheduler.
-**Phase 4.7 proposed 2026-09-25**: lay the repository out by concern -- factory,
+**Phase 4.7a built 2026-09-29** (the moves; 4.7b and 4.7c to follow), awaiting
+its on-cluster checks. **Phase 4.7 proposed 2026-09-25**: lay the repository out by concern -- factory,
 machine-targeted image builder, delivery to SIF, runner, machine descriptions --
 before sub-clusters and TACC. Summary in §10; the evidence and the steps are
 in `BenchRunnerPlanAddendum.md`, whose decisions 5-7 were answered 2026-09-29:

@@ -1,0 +1,6 @@
+# Built here by `make`: the images, their digest-pinned definition files, and
+# the per-image wrapper links.
+*.sif
+*.def
+*.def.tmp
+bin/

@@ -10,3 +10,6 @@ megalinter-reports/
 myscripts
 PlacementRuns*
 RunOSU
+# The old deployment directory.  Everything tracked moved out of it in phase
+# 4.7a; what remains in a checkout is local job output and images.
+/containers/deploy/

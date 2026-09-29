@@ -66,13 +66,13 @@ argument-parsing exercise.
 2. Add hooks only where the app needs them.
 3. Install it from `build_<name>.sh` — one `cp -R`, see `build_hpcg.sh`.
 4. Prove it, with no cluster and no container:
-   - `containers/deploy/bench/validate --app app.d/<name>/app.yaml` checks it
-     against `bench/schema/app.json`, which is where a typo in a field name or a
+   - `hpcrun/validate --app app.d/<name>/app.yaml` checks it
+     against `hpcrun/schema/app.json`, which is where a typo in a field name or a
      `primary_fom` naming a metric nothing declares gets caught;
-   - `libexec/test_app_contract.sh` runs every contract here against a stub
+   - `hpcrun/tests/test_app_contract.sh` runs every contract here against a stub
      launcher, so `prepare` and `extract` are exercised as themselves.
-5. Sweep it: name it in a `bench/experiments/*.yaml` and run
-   `bench/validate <experiment>`. Nothing about the app appears in the runner
+5. Sweep it: name it in a `hpcrun/experiments/*.yaml` and run
+   `hpcrun/validate <experiment>`. Nothing about the app appears in the runner
    or in the experiment beyond its name.
 
 If adding an app requires editing the runner, the contract has failed and the
