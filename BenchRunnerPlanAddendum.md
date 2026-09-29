@@ -760,6 +760,55 @@ This step changes behaviour, which is why it is separate from the moves.
 **Checks.** The 184 checks plus new ones for image-set validation, and
 `make -n derecho-hpcg` in `sif/` names the same six files as before.
 
+### 4.7c, as built (2026-09-29)
+
+Built on the branch `phase-4.7c-descriptions`, as planned, with these
+choices the plan left open:
+
+- **Set names and order.** A cluster's `images:` block yields `<cluster>`, every
+  compiler crossed with every MPI family, and `<cluster>-<app>` for each app.
+  MPI is the outer loop, so Derecho's six come out in the order the Makefile
+  listed them by hand and an existing sweep's jobs keep their order.
+- **`images.mk` is generated whole,** with no hand-edited half, and names its
+  cluster's site. `sif/Makefile` includes every one and takes `SIF_ENV` from
+  the site when only one is described; with more than one it asks. Because
+  nothing tells `wrap_apptainer.sh` which cluster an image is for, it uses the
+  one `sites/*/sif_env.sh` in the checkout, with the same rule.
+- **`images:` belongs to a cluster.** A site file carrying it is refused,
+  because a site's list would be concatenated with each cluster's rather than
+  replaced by it.
+- **`from_make:` keeps its name.** It now names a set from the description,
+  read by `Cluster.image_set` rather than by running `make`. Renaming it is
+  left to the schema change that brings sub-clusters, as the plan says.
+- **`root:` is required by `host-openmpi`,** and states the host tree on both
+  clusters as `'${NCAR_ROOT_OPENMPI}'`. It reaches the launcher as
+  `bench_site_mpi_root`, expanded like a `lib_dirs` entry once the MPI module is
+  loaded.
+- **Two more defaults that named Derecho,** found on the way: `hpcrun/submit`'s
+  missing-image hint fell back to `make derecho`, and `runner.sh`'s no-app hint
+  said `make derecho-<app>`. Both name the cluster's own set now.
+
+**Checked.** 198 checks, nine of them new: the image-set cross-checks, the
+`root:` requirement, the site-file refusal, a stale `images.mk` failing
+`--check`, and the generated sets against the hand-written ones they replace.
+`make -n derecho-hpcg` names the same six files. Dry-run submissions of
+`derecho-hpcg`, `derecho-osu` and `casper-hpcg` write the same job files as
+before, apart from paths and timestamps. `git grep -i ncar` over `hpcrun/`
+and `sif/` now finds only documentation and test data. One Casper job, because
+the Open MPI root now comes from the description: job 6083159 with
+`leap-oneapi-openmpi-hpcg.sif`, harness `04225f3`, clean tree. The launcher
+set `OPAL_PREFIX` to the host's openmpi/5.0.9 tree for oneAPI, which is the
+root expanded from the description, and `libmpi.so.40` resolved there. All 3
+runs exited 0 with the expected `placement=warn`. Results are in
+`/glade/derecho/scratch/kedziora/hpcrun-4.7c-casper`.
+
+**Found while building it.** Every `.sif` rule depends on `sif/Makefile`
+itself, so any edit to the Makefile -- this step's, or 4.7a's `check-images`
+guard -- makes `make derecho` rebuild all twelve images. The next rebuild was
+due anyway, since 4.7b's label rename changes every `.def`. The Makefile
+dependency is still worth reconsidering, because it turns a comment edit into
+a full rebuild.
+
 ### What phase 5 then absorbs
 
 Listed so that the rewrite of the plan's §9 carries them.
