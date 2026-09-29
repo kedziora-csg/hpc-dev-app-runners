@@ -212,9 +212,25 @@ result rather than parse prose:
 | 0 | fine |
 | 2 | bad command line |
 | 3 | the experiment does not parse, or fails `hpcrun/schema/experiment.json` |
-| 4 | a placement's `ranks × threads` is not a legal product for this node |
+| 4 | a placement's `ranks × threads` is not a legal product for this node, or asks for more CPUs than the scheduler hands out per node |
 | 5 | a named `.sif` is not on disk |
 | 6 | an image carries no contract for the app |
+
+**Which node type.** Casper's high-throughput pool holds two kinds of node,
+described as two **sub-clusters** of [casper.yaml](casper.yaml):
+`htc-genoa` (64 cores, 62 schedulable), the default, and `htc-cascadelake`
+(2 × 18 cores, 34 schedulable). An experiment names one with `subcluster:`, or
+`--subcluster` overrides it for one submission:
+
+```bash
+./validate casper-hpcg --subcluster htc-cascadelake
+./submit   casper-hpcg --subcluster htc-cascadelake --account <PROJECT>
+```
+
+The generated `job.pbs` then asks for that processor (`cpu_type=cascadelake`)
+and exports `HPCRUN_SUBCLUSTER` before sourcing the profile, which describes
+that node type's geometry. Every result row records the sub-cluster beside the
+cluster. Derecho describes one node type and has no sub-clusters.
 
 The two schemas — [`hpcrun/schema/experiment.json`](../../hpcrun/schema/experiment.json)
 and [`hpcrun/schema/app.json`](../../hpcrun/schema/app.json) — are also what an editor

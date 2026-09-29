@@ -48,9 +48,14 @@ def select_size(exp, job):
 
     The exclusive answer is not simply the larger one.  It is a different claim:
     give me the node.  So the two are not max()ed together.
+
+    "Every core" means every CPU the scheduler offers, node.ncpus, which is
+    fewer than the hardware has where the operating system keeps some back.
     """
     if exp.defaults["exclusive"]:
-        return exp.cluster.cores_per_node, exp.cluster.cores_per_node
+        # Every CPU the scheduler will hand out, which is the hardware count
+        # unless the description says a node offers fewer.
+        return exp.cluster.ncpus, exp.cluster.ncpus
     ranks = max(c.placement["ranks_per_node"] for c in job.cells)
     cpus = max(c.placement["ranks_per_node"] * c.placement["threads"]
                for c in job.cells)
@@ -157,7 +162,9 @@ def job_record(exp, job, results_dir, profile=None):
         "experiment": {"name": exp.name, "path": os.path.abspath(exp.path)},
         "site": exp.cluster.site,
         "cluster": {"name": exp.cluster.name, "conf": exp.cluster.conf,
+                    "subcluster": exp.cluster.subcluster or None,
                     "cores_per_node": exp.cluster.cores_per_node,
+                    "ncpus": exp.cluster.ncpus,
                     "smt": exp.cluster.smt, "node_source": exp.cluster.node_source},
         "profile": profile,
         "job": {"key": job.key, "nodes": job.nodes, "walltime": job.walltime,
@@ -212,6 +219,11 @@ def write(exp, job, results_dir, template_path, account, profile=None):
                             if exp.cluster.place else ""),
         "RESULTS_DIR": results_dir,
         "SITE_CONF": exp.cluster.conf,
+        # A whole line: which node type the profile describes once sourced.
+        # Stated here rather than in job.env because the profile reads it, and
+        # job.env is sourced after the profile.
+        "SUBCLUSTER_LINE": ("export HPCRUN_SUBCLUSTER=%s" % _sh(exp.cluster.subcluster)
+                            if exp.cluster.subcluster else "unset HPCRUN_SUBCLUSTER"),
         "HPCRUN_ROOT": exp.cluster.bench_root,
         "JOB_ENV": env_path,
         "EXPERIMENT": exp.path,

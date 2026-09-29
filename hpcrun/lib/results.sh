@@ -22,7 +22,8 @@
 #
 # FIELDS
 #
-#     top level     site cluster job_id nodes repeat wall_s exit valid warm
+#     top level     site cluster subcluster job_id nodes repeat wall_s exit
+#                   valid warm   (subcluster is null for a one-node-type cluster)
 #     image.        sif digest os compiler mpi
 #     app.          name version scale app_dir_override
 #     placement.    name ranks_per_node threads mpiexec_flags verdict

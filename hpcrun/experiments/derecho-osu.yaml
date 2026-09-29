@@ -7,7 +7,7 @@
 #
 #     ../validate derecho-osu
 #     ../submit   derecho-osu --account <PROJECT>
-schema: 1
+schema: 2
 cluster: derecho
 
 defaults:
@@ -17,7 +17,7 @@ defaults:
   scale: node
 
 images:
-  from_make: derecho-hpcg     # the app images; OSU ships in the base layer
+  set: derecho-hpcg     # the app images; OSU ships in the base layer
 
 # OSU is pure MPI -- app.yaml says requires.openmp: false -- so a thread sweep
 # measures nothing.  Rank count is the axis that matters, which is why the

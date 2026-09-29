@@ -1,4 +1,4 @@
-# HPCG on Casper's high-throughput Genoa nodes -- a plumbing check, on purpose.
+# HPCG on Casper's high-throughput nodes -- a plumbing check, on purpose.
 #
 # WHAT THIS IS FOR
 #
@@ -28,15 +28,24 @@
 #
 #     pbsnodes -a | awk '/cpu_type = genoa/{f=1} f&&/resources_available.ncpus/{print;exit}'
 #
-# That gap is not this file's to fix.  The geometry check derives legal
-# rank/thread products from the HARDWARE core count, and what a job may ask for
-# is the SCHEDULABLE count, which can be smaller.  A node type needs to state
-# both -- see the sub-cluster work in the plan.
+# `pbsnodes -a` on 2026-09-29 confirmed it: 62 on every htc Genoa node, 34 on
+# every htc Cascade Lake one.  Each sub-cluster in sites/ncar/casper.yaml now
+# states that as node.ncpus beside its hardware geometry, and hpcrun/validate
+# refuses a request above it instead of letting it queue.  A whole-node job
+# still has no legal geometry here -- 64 cores do not fit in 62 -- so this file
+# stays a partial-node plumbing check.
+#
+# The same file runs on the other node type of the pool:
+#
+#     ../submit casper-hpcg --subcluster htc-cascadelake --account <PROJECT>
 #
 #     ../validate casper-hpcg              expand it, check it, submit nothing
 #     ../submit   casper-hpcg --account <PROJECT>
-schema: 1
+schema: 2
 cluster: casper
+# The description's default, stated here so the file says which hardware it
+# ran on without anyone having to look it up.
+subcluster: htc-genoa
 
 defaults:
   nodes: 2
@@ -60,7 +69,7 @@ defaults:
 # the Casper description lists no mpich family, and why hpcrun/validate refuses
 # an mpich image for this cluster rather than queueing one that cannot run.
 images:
-  from_make: casper-hpcg
+  set: casper-hpcg
 
 apps:
   - name: hpcg

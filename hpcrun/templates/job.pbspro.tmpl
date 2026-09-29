@@ -44,6 +44,11 @@ set -u
 # Named outright rather than searched for: a job generated from one checkout
 # must be driven by that checkout's profile, even if the operator also has a
 # ~/.config/hpcrun/site.sh pointing somewhere else.
+#
+# The node type first, because the profile reads it: a cluster with several
+# describes the one named here, and a leftover in the environment must not
+# choose for it.
+@SUBCLUSTER_LINE@
 . "@SITE_CONF@" || { echo "cannot source @SITE_CONF@" >&2; exit 1; }
 bench_site_modules || { echo "site module bootstrap failed" >&2; exit 1; }
 

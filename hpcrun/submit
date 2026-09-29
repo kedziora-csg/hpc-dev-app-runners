@@ -13,6 +13,7 @@
     --dry-run            write job.pbs/job.env/job.json, print the qsub, stop
     --force              reuse a results directory that already holds results
     --cluster NAME       override the cluster named in the experiment
+    --subcluster NAME    override the node type named in the experiment
 
 WHAT EACH JOB IS GIVEN
 
@@ -95,6 +96,8 @@ def main():
     ap.add_argument("name", help="experiment name or path")
     ap.add_argument("--account", help="scheduler project to charge (required to submit)")
     ap.add_argument("--cluster", help="override the cluster named in the experiment")
+    ap.add_argument("--subcluster",
+                    help="override the node type named in the experiment")
     ap.add_argument("--profile", help="run only the cell this profile names")
     ap.add_argument("--images", help="override the image list (space separated)")
     ap.add_argument("--nodes", type=int, help="override defaults.nodes")
@@ -106,7 +109,7 @@ def main():
                     help="reuse a results directory that already holds results")
     args = ap.parse_args()
 
-    exp = exp_mod.load(args.name, args.cluster)
+    exp = exp_mod.load(args.name, args.cluster, subcluster=args.subcluster)
     if args.nodes:
         exp.defaults["nodes"] = args.nodes
     if args.walltime:
@@ -131,7 +134,7 @@ def main():
         print("error: these .sif images do not exist:", file=sys.stderr)
         for result in missing:
             print("    %s" % result.detail, file=sys.stderr)
-        target = (exp.data["images"].get("from_make") or exp.cluster.name)
+        target = (exp.data["images"].get("set") or exp.cluster.name)
         print("  build them with:  cd %s && make %s"
               % (exp.cluster.sif_dir, target), file=sys.stderr)
         return EXIT_IMAGE

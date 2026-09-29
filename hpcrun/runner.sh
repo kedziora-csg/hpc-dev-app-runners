@@ -114,6 +114,15 @@ if ! command -v bench_site_mpi_overlay >/dev/null 2>&1; then
     }
 fi
 
+# A cluster of several node types describes the one HPCRUN_SUBCLUSTER names,
+# and an unknown name leaves the profile with no node at all.  Said here, by
+# name, rather than as a topology fallback of one core three steps later.
+if [ -n "${HPCRUN_SUBCLUSTERS:-}" ] && [ -z "${HPCRUN_CORES_PER_NODE:-}" ]; then
+    echo "runner.sh: cluster ${HPCRUN_CLUSTER} has no sub-cluster '${HPCRUN_SUBCLUSTER:-}'." >&2
+    echo "  its sub-clusters: ${HPCRUN_SUBCLUSTERS}" >&2
+    exit 1
+fi
+
 #-------------------------------------------------------------------------------
 # 2. This job's expanded configuration.
 #-------------------------------------------------------------------------------
@@ -356,6 +365,7 @@ record_common () {
     result_reset
     result_set  site           "${HPCRUN_SITE}"
     result_set  cluster        "${HPCRUN_CLUSTER}"
+    result_set  subcluster     "${HPCRUN_SUBCLUSTER:-}"
     result_set  job_id         "${PBS_JOBID:-none}"
     result_set  nodes          "${NNODES}"
     result_str  experiment     "${HPCRUN_EXPERIMENT:-}"

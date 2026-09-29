@@ -14,7 +14,7 @@ WHAT IT CHECKS, IN ORDER
     1. the experiment parses                            exit 3
     2. it satisfies hpcrun/schema/experiment.json        exit 3
     3. cross-field rules a schema cannot state          exit 3
-       (one of from_make/list; per_job is a subset of matrix and holds no
+       (one of set/list; per_job is a subset of matrix and holds no
         axis a job cannot vary; no axis silently uncrossed; labels unique;
         every profile names something that exists)
     4. every placement is a legal ranks x threads        exit 4
@@ -88,8 +88,15 @@ def describe(exp, jobs, pre):
     print("cluster     %s of site %s   (%s)"
           % (exp.cluster.name, exp.cluster.site, exp.cluster.conf))
     print("description %s" % cluster_state(exp.cluster))
-    print("node        %d cores, SMT %d%s   [%s]"
+    if exp.cluster.subclusters:
+        print("subcluster  %s   (of %s)%s"
+              % (exp.cluster.subcluster, ", ".join(exp.cluster.subclusters),
+                 "" if exp.cluster.subcluster_verified
+                 else "   UNVERIFIED: no job has run on this node type"))
+    print("node        %d cores, SMT %d%s%s   [%s]"
           % (exp.cluster.cores_per_node, exp.cluster.smt,
+             (", %d schedulable" % exp.cluster.ncpus
+              if exp.cluster.ncpus != exp.cluster.cores_per_node else ""),
              (", select %s" % exp.cluster.node_select if exp.cluster.node_select
               else ", NO PROCESSOR SELECTOR")
              + (", place %s" % exp.cluster.place if exp.cluster.place else ""),
@@ -144,8 +151,9 @@ def as_json(exp, jobs, pre):
         "experiment": os.path.abspath(exp.path),
         "site": exp.cluster.site,
         "cluster": exp.cluster.name,
+        "subcluster": exp.cluster.subcluster or None,
         "node": {"cores_per_node": exp.cluster.cores_per_node, "smt": exp.cluster.smt,
-                 "source": exp.cluster.node_source},
+                 "ncpus": exp.cluster.ncpus, "source": exp.cluster.node_source},
         "jobs": [{"key": j.key, "image": j.image,
                   "app": j.app.get("label") or j.app["name"],
                   "nodes": j.nodes, "walltime": j.walltime, "repeats": j.repeats,
@@ -191,6 +199,8 @@ def main():
         description="Expand and check an experiment without submitting anything.")
     ap.add_argument("name", nargs="?", help="experiment name or path")
     ap.add_argument("--cluster", help="override the cluster named in the experiment")
+    ap.add_argument("--subcluster",
+                    help="override the node type named in the experiment")
     ap.add_argument("--profile", help="check only the cell this profile names")
     ap.add_argument("--images", help="override the image list (space separated)")
     ap.add_argument("--app", nargs="+", metavar="APP_YAML",
@@ -205,7 +215,7 @@ def main():
         ap.error("give an experiment name, or --app <app.yaml>")
 
     try:
-        exp = exp_mod.load(args.name, args.cluster)
+        exp = exp_mod.load(args.name, args.cluster, subcluster=args.subcluster)
         jobs = exp_mod.expand(exp, args.profile,
                               args.images.split() if args.images else None)
     except BenchError as exc:

@@ -32,7 +32,7 @@ scheduler:
 # provides modules for (gcc14 matches gcc/14.3.0 exactly); mpich because only
 # MPICH can be displaced by Cray MPICH's ABI shim, openmpi to test the
 # alternative.  sitegen writes it into derecho/images.mk, so `make derecho` and
-# `make derecho-hpcg` in sif/ build it and `images.from_make: derecho-hpcg` in
+# `make derecho-hpcg` in sif/ build it and `images.set: derecho-hpcg` in
 # an experiment runs it.
 images:
   os: leap

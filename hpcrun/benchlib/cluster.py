@@ -39,7 +39,8 @@ EXPORTED = ("HPCRUN_SITE", "HPCRUN_CLUSTER", "HPCRUN_ROOT", "HPCRUN_IMAGE_DIR",
             "HPCRUN_SCHEDULER", "HPCRUN_SUBMIT", "HPCRUN_QUEUE",
             "HPCRUN_WALLTIME_MAX", "HPCRUN_CORES_PER_NODE", "HPCRUN_SMT",
             "HPCRUN_TARGET_ARCH", "HPCRUN_TOPOLOGY_MODE", "HPCRUN_NODE_SELECT",
-            "HPCRUN_PLACE")
+            "HPCRUN_PLACE", "HPCRUN_NCPUS",
+            "HPCRUN_SUBCLUSTER", "HPCRUN_SUBCLUSTERS", "HPCRUN_SUBCLUSTER_VERIFIED")
 
 
 class Cluster(object):
@@ -70,8 +71,18 @@ class Cluster(object):
         self.node_select = values.get("HPCRUN_NODE_SELECT") or ""
         self.place = values.get("HPCRUN_PLACE") or ""
 
+        # The node type within the cluster, when it has more than one.  Empty
+        # for a cluster of one node type, whose profile states no sub-clusters.
+        self.subclusters = (values.get("HPCRUN_SUBCLUSTERS") or "").split()
+        self.subcluster = ((values.get("HPCRUN_SUBCLUSTER") or "")
+                           if self.subclusters else "")
+        self.subcluster_verified = values.get("HPCRUN_SUBCLUSTER_VERIFIED") != "0"
+
         self.cores_per_node = _int(values.get("HPCRUN_CORES_PER_NODE"))
         self.smt = _int(values.get("HPCRUN_SMT"))
+        # What the scheduler hands out per node; the hardware count where the
+        # description states no difference.
+        self.ncpus = _int(values.get("HPCRUN_NCPUS")) or self.cores_per_node
         # The profile is where these live now, so an unset one means the block
         # was never generated -- almost always a ~/.config/hpcrun/site.sh copied
         # before sitegen existed.  Assuming Derecho here is exactly the silent
@@ -111,7 +122,7 @@ class Cluster(object):
                 "cluster %s has no image set %r" % (self.name, name), EXIT_ERROR,
                 ["sets it states: %s" % (", ".join(sorted(sets)) or
                                          "none -- its YAML has no images: block"),
-                 "images.from_make names a set from the images: block of the",
+                 "images.set names a set from the images: block of the",
                  "cluster's description; or list the .sif files with images.list"])
         return list(sets[name])
 
@@ -212,14 +223,14 @@ def _walk_up(name, origin):
         here = parent
 
 
-def load(name, start=None):
+def load(name, start=None, subcluster=None):
     # Absolute from here on.  A generated job script names this path outright
     # and PBS runs it from its own spool directory, so a relative $HPCRUN_SITE_CONF
     # -- which is how anyone would type it on a login node -- would resolve to
     # nothing once the job started, three hours later.
     conf = os.path.abspath(find_conf(name, start))
     try:
-        values = _exported(conf, EXPORTED)
+        values = _exported(conf, EXPORTED, subcluster)
     except (OSError, subprocess.CalledProcessError):
         raise BenchError("cannot source the site profile %s" % conf, EXIT_ERROR,
                          ["it must be sourceable on a login node: only "
@@ -243,6 +254,19 @@ def load(name, start=None):
              "and let" ,
              "the search find the checkout's own profile"])
 
+    offered = (values.get("HPCRUN_SUBCLUSTERS") or "").split()
+    if subcluster and not offered:
+        raise BenchError(
+            "cluster %s has no sub-clusters, but %r was asked for" % (name, subcluster),
+            EXIT_ERROR,
+            ["%s describes one node type; drop subcluster: from the experiment"
+             % conf])
+    if subcluster and subcluster not in offered:
+        raise BenchError(
+            "cluster %s has no sub-cluster %r" % (name, subcluster), EXIT_ERROR,
+            ["its sub-clusters: %s" % ", ".join(offered),
+             "from the subclusters: map of its description, via %s" % conf])
+
     site = Cluster(name, conf, values)
     if not site.bench_root or not os.path.isfile(
             os.path.join(site.bench_root, "runner.sh")):
@@ -253,8 +277,12 @@ def load(name, start=None):
     return site
 
 
-def _exported(conf, names):
+def _exported(conf, names, subcluster=None):
     """Source `conf` in a subshell and read back `names`.
+
+    HPCRUN_SUBCLUSTER is set to what the caller chose, or removed: which node
+    type a submission describes is the experiment's decision, never a leftover
+    in the operator's shell.
 
     Sourcing rather than parsing, because the profile is bash and the host must
     read exactly what a job will.  Safe: it only assigns and defines, and
@@ -263,7 +291,11 @@ def _exported(conf, names):
     """
     script = ". %s >/dev/null 2>&1 || exit 1\n" % _quote(conf)
     script += "".join('printf "%%s\\n" "%s=${%s-}"\n' % (v, v) for v in names)
-    out = subprocess.check_output(["bash", "-c", script])
+    env = dict(os.environ)
+    env.pop("HPCRUN_SUBCLUSTER", None)
+    if subcluster:
+        env["HPCRUN_SUBCLUSTER"] = subcluster
+    out = subprocess.check_output(["bash", "-c", script], env=env)
     values = {}
     for line in out.decode().splitlines():
         if "=" in line:

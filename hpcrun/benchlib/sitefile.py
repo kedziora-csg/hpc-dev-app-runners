@@ -101,6 +101,15 @@ class ClusterFile(object):
     def verified(self):
         return self.data.get("verified", True)
 
+    @property
+    def subclusters(self):
+        """{name: entry}, empty for a cluster of one node type."""
+        return self.data.get("subclusters") or {}
+
+    @property
+    def default_subcluster(self):
+        return self.data.get("default_subcluster") or ""
+
 
 def sites_dir(start=None):
     """The nearest `sites/` above `start`, or above this code if there is none.
@@ -258,7 +267,7 @@ REQUIRED = (
     ("cluster", None),
     ("scheduler", ("kind", "submit", "queue")),
     ("modules", ("bootstrap",)),
-    ("node", ("cores", "smt")),
+    ("node", ("cores", "smt")),         # or one per sub-cluster, see below
     ("container", ("runtime", "binds")),
     ("mpi", None),
 )
@@ -268,6 +277,8 @@ def complete_checks(data, cluster_path, site_path):
     """Keys that must exist after merging, and where each could have come from."""
     out = []
     for key, subkeys in REQUIRED:
+        if key == "node" and data.get("subclusters"):
+            continue                    # each entry's own node:, checked below
         if key not in data:
             out.append("no %s: -- state it in %s or in %s"
                        % (key, os.path.basename(cluster_path),
@@ -324,21 +335,30 @@ def cross_checks(data):
                 "bootstraps over PMIx and spells every placement flag "
                 "differently; use launcher: openmpi." % family)
 
-    node = data.get("node") or {}
-    cores, smt = node.get("cores"), node.get("smt")
-    for key in ("cores_per_l3", "cores_per_numa"):
-        value = node.get(key)
-        if isinstance(value, int) and isinstance(cores, int) and value > cores:
-            out.append("node.%s is %d, more than node.cores (%d)"
-                       % (key, value, cores))
-    stride = node.get("smt_stride")
-    if isinstance(stride, int) and isinstance(cores, int) and isinstance(smt, int):
-        if smt > 1 and stride != cores:
+    subclusters = data.get("subclusters") or {}
+    default = data.get("default_subcluster")
+    if subclusters:
+        if "node" in data:
             out.append(
-                "node.smt_stride is %d but node.cores is %d. Under the block "
-                "layout the stride IS the core count; a different value means "
-                "an interleaved layout, which the stride does not describe."
-                % (stride, cores))
+                "node: and subclusters: are both stated. With sub-clusters each "
+                "entry states its own node: in full and there is no cluster-wide "
+                "one, because a key one entry forgot would otherwise be taken "
+                "silently from a different node type.")
+        if not default:
+            out.append(
+                "subclusters: has no default_subcluster:. Which node type a job "
+                "lands on when an experiment names none is a decision; state it.")
+        elif default not in subclusters:
+            out.append("default_subcluster: %s is not one of subclusters: (%s)"
+                       % (default, ", ".join(sorted(subclusters))))
+        for name, entry in sorted(subclusters.items()):
+            out.extend(_node_checks(entry.get("node") or {},
+                                    "subclusters.%s.node" % name))
+    else:
+        if default:
+            out.append("default_subcluster: %s, but there is no subclusters: "
+                       "map for it to name" % default)
+        out.extend(_node_checks(data.get("node") or {}, "node"))
 
     for family in sorted(set(mpi) | set(mpi_map)):
         if family not in FAMILIES:
@@ -368,14 +388,6 @@ def cross_checks(data):
                 "no way to give such an image the host's MPI, so building it "
                 "would produce .sif files no job here could use." % family)
 
-    select = (data.get("node") or {}).get("select") or ""
-    for clause in select.split(":"):
-        if clause.startswith("place="):
-            out.append(
-                "node.select carries %r. `place` is a job-wide directive, not a "
-                "per-chunk resource, so inside select= it would be read as a "
-                "chunk resource of that name and quietly do nothing. Use "
-                "scheduler.place." % clause)
 
     binds = (data.get("container") or {}).get("binds") or []
     bind_map = (data.get("container") or {}).get("bind_map") or {}
@@ -385,6 +397,39 @@ def cross_checks(data):
                 "container.bind_map remaps %s, which container.binds also binds "
                 "at its own name. The unconditional bind would land on top of "
                 "the container's own tree." % host_path)
+    return out
+
+
+def _node_checks(node, where):
+    """The rules one node: block must satisfy, wherever it is stated."""
+    out = []
+    cores, smt = node.get("cores"), node.get("smt")
+    for key in ("cores_per_l3", "cores_per_numa"):
+        value = node.get(key)
+        if isinstance(value, int) and isinstance(cores, int) and value > cores:
+            out.append("%s.%s is %d, more than %s.cores (%d)"
+                       % (where, key, value, where, cores))
+    stride = node.get("smt_stride")
+    if isinstance(stride, int) and isinstance(cores, int) and isinstance(smt, int):
+        if smt > 1 and stride != cores:
+            out.append(
+                "%s.smt_stride is %d but %s.cores is %d. Under the block "
+                "layout the stride IS the core count; a different value means "
+                "an interleaved layout, which the stride does not describe."
+                % (where, stride, where, cores))
+    ncpus = node.get("ncpus")
+    if isinstance(ncpus, int) and isinstance(cores, int) and isinstance(smt, int):
+        if ncpus > cores * smt:
+            out.append("%s.ncpus is %d, more than the node's %d hardware threads"
+                       % (where, ncpus, cores * smt))
+    select = node.get("select") or ""
+    for clause in select.split(":"):
+        if clause.startswith("place="):
+            out.append(
+                "%s.select carries %r. `place` is a job-wide directive, not a "
+                "per-chunk resource, so inside select= it would be read as a "
+                "chunk resource of that name and quietly do nothing. Use "
+                "scheduler.place." % (where, clause))
     return out
 
 
@@ -473,6 +518,49 @@ def _case(fname, mapping, families, default="", comment=None):
     return lines
 
 
+NODE_VARS = (("cores", "HPCRUN_CORES_PER_NODE"),
+             ("smt", "HPCRUN_SMT"),
+             ("sockets", "HPCRUN_SOCKETS"),
+             ("smt_stride", "HPCRUN_SMT_STRIDE"),
+             ("cores_per_l3", "HPCRUN_CORES_PER_L3"),
+             ("cores_per_numa", "HPCRUN_CORES_PER_NUMA"))
+
+
+def _node_lines(node, where, assign, comments=True):
+    """The shell lines one node: block becomes, with `assign` choosing whether
+    each value is offered (_assign) or stated (_assert)."""
+    out = []
+    for key, var in NODE_VARS:
+        if node.get(key) is not None:
+            out.append(assign(var, node[key], "%s.%s" % (where, key)))
+    if node.get("ncpus") is not None:
+        if comments:
+            out.append("# What the scheduler will hand out per node, when it is fewer than")
+            out.append("# the hardware has.  What a request may ask for; the geometry check")
+            out.append("# still reasons in hardware cores.")
+        out.append(assign("HPCRUN_NCPUS", node["ncpus"], where + ".ncpus"))
+    out.append(assign("HPCRUN_TOPOLOGY_MODE", node.get("topology", "probe"),
+                      where + ".topology"))
+    if node.get("select"):
+        if comments:
+            out.append("")
+            out.append("# How to ask the scheduler for THIS node type.  Appended to the select")
+            out.append("# directive by hpcrun/submit.  Without it a job takes whatever the pool")
+            out.append("# offers, which is how the first Casper run measured hardware this file")
+            out.append("# did not describe.")
+        out.append(assign("HPCRUN_NODE_SELECT", node["select"], where + ".select"))
+    if node.get("target_arch"):
+        if comments:
+            out.append("")
+            out.append("# What this hardware runs, in report_cpu_features' spelling.  Checked")
+            out.append("# against the app binary once at job start: a mismatch costs one line")
+            out.append("# before the first cell instead of a SIGILL on every rank, three hours")
+            out.append("# into a queue, with no output and exit 132.")
+        out.append(assign("HPCRUN_TARGET_ARCH", node["target_arch"],
+                          where + ".target_arch"))
+    return out
+
+
 def source_label(sf):
     """How the block names the files it came from.
 
@@ -488,7 +576,7 @@ def render(sf, source_rel=None):
     source_rel = source_rel or source_label(sf)
     d = sf.data
     sched, mods = d["scheduler"], d["modules"]
-    node, cont, mpi = d["node"], d["container"], d["mpi"]
+    node, cont, mpi = d.get("node") or {}, d["container"], d["mpi"]
 
     out = [BEGIN,
            "#",
@@ -548,31 +636,47 @@ def render(sf, source_rel=None):
     out.append("# The job probes lscpu and topology.json carries THAT answer.  These")
     out.append("# are what can be known before there is a node to ask, which is when")
     out.append("# an illegal ranks x threads is still cheap to reject.")
-    for key, var in (("cores", "HPCRUN_CORES_PER_NODE"),
-                     ("smt", "HPCRUN_SMT"),
-                     ("sockets", "HPCRUN_SOCKETS"),
-                     ("smt_stride", "HPCRUN_SMT_STRIDE"),
-                     ("cores_per_l3", "HPCRUN_CORES_PER_L3"),
-                     ("cores_per_numa", "HPCRUN_CORES_PER_NUMA")):
-        if node.get(key) is not None:
-            out.append(_assign(var, node[key], "node." + key))
-    out.append(_assign("HPCRUN_TOPOLOGY_MODE", node.get("topology", "probe"),
-                       "node.topology"))
-    if node.get("select"):
-        out.append("")
-        out.append("# How to ask the scheduler for THIS node type.  Appended to the select")
-        out.append("# directive by hpcrun/submit.  Without it a job takes whatever the pool")
-        out.append("# offers, which is how the first Casper run measured hardware this file")
-        out.append("# did not describe.")
-        out.append(_assign("HPCRUN_NODE_SELECT", node["select"], "node.select"))
-    if node.get("target_arch"):
-        out.append("")
-        out.append("# What this hardware runs, in report_cpu_features' spelling.  Checked")
-        out.append("# against the app binary once at job start: a mismatch costs one line")
-        out.append("# before the first cell instead of a SIGILL on every rank, three hours")
-        out.append("# into a queue, with no output and exit 132.")
-        out.append(_assign("HPCRUN_TARGET_ARCH", node["target_arch"],
-                           "node.target_arch"))
+    subs = sf.subclusters
+    if not subs:
+        out += _node_lines(node, "node", _assign)
+    else:
+        names = sorted(subs)
+        out.append("#")
+        out.append("# One arm per sub-cluster, chosen by HPCRUN_SUBCLUSTER when this file is")
+        out.append("# sourced.  The chosen arm ASSIGNS its geometry rather than offering it:")
+        out.append("# the sub-cluster is the override, and a value inherited from a shell")
+        out.append("# that sourced this file for a different node type would describe the")
+        out.append("# wrong hardware.  Keys an arm does not state are unset, for the same")
+        out.append("# reason.  An unknown name leaves no geometry at all, which every")
+        out.append("# consumer refuses by name.")
+        out.append(_assert("HPCRUN_SUBCLUSTERS", " ".join(names), "subclusters"))
+        out.append("[ -n \"${HPCRUN_SUBCLUSTER:-}\" ] || %s"
+                   % _assert("HPCRUN_SUBCLUSTER", sf.default_subcluster,
+                             "default_subcluster"))
+        every = [var for _, var in NODE_VARS] + ["HPCRUN_NCPUS",
+                 "HPCRUN_TOPOLOGY_MODE", "HPCRUN_NODE_SELECT", "HPCRUN_TARGET_ARCH"]
+        out.append("case \"${HPCRUN_SUBCLUSTER}\" in")
+        for name in names:
+            entry = subs[name]
+            out.append("    %s)" % name)
+            if entry.get("description"):
+                out.append("        # " + " ".join(entry["description"].split()))
+            if not entry.get("verified", True):
+                out.append("        # UNVERIFIED: no job has run on this node type yet.")
+            lines = _node_lines(entry["node"], "subclusters.%s.node" % name, _assert,
+                                comments=False)
+            stated = set(l.split("=", 1)[0] for l in lines if "=" in l)
+            out += ["        " + l for l in lines]
+            out.append("        HPCRUN_SUBCLUSTER_VERIFIED='%d'"
+                       % (1 if entry.get("verified", True) else 0))
+            missing = [v for v in every if v not in stated]
+            if missing:
+                out.append("        unset " + " ".join(missing))
+            out.append("        ;;")
+        out.append("    *)")
+        out.append("        unset " + " ".join(every + ["HPCRUN_SUBCLUSTER_VERIFIED"]))
+        out.append("        ;;")
+        out.append("esac")
     out.append("")
 
     out.append("#-- the container " + "-" * 56)
@@ -658,13 +762,21 @@ def render(sf, source_rel=None):
     out.append("export HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_TOPOLOGY_MODE")
     out.append("export HPCRUN_CONTAINER_RUNTIME HPCRUN_BINDS HPCRUN_BINDS_IF_PRESENT")
     out.append("export HPCRUN_BIND_MAP HPCRUN_LIB_DIRS")
+    if sf.subclusters:
+        out.append("export HPCRUN_SUBCLUSTERS HPCRUN_SUBCLUSTER HPCRUN_SUBCLUSTER_VERIFIED")
+    # With sub-clusters, a key any entry states is exported; `export` of a
+    # name an arm has unset marks it without giving it a value.
+    nodes = [e["node"] for e in sf.subclusters.values()] or [node]
+    def stated(key):
+        return any(n.get(key) is not None for n in nodes) or None
     optional = [("HPCRUN_WALLTIME_MAX", sched.get("walltime_max")),
-                ("HPCRUN_SOCKETS", node.get("sockets")),
-                ("HPCRUN_SMT_STRIDE", node.get("smt_stride")),
-                ("HPCRUN_CORES_PER_L3", node.get("cores_per_l3")),
-                ("HPCRUN_CORES_PER_NUMA", node.get("cores_per_numa")),
-                ("HPCRUN_TARGET_ARCH", node.get("target_arch")),
-                ("HPCRUN_NODE_SELECT", node.get("select")),
+                ("HPCRUN_SOCKETS", stated("sockets")),
+                ("HPCRUN_SMT_STRIDE", stated("smt_stride")),
+                ("HPCRUN_CORES_PER_L3", stated("cores_per_l3")),
+                ("HPCRUN_CORES_PER_NUMA", stated("cores_per_numa")),
+                ("HPCRUN_NCPUS", stated("ncpus")),
+                ("HPCRUN_TARGET_ARCH", stated("target_arch")),
+                ("HPCRUN_NODE_SELECT", stated("select")),
                 ("HPCRUN_PLACE", sched.get("place"))]
     present = [name for name, value in optional if value is not None]
     if present:

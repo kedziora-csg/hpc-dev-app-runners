@@ -162,6 +162,7 @@ emit_provenance () {
         # to know that `derecho` implies NCAR.
         printf '# %-16s %s\n' site          "${HPCRUN_SITE:-unknown}"
         printf '# %-16s %s\n' cluster       "${HPCRUN_CLUSTER:-unknown}"
+        printf '# %-16s %s\n' subcluster    "${HPCRUN_SUBCLUSTER:-none}"
         printf '# %-16s %s\n' host          "$(hostname -s 2>/dev/null)"
         printf '# %-16s %s\n' job_id        "${PBS_JOBID:-${SLURM_JOB_ID:-none}}"
         printf '# %-16s %s\n' harness_sha   "$(harness_sha)"
