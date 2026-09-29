@@ -1,4 +1,4 @@
-# Results land wherever BENCH_RESULTS_ROOT points, which defaults to the
+# Results land wherever HPCRUN_RESULTS_ROOT points, which defaults to the
 # directory the job was submitted from -- so running `./submit ...` here leaves
 # a directory per experiment.  Ignored rather than moved: where results go is
 # the operator's choice (site.sh, or --results-dir), and pinning it in the

@@ -25,7 +25,7 @@
 # a job is queued or after it fails -- the geometry of each cell, its placement
 # verdict, the figure of merit, and anything that made a cell abort.
 #
-# BENCH_VERBOSE=1 means "also echo those files to stdout as they are written",
+# HPCRUN_VERBOSE=1 means "also echo those files to stdout as they are written",
 # for watching a live job or bringing up a new site.  It changes what is
 # DISPLAYED, never what is RECORDED, so no run is ever missing information
 # because nobody set it.  That is the whole point: porting to a new machine is
@@ -45,7 +45,7 @@ _PROV_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #-------------------------------------------------------------------------------
 # Verbosity
 #-------------------------------------------------------------------------------
-bench_verbose () { [ "${BENCH_VERBOSE:-0}" != "0" ]; }
+bench_verbose () { [ "${HPCRUN_VERBOSE:-0}" != "0" ]; }
 
 # Echo only when verbose.
 vecho () { bench_verbose && echo "$@"; return 0; }
@@ -161,7 +161,7 @@ emit_provenance () {
         # cluster is the machine.  A reader can group by either without having
         # to know that `derecho` implies NCAR.
         printf '# %-16s %s\n' site          "${HPCRUN_SITE:-unknown}"
-        printf '# %-16s %s\n' cluster       "${BENCH_CLUSTER:-${NCAR_HOST:-unknown}}"
+        printf '# %-16s %s\n' cluster       "${HPCRUN_CLUSTER:-${NCAR_HOST:-unknown}}"
         printf '# %-16s %s\n' host          "$(hostname -s 2>/dev/null)"
         printf '# %-16s %s\n' job_id        "${PBS_JOBID:-${SLURM_JOB_ID:-none}}"
         printf '# %-16s %s\n' harness_sha   "$(harness_sha)"

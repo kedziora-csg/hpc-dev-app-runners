@@ -13,3 +13,17 @@ RunOSU
 # The old deployment directory.  Everything tracked moved out of it in phase
 # 4.7a; what remains in a checkout is local job output and images.
 /containers/deploy/
+
+# Job output, when a job is submitted from the top of the checkout.  Anchored,
+# so hpcrun/tests/fixtures/topology.json and the app.yaml files stay tracked.
+/results.jsonl
+/run.meta
+/app.yaml
+/topology.json
+/modules.txt
+/env.txt
+/launcher.sh
+/apptainer-launch-*.sh
+/ldd_*.txt
+/placement_*.out
+/run_*/

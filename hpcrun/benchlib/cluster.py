@@ -34,12 +34,12 @@ from . import BenchError, EXIT_ERROR
 # Read back after sourcing.  Every one is exported by site.sh itself, so adding
 # a name to this list is not enough -- the profile has to export it, which for
 # everything except the four paths means adding it to sitefile.render.
-EXPORTED = ("HPCRUN_SITE", "BENCH_CLUSTER", "HPCRUN_ROOT", "BENCH_IMAGE_DIR",
-            "BENCH_RESULTS_ROOT", "BENCH_SCRATCH",
-            "BENCH_SCHEDULER", "BENCH_SUBMIT", "BENCH_QUEUE",
-            "BENCH_WALLTIME_MAX", "BENCH_CORES_PER_NODE", "BENCH_SMT",
-            "BENCH_TARGET_ARCH", "BENCH_TOPOLOGY_MODE", "BENCH_NODE_SELECT",
-            "BENCH_PLACE")
+EXPORTED = ("HPCRUN_SITE", "HPCRUN_CLUSTER", "HPCRUN_ROOT", "HPCRUN_IMAGE_DIR",
+            "HPCRUN_RESULTS_ROOT", "HPCRUN_SCRATCH",
+            "HPCRUN_SCHEDULER", "HPCRUN_SUBMIT", "HPCRUN_QUEUE",
+            "HPCRUN_WALLTIME_MAX", "HPCRUN_CORES_PER_NODE", "HPCRUN_SMT",
+            "HPCRUN_TARGET_ARCH", "HPCRUN_TOPOLOGY_MODE", "HPCRUN_NODE_SELECT",
+            "HPCRUN_PLACE")
 
 
 class Cluster(object):
@@ -51,27 +51,27 @@ class Cluster(object):
     """
 
     def __init__(self, name, conf, values):
-        self.name = values.get("BENCH_CLUSTER") or name
+        self.name = values.get("HPCRUN_CLUSTER") or name
         self.site = values.get("HPCRUN_SITE") or ""
         self.conf = conf
-        self.image_dir = values.get("BENCH_IMAGE_DIR", "")
-        self.results_root = values.get("BENCH_RESULTS_ROOT", "")
-        self.scratch = values.get("BENCH_SCRATCH", "")
+        self.image_dir = values.get("HPCRUN_IMAGE_DIR", "")
+        self.results_root = values.get("HPCRUN_RESULTS_ROOT", "")
+        self.scratch = values.get("HPCRUN_SCRATCH", "")
         self.bench_root = values.get("HPCRUN_ROOT", "")
         # The delivery step's Makefile, beside the runner in the same clone.
         self.sif_dir = (os.path.normpath(os.path.join(self.bench_root, "..", "sif"))
                         if self.bench_root else "")
-        self.scheduler = values.get("BENCH_SCHEDULER") or ""
-        self.submit_cmd = values.get("BENCH_SUBMIT") or ""
-        self.queue = values.get("BENCH_QUEUE") or ""
-        self.walltime_max = values.get("BENCH_WALLTIME_MAX") or ""
-        self.target_arch = values.get("BENCH_TARGET_ARCH") or ""
-        self.topology_mode = values.get("BENCH_TOPOLOGY_MODE") or "probe"
-        self.node_select = values.get("BENCH_NODE_SELECT") or ""
-        self.place = values.get("BENCH_PLACE") or ""
+        self.scheduler = values.get("HPCRUN_SCHEDULER") or ""
+        self.submit_cmd = values.get("HPCRUN_SUBMIT") or ""
+        self.queue = values.get("HPCRUN_QUEUE") or ""
+        self.walltime_max = values.get("HPCRUN_WALLTIME_MAX") or ""
+        self.target_arch = values.get("HPCRUN_TARGET_ARCH") or ""
+        self.topology_mode = values.get("HPCRUN_TOPOLOGY_MODE") or "probe"
+        self.node_select = values.get("HPCRUN_NODE_SELECT") or ""
+        self.place = values.get("HPCRUN_PLACE") or ""
 
-        self.cores_per_node = _int(values.get("BENCH_CORES_PER_NODE"))
-        self.smt = _int(values.get("BENCH_SMT"))
+        self.cores_per_node = _int(values.get("HPCRUN_CORES_PER_NODE"))
+        self.smt = _int(values.get("HPCRUN_SMT"))
         # The profile is where these live now, so an unset one means the block
         # was never generated -- almost always a ~/.config/hpcrun/site.sh copied
         # before sitegen existed.  Assuming Derecho here is exactly the silent
@@ -80,9 +80,9 @@ class Cluster(object):
         if not self.cores_per_node or not self.smt:
             raise BenchError(
                 "%s does not describe the node" % conf, EXIT_ERROR,
-                ["BENCH_CORES_PER_NODE=%s BENCH_SMT=%s"
-                 % (values.get("BENCH_CORES_PER_NODE") or "<unset>",
-                    values.get("BENCH_SMT") or "<unset>"),
+                ["HPCRUN_CORES_PER_NODE=%s HPCRUN_SMT=%s"
+                 % (values.get("HPCRUN_CORES_PER_NODE") or "<unset>",
+                    values.get("HPCRUN_SMT") or "<unset>"),
                  "these come from the generated block of site.sh, written from",
                  "the cluster's YAML by hpcrun/sitegen.  A profile without one is",
                  "either older than sitegen or a hand-made copy:",
@@ -129,7 +129,7 @@ def profile_cluster(conf):
     sourcing it costs one subshell and no `module` command runs.
     """
     try:
-        return _exported(conf, ("BENCH_CLUSTER",)).get("BENCH_CLUSTER", "")
+        return _exported(conf, ("HPCRUN_CLUSTER",)).get("HPCRUN_CLUSTER", "")
     except (OSError, subprocess.CalledProcessError):
         return ""
 
@@ -137,7 +137,7 @@ def profile_cluster(conf):
 def find_conf(name, start=None):
     """The site profile, looked for the same three places a PBS script looks.
 
-    $BENCH_SITE_CONF, then ~/.config/hpcrun/cluster.sh, then
+    $HPCRUN_SITE_CONF, then ~/.config/hpcrun/cluster.sh, then
     sites/*/<cluster>/cluster.sh walking up from `start`.  Keeping the order
     identical to the one inlined in the PBS scripts is the point: the host and
     the job must never disagree about which profile is in force.
@@ -152,7 +152,7 @@ def find_conf(name, start=None):
     skipped so the search falls through to the checkout's own profile.  Working
     on two machines needs no setup beyond having both described.
     """
-    named = os.environ.get("BENCH_SITE_CONF")
+    named = os.environ.get("HPCRUN_SITE_CONF")
     if named and os.path.isfile(named):
         return named
 
@@ -182,7 +182,7 @@ def find_conf(name, start=None):
 
     raise BenchError(
         "cannot find a site profile for %r" % name, EXIT_ERROR,
-        ["looked for: $BENCH_SITE_CONF, "
+        ["looked for: $HPCRUN_SITE_CONF, "
          "${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/cluster.sh,",
          "            sites/*/%s/cluster.sh above %s" % (name, start or os.getcwd()),
          "            and sites/*/%s/cluster.sh above %s" % (name, from_here),
@@ -207,7 +207,7 @@ def _walk_up(name, origin):
 
 def load(name, start=None):
     # Absolute from here on.  A generated job script names this path outright
-    # and PBS runs it from its own spool directory, so a relative $BENCH_SITE_CONF
+    # and PBS runs it from its own spool directory, so a relative $HPCRUN_SITE_CONF
     # -- which is how anyone would type it on a login node -- would resolve to
     # nothing once the job started, three hours later.
     conf = os.path.abspath(find_conf(name, start))
@@ -219,20 +219,20 @@ def load(name, start=None):
                           "assignments and function definitions,",
                           "no `module` calls at the top level"])
 
-    # The last line of defence, and the one that covers $BENCH_SITE_CONF: naming
+    # The last line of defence, and the one that covers $HPCRUN_SITE_CONF: naming
     # a profile explicitly is allowed to override where it is found, never which
     # machine it describes.  Running Derecho's core count and bind list under a
     # Casper experiment produces results that are wrong in a way no reader could
     # detect afterwards, so it is refused rather than reported.
-    found = values.get("BENCH_CLUSTER") or ""
+    found = values.get("HPCRUN_CLUSTER") or ""
     if found and found != name:
         raise BenchError(
             "%s describes cluster %r, but %r was asked for" % (conf, found, name),
             EXIT_ERROR,
-            ["this profile was found via $BENCH_SITE_CONF" if
-             os.environ.get("BENCH_SITE_CONF") else
+            ["this profile was found via $HPCRUN_SITE_CONF" if
+             os.environ.get("HPCRUN_SITE_CONF") else
              "this profile was found by searching upwards",
-             "point BENCH_SITE_CONF at that cluster's cluster.sh, or unset it",
+             "point HPCRUN_SITE_CONF at that cluster's cluster.sh, or unset it",
              "and let" ,
              "the search find the checkout's own profile"])
 

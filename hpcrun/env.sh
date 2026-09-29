@@ -21,7 +21,7 @@
 #
 # WHAT IT DELIBERATELY DOES NOT DO
 #
-# It sets PATH and nothing else.  Exporting HPCRUN_ROOT or BENCH_IMAGE_DIR would
+# It sets PATH and nothing else.  Exporting HPCRUN_ROOT or HPCRUN_IMAGE_DIR would
 # look helpful and would be a trap: every cluster.sh honours both if they are
 # already set, so a line in ~/.bashrc naming one clone would silently drive
 # every other clone's jobs at the first clone's runner and images.  Two
@@ -30,7 +30,7 @@
 # own checkout from its own location, and this file only decides which tool you
 # reach by typing its name.
 #
-# It also does not set BENCH_SITE_CONF.  Derecho and Casper share a home
+# It also does not set HPCRUN_SITE_CONF.  Derecho and Casper share a home
 # directory, so one ~/.bashrc runs on both, and pinning a cluster there would
 # point Casper's jobs at Derecho's profile.  Nothing needs it: an experiment
 # names its cluster, and the search finds that cluster's profile in the checkout
@@ -60,15 +60,15 @@ if [ -z "${_bench_env_self}" ]; then
     return 1 2>/dev/null || exit 1
 fi
 
-BENCH_ENV_ROOT="$(cd "$(dirname "${_bench_env_self}")" && pwd)"
+HPCRUN_ENV_ROOT="$(cd "$(dirname "${_bench_env_self}")" && pwd)"
 unset _bench_env_self
 
 # Prepended, so this checkout's tools win over any other copy already on the
 # path; and only once, so sourcing twice -- or a ~/.bashrc read again by a
 # subshell -- does not grow PATH without bound.
 case ":${PATH}:" in
-    *":${BENCH_ENV_ROOT}:"*) ;;
-    *) PATH="${BENCH_ENV_ROOT}:${PATH}" ;;
+    *":${HPCRUN_ENV_ROOT}:"*) ;;
+    *) PATH="${HPCRUN_ENV_ROOT}:${PATH}" ;;
 esac
 export PATH
 
@@ -76,30 +76,30 @@ export PATH
 # two checkouts the way HPCRUN_ROOT would.  It exists so
 # bench_env_show can answer "which clone am I typing at?", which is a real
 # question the moment there are two.
-export BENCH_ENV_ROOT
+export HPCRUN_ENV_ROOT
 
 #-------------------------------------------------------------------------------
 # bench_env_show -- what is in force, when the answer is not obvious.
 #-------------------------------------------------------------------------------
 bench_env_show () {
     local tool
-    printf 'bench tools : %s\n' "${BENCH_ENV_ROOT}"
+    printf 'bench tools : %s\n' "${HPCRUN_ENV_ROOT}"
 
     tool="$(command -v submit 2>/dev/null)"
     if [ -z "${tool}" ]; then
         printf 'submit      : not on PATH\n'
-    elif [ "${tool}" = "${BENCH_ENV_ROOT}/submit" ]; then
+    elif [ "${tool}" = "${HPCRUN_ENV_ROOT}/submit" ]; then
         printf 'submit      : this checkout\n'
     else
         printf 'submit      : %s\n' "${tool}"
         printf '              ^ a DIFFERENT checkout is first on PATH\n'
     fi
 
-    printf 'site profile: %s\n' "${BENCH_SITE_CONF:-<searched per experiment>}"
-    printf 'results root: %s\n' "${BENCH_RESULTS_ROOT:-<the directory you submit from>}"
-    [ -n "${BENCH_QUEUE:-}" ] && \
-        printf 'queue       : %s   (overriding the site file)\n' "${BENCH_QUEUE}"
-    [ -n "${BENCH_PLACE+set}" ] && \
-        printf 'place       : %s   (overriding the site file)\n' "${BENCH_PLACE:-<off>}"
+    printf 'site profile: %s\n' "${HPCRUN_SITE_CONF:-<searched per experiment>}"
+    printf 'results root: %s\n' "${HPCRUN_RESULTS_ROOT:-<the directory you submit from>}"
+    [ -n "${HPCRUN_QUEUE:-}" ] && \
+        printf 'queue       : %s   (overriding the site file)\n' "${HPCRUN_QUEUE}"
+    [ -n "${HPCRUN_PLACE+set}" ] && \
+        printf 'place       : %s   (overriding the site file)\n' "${HPCRUN_PLACE:-<off>}"
     return 0
 }

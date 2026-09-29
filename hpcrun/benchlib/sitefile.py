@@ -387,13 +387,13 @@ def _assign(name, value, where):
     """[ -n "${X+set}" ] || X='value' -- an environment override still wins.
 
     site.sh has always advertised that every setting honours an existing value,
-    which is what makes `qsub -v BENCH_QUEUE=develop ...` work for a one-off, so
+    which is what makes `qsub -v HPCRUN_QUEUE=develop ...` work for a one-off, so
     a plain assignment would quietly take that away.
 
     `${X+set}` and not `${X:-}`, because those differ on the case that matters:
     a variable SET TO EMPTY.  With `-n` an empty value reads as absent and the
     default is applied anyway, so an operator could change an optional setting
-    from the environment but never switch it OFF -- `BENCH_PLACE= submit ...`
+    from the environment but never switch it OFF -- `HPCRUN_PLACE= submit ...`
     would silently keep emitting the site's place directive.  `+set` is true for
     a variable that exists at all, so an empty one means exactly what it looks
     like.  It is also the honest reading of what the header has always claimed:
@@ -403,7 +403,7 @@ def _assign(name, value, where):
     inside a parameter expansion, and a value containing ${NAME} -- which a
     lib_dirs entry may -- closes it at the wrong brace:
 
-        BENCH_LIB_DIRS="${BENCH_LIB_DIRS:-a ${B}/c}"   ->   a ${B/c}
+        HPCRUN_LIB_DIRS="${HPCRUN_LIB_DIRS:-a ${B}/c}"   ->   a ${B/c}
 
     Escaping the dollar does not help, since it is the BRACE that ends the
     expansion.  Single quotes take no expansion at all, so the stored text is
@@ -468,8 +468,8 @@ def render(sf, source_rel=None):
            "# fails while it is stale.  Change the YAML instead.",
            "#",
            "# Every SETTING below honours a value already in the environment, so a",
-           "# one-off `BENCH_QUEUE=develop hpcrun/submit ...` wins over the file.",
-           "# An EMPTY value counts: `BENCH_PLACE= hpcrun/submit ...` switches an",
+           "# one-off `HPCRUN_QUEUE=develop hpcrun/submit ...` wins over the file.",
+           "# An EMPTY value counts: `HPCRUN_PLACE= hpcrun/submit ...` switches an",
            "# optional setting off, which is not the same as leaving it unset.",
            "#",
            "# The two IDENTITY variables are the exception: they are assigned, not",
@@ -485,7 +485,7 @@ def render(sf, source_rel=None):
 
     out.append("#-- identity " + "-" * 61)
     # Two names, because there are two levels.  HPCRUN_SITE is the organisation
-    # whose conventions the module names and GLADE belong to; BENCH_CLUSTER is
+    # whose conventions the module names and GLADE belong to; HPCRUN_CLUSTER is
     # the machine.  Both reach every result row, so a row can be grouped either
     # way without anyone having to know that `derecho` implies NCAR.
     #
@@ -499,35 +499,35 @@ def render(sf, source_rel=None):
     # it was correct the week before, which is precisely why no operator would
     # have thought to clear it.
     out.append(_assert("HPCRUN_SITE", d["site"], "site"))
-    out.append(_assert("BENCH_CLUSTER", d["cluster"], "cluster"))
+    out.append(_assert("HPCRUN_CLUSTER", d["cluster"], "cluster"))
     out.append("")
     out.append("#-- scheduler " + "-" * 60)
-    out.append(_assign("BENCH_SCHEDULER", sched["kind"], "scheduler.kind"))
-    out.append(_assign("BENCH_SUBMIT", sched["submit"], "scheduler.submit"))
-    out.append(_assign("BENCH_QUEUE", sched["queue"], "scheduler.queue"))
+    out.append(_assign("HPCRUN_SCHEDULER", sched["kind"], "scheduler.kind"))
+    out.append(_assign("HPCRUN_SUBMIT", sched["submit"], "scheduler.submit"))
+    out.append(_assign("HPCRUN_QUEUE", sched["queue"], "scheduler.queue"))
     if sched.get("walltime_max"):
-        out.append(_assign("BENCH_WALLTIME_MAX", sched["walltime_max"],
+        out.append(_assign("HPCRUN_WALLTIME_MAX", sched["walltime_max"],
                            "scheduler.walltime_max"))
     if sched.get("place"):
         out.append("# Job-wide placement policy, its own directive rather than part of the")
         out.append("# select chunk.  Only stated where the queue's default is not what this")
         out.append("# site wants.")
-        out.append(_assign("BENCH_PLACE", sched["place"], "scheduler.place"))
+        out.append(_assign("HPCRUN_PLACE", sched["place"], "scheduler.place"))
     out.append("")
 
     out.append("#-- node geometry: fallbacks, never measurements " + "-" * 26)
     out.append("# The job probes lscpu and topology.json carries THAT answer.  These")
     out.append("# are what can be known before there is a node to ask, which is when")
     out.append("# an illegal ranks x threads is still cheap to reject.")
-    for key, var in (("cores", "BENCH_CORES_PER_NODE"),
-                     ("smt", "BENCH_SMT"),
-                     ("sockets", "BENCH_SOCKETS"),
-                     ("smt_stride", "BENCH_SMT_STRIDE"),
-                     ("cores_per_l3", "BENCH_CORES_PER_L3"),
-                     ("cores_per_numa", "BENCH_CORES_PER_NUMA")):
+    for key, var in (("cores", "HPCRUN_CORES_PER_NODE"),
+                     ("smt", "HPCRUN_SMT"),
+                     ("sockets", "HPCRUN_SOCKETS"),
+                     ("smt_stride", "HPCRUN_SMT_STRIDE"),
+                     ("cores_per_l3", "HPCRUN_CORES_PER_L3"),
+                     ("cores_per_numa", "HPCRUN_CORES_PER_NUMA")):
         if node.get(key) is not None:
             out.append(_assign(var, node[key], "node." + key))
-    out.append(_assign("BENCH_TOPOLOGY_MODE", node.get("topology", "probe"),
+    out.append(_assign("HPCRUN_TOPOLOGY_MODE", node.get("topology", "probe"),
                        "node.topology"))
     if node.get("select"):
         out.append("")
@@ -535,36 +535,36 @@ def render(sf, source_rel=None):
         out.append("# directive by hpcrun/submit.  Without it a job takes whatever the pool")
         out.append("# offers, which is how the first Casper run measured hardware this file")
         out.append("# did not describe.")
-        out.append(_assign("BENCH_NODE_SELECT", node["select"], "node.select"))
+        out.append(_assign("HPCRUN_NODE_SELECT", node["select"], "node.select"))
     if node.get("target_arch"):
         out.append("")
         out.append("# What this hardware runs, in report_cpu_features' spelling.  Checked")
         out.append("# against the app binary once at job start: a mismatch costs one line")
         out.append("# before the first cell instead of a SIGILL on every rank, three hours")
         out.append("# into a queue, with no output and exit 132.")
-        out.append(_assign("BENCH_TARGET_ARCH", node["target_arch"],
+        out.append(_assign("HPCRUN_TARGET_ARCH", node["target_arch"],
                            "node.target_arch"))
     out.append("")
 
     out.append("#-- the container " + "-" * 56)
-    out.append(_assign("BENCH_CONTAINER_RUNTIME", cont["runtime"],
+    out.append(_assign("HPCRUN_CONTAINER_RUNTIME", cont["runtime"],
                        "container.runtime"))
-    out.append(_assign("BENCH_BINDS", " ".join(cont["binds"]), "container.binds"))
+    out.append(_assign("HPCRUN_BINDS", " ".join(cont["binds"]), "container.binds"))
     out.append("# Bound only where the directory exists: apptainer treats a missing bind")
     out.append("# SOURCE as fatal, so an unconditional bind of a filesystem this machine")
     out.append("# may lack turns 'that mount is absent' into 'the job will not start'.")
-    out.append(_assign("BENCH_BINDS_IF_PRESENT",
+    out.append(_assign("HPCRUN_BINDS_IF_PRESENT",
                        " ".join(cont.get("binds_if_present") or []),
                        "container.binds_if_present"))
     out.append("# host:container pairs, for a directory that must NOT land on top of the")
     out.append("# container's own tree.")
-    out.append(_assign("BENCH_BIND_MAP",
+    out.append(_assign("HPCRUN_BIND_MAP",
                        " ".join("%s:%s" % (k, v)
                                 for k, v in sorted((cont.get("bind_map") or {}).items())),
                        "container.bind_map"))
     out.append("# LD_LIBRARY_PATH inside the container, in order, after whatever the MPI")
     out.append("# overlay prepends.  A * entry is a glob and takes its newest match.")
-    out.append(_assign("BENCH_LIB_DIRS", " ".join(cont.get("lib_dirs") or []),
+    out.append(_assign("HPCRUN_LIB_DIRS", " ".join(cont.get("lib_dirs") or []),
                        "container.lib_dirs"))
     out.append("")
 
@@ -618,18 +618,18 @@ def render(sf, source_rel=None):
     out.append("}")
     out.append("")
 
-    out.append("export HPCRUN_SITE BENCH_CLUSTER BENCH_SCHEDULER BENCH_SUBMIT BENCH_QUEUE")
-    out.append("export BENCH_CORES_PER_NODE BENCH_SMT BENCH_TOPOLOGY_MODE")
-    out.append("export BENCH_CONTAINER_RUNTIME BENCH_BINDS BENCH_BINDS_IF_PRESENT")
-    out.append("export BENCH_BIND_MAP BENCH_LIB_DIRS")
-    optional = [("BENCH_WALLTIME_MAX", sched.get("walltime_max")),
-                ("BENCH_SOCKETS", node.get("sockets")),
-                ("BENCH_SMT_STRIDE", node.get("smt_stride")),
-                ("BENCH_CORES_PER_L3", node.get("cores_per_l3")),
-                ("BENCH_CORES_PER_NUMA", node.get("cores_per_numa")),
-                ("BENCH_TARGET_ARCH", node.get("target_arch")),
-                ("BENCH_NODE_SELECT", node.get("select")),
-                ("BENCH_PLACE", sched.get("place"))]
+    out.append("export HPCRUN_SITE HPCRUN_CLUSTER HPCRUN_SCHEDULER HPCRUN_SUBMIT HPCRUN_QUEUE")
+    out.append("export HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_TOPOLOGY_MODE")
+    out.append("export HPCRUN_CONTAINER_RUNTIME HPCRUN_BINDS HPCRUN_BINDS_IF_PRESENT")
+    out.append("export HPCRUN_BIND_MAP HPCRUN_LIB_DIRS")
+    optional = [("HPCRUN_WALLTIME_MAX", sched.get("walltime_max")),
+                ("HPCRUN_SOCKETS", node.get("sockets")),
+                ("HPCRUN_SMT_STRIDE", node.get("smt_stride")),
+                ("HPCRUN_CORES_PER_L3", node.get("cores_per_l3")),
+                ("HPCRUN_CORES_PER_NUMA", node.get("cores_per_numa")),
+                ("HPCRUN_TARGET_ARCH", node.get("target_arch")),
+                ("HPCRUN_NODE_SELECT", node.get("select")),
+                ("HPCRUN_PLACE", sched.get("place"))]
     present = [name for name, value in optional if value is not None]
     if present:
         out.append("export " + " ".join(present))

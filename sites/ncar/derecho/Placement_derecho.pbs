@@ -33,7 +33,7 @@
 # one of the things the profile locates.
 #
 # Looked for in three places, first one found wins:
-#   1. $BENCH_SITE_CONF                                    named outright
+#   1. $HPCRUN_SITE_CONF                                    named outright
 #   2. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/cluster.sh your own copy
 #   3. sites/*/<cluster>/cluster.sh, walking up from $PBS_O_WORKDIR
 #
@@ -46,8 +46,8 @@
 _find_site_conf () {
     local from="${1:-$(pwd)}" site="${2:-derecho}" d p
 
-    [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ] && {
-        printf '%s' "${BENCH_SITE_CONF}"; return 0; }
+    [ -n "${HPCRUN_SITE_CONF:-}" ] && [ -f "${HPCRUN_SITE_CONF}" ] && {
+        printf '%s' "${HPCRUN_SITE_CONF}"; return 0; }
 
     d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/cluster.sh"
     [ -f "${d}" ] && { printf '%s' "${d}"; return 0; }
@@ -66,7 +66,7 @@ _find_site_conf () {
 _site_conf="$(_find_site_conf "${PBS_O_WORKDIR:-$(pwd)}" "${HPCRUN_SITE:-derecho}")"
 if [ -z "${_site_conf}" ]; then
     echo "cannot find a site profile for '${HPCRUN_SITE:-derecho}'." >&2
-    echo "  looked for: \$BENCH_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/cluster.sh," >&2
+    echo "  looked for: \$HPCRUN_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/cluster.sh," >&2
     echo "              and sites/*/<cluster>/cluster.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
     echo "  to submit from outside the checkout, copy" >&2
     echo "  sites/ncar/derecho/cluster.sh to" >&2
@@ -106,7 +106,7 @@ echo "geometry  ${MPIPROCS_PER_CHUNK} ranks/node x ${OMP_NUM_THREADS} threads ($
 # Artifacts land in the site's results root, which defaults to the directory the
 # job was submitted from -- so a per-run directory keeps one certification pass
 # together, and a site profile can redirect the lot to scratch instead.
-RESULTS_DIR="${RESULTS_DIR:-${BENCH_RESULTS_ROOT}}"
+RESULTS_DIR="${RESULTS_DIR:-${HPCRUN_RESULTS_ROOT}}"
 mkdir -p "${RESULTS_DIR}" && cd "${RESULTS_DIR}" \
     || { echo "cannot use RESULTS_DIR=${RESULTS_DIR}" >&2; exit 1; }
 
@@ -122,7 +122,7 @@ if [ -n "${container_img:-}" ]; then
 else
     IMAGES=""
     for i in $(cd "${HPCRUN_ROOT}/../sif" && make --no-print-directory echo-derecho); do
-        IMAGES="${IMAGES} ${BENCH_IMAGE_DIR}/${i}"
+        IMAGES="${IMAGES} ${HPCRUN_IMAGE_DIR}/${i}"
     done
 fi
 
@@ -139,7 +139,7 @@ probe_topology "$(pwd)/topology.json" \
 vshow topology.json "node topology"
 
 # The environment this certification ran under, as files rather than 86 lines of
-# job log.  BENCH_VERBOSE=1 echoes them too -- which is what you want the first
+# job log.  HPCRUN_VERBOSE=1 echoes them too -- which is what you want the first
 # time an image is tried on a new machine.
 capture_run_context "$(pwd)"
 

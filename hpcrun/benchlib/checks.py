@@ -99,7 +99,7 @@ def contracts(cluster, pairs):
         else:
             out.append(Result("%s in %s" % (app, sif), "missing",
                               "no %s in the image -- rebuild it with the app "
-                              "layer, or point BENCH_APP_DIR at a contract on a "
+                              "layer, or point HPCRUN_APP_DIR at a contract on a "
                               "bound filesystem" % target))
     return out
 

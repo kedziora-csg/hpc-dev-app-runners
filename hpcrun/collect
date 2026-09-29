@@ -5,7 +5,7 @@
             [--include-failed] [--per-run]
 
 ROOT defaults to the current directory, which is where a job writes its
-results unless BENCH_RESULTS_ROOT says otherwise.  Every results.jsonl at or
+results unless HPCRUN_RESULTS_ROOT says otherwise.  Every results.jsonl at or
 below each ROOT is read; rows are tagged with the directory they came from, so
 one invocation summarises a whole matrix of jobs.
 

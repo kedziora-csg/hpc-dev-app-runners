@@ -637,6 +637,13 @@ Where the build differs from the plan above, and why:
   `BENCH_` prefix stays, as §6 says; none of the three is used by an app hook
   inside an image, so no image needs rebuilding. Elsewhere in this document,
   text written before the rename keeps the old names.
+- **Then every `BENCH_` variable became `HPCRUN_`,** also at your request,
+  reversing §6's "the `BENCH_` prefix stays". §6's reason was the 13
+  variables the runner hands to app hooks, which the hooks inside published
+  images read. So `app_export_geometry` exports those 13 under both names,
+  checked by `test_app_contract.sh`, until every image in use has been rebuilt
+  from the renamed hooks; then the old names can be deleted. The `bench_site_*`
+  shell functions keep their names: they are not environment variables.
 
 **Checked, off the cluster.** All 184 checks pass. A dry-run submission of
 `derecho-hpcg` produces the same `job.pbs`, `job.env` and `job.json` as the old

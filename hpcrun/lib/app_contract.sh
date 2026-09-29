@@ -26,7 +26,7 @@
 # WHERE THE HOOKS RUN
 #
 # Inside the container, through the launcher, always.  They are part of the
-# image and may use anything in it.  A BENCH_APP_DIR override must therefore sit
+# image and may use anything in it.  A HPCRUN_APP_DIR override must therefore sit
 # under a path the launcher binds (on Derecho, /glade), or the container will not
 # be able to see it.
 #
@@ -81,14 +81,14 @@ app_resolve () {
             ;;
     esac
 
-    if [ -n "${BENCH_APP_DIR:-}" ]; then
+    if [ -n "${HPCRUN_APP_DIR:-}" ]; then
         # A development override: the extractor can be fixed without rebuilding
         # an image.  Recorded in every row so such results are never mistaken
         # for reproducible ones.
-        if   [ -f "${BENCH_APP_DIR}/${app}/app.yaml" ]; then APP_DIR="${BENCH_APP_DIR}/${app}"
-        elif [ -f "${BENCH_APP_DIR}/app.yaml" ];       then APP_DIR="${BENCH_APP_DIR}"
+        if   [ -f "${HPCRUN_APP_DIR}/${app}/app.yaml" ]; then APP_DIR="${HPCRUN_APP_DIR}/${app}"
+        elif [ -f "${HPCRUN_APP_DIR}/app.yaml" ];       then APP_DIR="${HPCRUN_APP_DIR}"
         else
-            echo "BENCH_APP_DIR=${BENCH_APP_DIR} has no ${app}/app.yaml" >&2
+            echo "HPCRUN_APP_DIR=${HPCRUN_APP_DIR} has no ${app}/app.yaml" >&2
             return 1
         fi
         APP_DIR_OVERRIDE=true
@@ -104,7 +104,7 @@ app_resolve () {
         rm -f "${_APP_YAML}"
         echo "no app contract at ${APP_DIR}/app.yaml" >&2
         echo "  the image predates it, or the app name is wrong;" >&2
-        echo "  BENCH_APP_DIR=<host path> overrides it for development" >&2
+        echo "  HPCRUN_APP_DIR=<host path> overrides it for development" >&2
         return 1
     fi
 
@@ -129,19 +129,27 @@ app_resolve () {
 # rather than a constant someone typed.
 #-------------------------------------------------------------------------------
 app_export_geometry () {
-    export BENCH_APP="${APP_NAME}"
-    export BENCH_RUNDIR="$1"
-    export BENCH_PLACEMENT="$2"
-    export BENCH_NODES="$3"
-    export BENCH_RANKS="$4"
-    export BENCH_RANKS_PER_NODE="$5"
-    export BENCH_THREADS="$6"
-    export BENCH_SCALE="${BENCH_SCALE:-node}"
-    export BENCH_TARGET_SECONDS="${BENCH_TARGET_SECONDS:-60}"
-    export BENCH_CORES_PER_NODE="${TOPO_CORES_PER_NODE}"
-    export BENCH_CORES_PER_L3="${TOPO_CORES_PER_L3}"
-    export BENCH_CORES_PER_NUMA="${TOPO_CORES_PER_NUMA}"
-    export BENCH_SCRATCH="${BENCH_SCRATCH:-}"
+    export HPCRUN_APP="${APP_NAME}"
+    export HPCRUN_RUNDIR="$1"
+    export HPCRUN_PLACEMENT="$2"
+    export HPCRUN_NODES="$3"
+    export HPCRUN_RANKS="$4"
+    export HPCRUN_RANKS_PER_NODE="$5"
+    export HPCRUN_THREADS="$6"
+    export HPCRUN_SCALE="${HPCRUN_SCALE:-node}"
+    export HPCRUN_TARGET_SECONDS="${HPCRUN_TARGET_SECONDS:-60}"
+    export HPCRUN_CORES_PER_NODE="${TOPO_CORES_PER_NODE}"
+    export HPCRUN_CORES_PER_L3="${TOPO_CORES_PER_L3}"
+    export HPCRUN_CORES_PER_NUMA="${TOPO_CORES_PER_NUMA}"
+    export HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-}"
+
+    # Images built before the HPCRUN_ rename carry hooks that read BENCH_*.
+    # Delete this once every image in use was built from the renamed hooks.
+    local v
+    for v in APP RUNDIR PLACEMENT NODES RANKS RANKS_PER_NODE THREADS SCALE \
+             TARGET_SECONDS CORES_PER_NODE CORES_PER_L3 CORES_PER_NUMA SCRATCH; do
+        eval "export BENCH_${v}=\"\${HPCRUN_${v}}\""
+    done
 }
 
 _app_has_hook () {

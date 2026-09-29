@@ -51,7 +51,7 @@ bench_site_modules || { echo "site module bootstrap failed" >&2; exit 1; }
 # VARIABLES cross an exec, shell FUNCTIONS do not.  The runner re-sources this
 # file to recover bench_site_modules and the bench_site_* lookups, and naming it
 # here is what makes it re-source the SAME profile this job was submitted with.
-export BENCH_SITE_CONF="@SITE_CONF@"
+export HPCRUN_SITE_CONF="@SITE_CONF@"
 
-export BENCH_JOB_ENV="@JOB_ENV@"
+export HPCRUN_JOB_ENV="@JOB_ENV@"
 exec "@HPCRUN_ROOT@/runner.sh"

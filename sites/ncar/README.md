@@ -15,7 +15,7 @@ This repository employs a **hybrid building pattern**:
 All NCAR-specific deployment files are located under [sites/ncar/](./) — this directory — with the pieces that are deliberately **not** NCAR-specific at the top of the repository:
 
 * [hpcrun/](../../hpcrun/) — the runner.  Its shell libraries (the launcher, the placement checker, the topology probe, provenance and results) are in `hpcrun/lib/`, and its off-cluster tests in `hpcrun/tests/` (`make -C hpcrun test`). `submit` and `validate` expand a declarative experiment on the login node; `runner.sh` is the in-job sweep, with no site and no application in it; `collect` turns the resulting `results.jsonl` files into a table or a runnable configuration. Nothing here names Derecho.
-* [hpcrun/env.sh](../../hpcrun/env.sh) — source it, or add that one line to `~/.bashrc`, and `validate`, `submit`, `collect` and `sitegen` work by name from any directory. Then a run is: make a directory where you want the output, `cd` into it, `submit <experiment> --account <PROJECT>`. It sets `PATH` and deliberately nothing else — exporting `HPCRUN_ROOT` or `BENCH_IMAGE_DIR` would be honoured by every clone's `cluster.sh` and would silently drive one checkout's jobs at another's images. `bench_env_show` says which checkout you are typing at.
+* [hpcrun/env.sh](../../hpcrun/env.sh) — source it, or add that one line to `~/.bashrc`, and `validate`, `submit`, `collect` and `sitegen` work by name from any directory. Then a run is: make a directory where you want the output, `cd` into it, `submit <experiment> --account <PROJECT>`. It sets `PATH` and deliberately nothing else — exporting `HPCRUN_ROOT` or `HPCRUN_IMAGE_DIR` would be honoured by every clone's `cluster.sh` and would silently drive one checkout's jobs at another's images. `bench_env_show` says which checkout you are typing at.
 * [sites/](../) — what one machine is, in three levels. `ncar.yaml` is the **site**: the module naming conventions, the `ncarenv` bootstrap, GLADE, the container runtime — everything every NCAR machine shares. `ncar/derecho.yaml` and `ncar/casper.yaml` are the **clusters**, holding only what differs: scheduler dialect, module bootstrap, node geometry, container binds and the host-MPI recipe. `ncar/derecho/cluster.sh` is the file every job actually sources — four hand-edited paths that belong to you, plus a block `hpcrun/sitegen` generates by merging those two YAMLs, so nothing on a compute node parses YAML and no value is written down twice. `hpcrun/templates/job.pbspro.tmpl` is the scheduler-directive skeleton `submit` generates from, shared by every PBS site. Adding a machine is one more cluster YAML and one more `cluster.sh`; adding an organisation is one more site YAML.
 
 * **Template-Driven Builds**: 
@@ -47,16 +47,18 @@ All NCAR-specific deployment files are located under [sites/ncar/](./) — this 
 phase 4.7a)?  After `git pull`, once:
 
 * move your images: `mv containers/deploy/ncar-hpc/libexec/*.sif sif/`, or set
-  `BENCH_IMAGE_DIR` to wherever you keep them.  Git does not move ignored files,
+  `HPCRUN_IMAGE_DIR` to wherever you keep them.  Git does not move ignored files,
   so they are still in the old directory; the `.def` files need not move, `make`
   regenerates them.
 * if you copied a profile to `~/.config/hpcdev/cluster.sh`, move it:
   `mv ~/.config/hpcdev ~/.config/hpcrun`.  The old directory is no longer
   searched.  Then replace its `NCAR_HPC_ROOT=` line with
   `HPCRUN_ROOT=<clone>/hpcrun` -- or copy the profile again.
-* `BENCH_ROOT` and `BENCH_SITE` are now `HPCRUN_ROOT` and `HPCRUN_SITE`.  Set
-  them by their new names if you set them by hand; the other `BENCH_` names are
-  unchanged.
+* every `BENCH_` variable is now `HPCRUN_`: `BENCH_IMAGE_DIR` is
+  `HPCRUN_IMAGE_DIR`, `BENCH_SITE_CONF` is `HPCRUN_SITE_CONF`, `BENCH_APP_DIR`
+  is `HPCRUN_APP_DIR`, and so on.  Set them by their new names wherever you set
+  them by hand -- in `~/.bashrc`, or on a `qsub -v` line.  Images built before
+  the rename keep working: the runner still hands their hooks the old names.
 * type `hpcrun/` where you typed `containers/deploy/bench/`.
 
 Follow these steps to deploy and build the `.sif` images on NCAR clusters:
@@ -142,10 +144,10 @@ Alternatively, name the file outright and skip the copy — this always uses the
 repository's current version:
 
 ```bash
-export BENCH_SITE_CONF=<checkout>/sites/ncar/derecho/cluster.sh
+export HPCRUN_SITE_CONF=<checkout>/sites/ncar/derecho/cluster.sh
 ```
 
-The scripts look in three places, first one found wins: `$BENCH_SITE_CONF`, then
+The scripts look in three places, first one found wins: `$HPCRUN_SITE_CONF`, then
 `~/.config/hpcrun/cluster.sh`, then `sites/*/<cluster>/cluster.sh` walking up from the
 submission directory.
 
@@ -154,18 +156,18 @@ submission directory.
 | Name | Meaning |
 |---|---|
 | `HPCRUN_ROOT` | the clone's `hpcrun/` — where `runner.sh`, its `lib/` and the sweep tools live |
-| `BENCH_IMAGE_DIR` | where the `.sif` images live (default: the clone's `sif/`) |
-| `BENCH_RESULTS_ROOT` | where results directories are created (default: the submission directory) |
-| `BENCH_SCRATCH` | big, fast, purgeable space for apps that stage large inputs |
-| `BENCH_QUEUE` | the queue `hpcrun/submit` puts jobs in |
-| `BENCH_CORES_PER_NODE`, `BENCH_SMT` | what one node has, so `hpcrun/validate` can reject an illegal `ranks × threads` before a job is queued. The job itself probes `lscpu` and uses that instead |
+| `HPCRUN_IMAGE_DIR` | where the `.sif` images live (default: the clone's `sif/`) |
+| `HPCRUN_RESULTS_ROOT` | where results directories are created (default: the submission directory) |
+| `HPCRUN_SCRATCH` | big, fast, purgeable space for apps that stage large inputs |
+| `HPCRUN_QUEUE` | the queue `hpcrun/submit` puts jobs in |
+| `HPCRUN_CORES_PER_NODE`, `HPCRUN_SMT` | what one node has, so `hpcrun/validate` can reject an illegal `ranks × threads` before a job is queued. The job itself probes `lscpu` and uses that instead |
 | `bench_site_modules` | the module set-up every job here starts from |
 
 Every one honours a value that is already set, so a one-off change needs no
 edit at all:
 
 ```bash
-qsub -v BENCH_RESULTS_ROOT=$SCRATCH/hpcdev-bench sites/ncar/derecho/Placement_derecho.pbs
+qsub -v HPCRUN_RESULTS_ROOT=$SCRATCH/hpcdev-bench sites/ncar/derecho/Placement_derecho.pbs
 ```
 
 ### Step 4.2b: Sweeping a Matrix — `hpcrun/submit`
@@ -284,11 +286,11 @@ qsub -A <project> -v APP=/glade/work/$USER/bin/wrf.exe \
     sites/ncar/derecho/App_benchmarker_derecho.pbs
 ```
 
-To fix an extractor without rebuilding an image, point `BENCH_APP_DIR` at a copy
+To fix an extractor without rebuilding an image, point `HPCRUN_APP_DIR` at a copy
 of the contract on a filesystem the container binds (on Derecho, `/glade`):
 
 ```bash
-qsub -A <project> -v APP=hpcg,BENCH_APP_DIR=/glade/work/$USER/app.d ...
+qsub -A <project> -v APP=hpcg,HPCRUN_APP_DIR=/glade/work/$USER/app.d ...
 ```
 
 Rows produced that way carry `app_dir_override: true`, so they are never mistaken
@@ -310,7 +312,7 @@ the job log, or knowing what was submitted.
 | `ldd_*_host.txt` | linkage through the launcher, i.e. after the host libraries displace the container's |
 | `placement_<cfg>.out` | `report_placement` output, provenance header first |
 | `app.yaml` | the contract that was in force: what declared each metric, and which one decides |
-| `run_<cfg>[_r<n>]/` | the app's own working directory (`$BENCH_RUNDIR`): inputs, `app.out`, `metrics.kv`, `prepare.log`. One per repeat when `repeats:` is more than 1 |
+| `run_<cfg>[_r<n>]/` | the app's own working directory (`$HPCRUN_RUNDIR`): inputs, `app.out`, `metrics.kv`, `prepare.log`. One per repeat when `repeats:` is more than 1 |
 
 Tabulate one or many jobs:
 
@@ -341,7 +343,7 @@ hpcrun/submit derecho-hpcg --account <PROJECT> --profile production
 
 The job log itself carries only the narrative: each cell's geometry, its
 placement verdict, its figure of merit, and anything that aborted it. Set
-`BENCH_VERBOSE=1` to also echo the captured files as they are written — useful
+`HPCRUN_VERBOSE=1` to also echo the captured files as they are written — useful
 when bringing up a new machine or a new app, where you are watching the job
 rather than reading it afterwards. It changes what is displayed, never what is
 recorded.

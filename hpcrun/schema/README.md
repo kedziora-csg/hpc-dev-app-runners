@@ -58,7 +58,7 @@ Job-level settings. Anything an app does not override itself.
 | `nodes` | integer |  | at least 1 |  |
 | `queue` | string |  |  |  |
 | `repeats` | integer |  | at least 1 | Times each cell is run. Reported as min and median, never as a single sample. |
-| `scale` | string |  |  | BENCH_SCALE: an app-defined size class (smoke, node, weak, strong). |
+| `scale` | string |  |  | HPCRUN_SCALE: an app-defined size class (smoke, node, weak, strong). |
 | `target_seconds` | integer |  | at least 1 |  |
 | `walltime` | string |  | matches `/^[0-9]{1,3}:[0-5][0-9]:[0-5][0-9]$/` |  |
 
@@ -291,7 +291,7 @@ Which batch system, and how a job reaches it.
 | --- | --- | --- | --- | --- |
 | `kind` | `pbspro` \| `slurm` |  |  | Selects sites/<site>/job.tmpl's directive dialect. Only pbspro is exercised today; slurm is named so the enum rejects a typo rather than accepting an unimplemented value silently. |
 | `place` | string |  | matches `/^[a-z]+(:[a-z]+)*$/` | The scheduler's placement policy, emitted as its own directive because it is job-wide rather than per-chunk -- PBS spells it `-l place=scatter:excl`. Distinct from node.select, which describes ONE chunk and cannot express `spread these chunks across distinct hosts and let nobody else on them`. Omit it where the queue's default is already what you want: Derecho's main queue allocates whole nodes, so only a queue that does not needs this stated. |
-| `queue` | string |  |  | Default queue. An experiment's defaults.queue overrides it, and so does BENCH_QUEUE in the environment. |
+| `queue` | string |  |  | Default queue. An experiment's defaults.queue overrides it, and so does HPCRUN_QUEUE in the environment. |
 | `submit` | string |  | matches `/^[a-z][a-z0-9_.-]*$/` | The submission command, qsub or sbatch. |
 | `walltime_max` | string |  | matches `/^[0-9]{1,3}:[0-5][0-9]:[0-5][0-9]$/` | The longest walltime this queue accepts. hpcrun/validate refuses a longer request at submit time instead of letting the scheduler reject it after the fact. |
 

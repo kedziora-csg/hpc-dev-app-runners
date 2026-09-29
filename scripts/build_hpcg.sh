@@ -220,7 +220,7 @@ ln -sf ${HPCG_INSTALL_DIR}/bin/xhpcg ${INSTALL_ROOT}/bin/xhpcg
 # travels with the app VERSION it was written against, and a recorded result can
 # name an image digest and mean it.
 #
-# See scripts/app.d/README.md.  BENCH_APP_DIR overrides this at run time for
+# See scripts/app.d/README.md.  HPCRUN_APP_DIR overrides this at run time for
 # development, without a rebuild.
 #-------------------------------------------------------------------------------
 app_src="${SCRIPTDIR}/app.d/hpcg"

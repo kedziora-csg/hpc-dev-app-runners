@@ -51,10 +51,10 @@
 #       qsub -A <PROJECT> -v APP=/glade/work/$USER/bin/wrf.exe ...
 #
 #   Iterate on a contract without rebuilding the image (results are marked):
-#       qsub -A <PROJECT> -v APP=hpcg,BENCH_APP_DIR=/glade/work/$USER/app.d ...
+#       qsub -A <PROJECT> -v APP=hpcg,HPCRUN_APP_DIR=/glade/work/$USER/app.d ...
 #
 #   Pick the image, and repeat each cell:
-#       qsub -A <PROJECT> -v APP=hpcg,container_img=/path/to/x.sif,BENCH_REPEATS=3 ...
+#       qsub -A <PROJECT> -v APP=hpcg,container_img=/path/to/x.sif,HPCRUN_REPEATS=3 ...
 #
 # With no job.env to read, the runner derives its three cells from the topology
 # it probes on the node -- one rank per core, one per L3, one per NUMA domain.
@@ -70,7 +70,7 @@
 # things the profile locates.
 #
 # Looked for in three places, first one found wins:
-#   1. $BENCH_SITE_CONF                                    named outright
+#   1. $HPCRUN_SITE_CONF                                    named outright
 #   2. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/cluster.sh your own copy
 #   3. sites/*/<cluster>/cluster.sh, walking up from $PBS_O_WORKDIR
 #
@@ -85,13 +85,13 @@
 # that checkout even if the operator also has a ~/.config copy pointing
 # elsewhere.  Here, where a person typed the qsub, the search is the point.
 #-------------------------------------------------------------------------------
-_profile_cluster () { ( . "$1" >/dev/null 2>&1; printf '%s' "${BENCH_CLUSTER:-}" ); }
+_profile_cluster () { ( . "$1" >/dev/null 2>&1; printf '%s' "${HPCRUN_CLUSTER:-}" ); }
 
 _find_cluster_conf () {
     local from="${1:-$(pwd)}" cluster="${2:-derecho}" d p
 
-    [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ] && {
-        printf '%s' "${BENCH_SITE_CONF}"; return 0; }
+    [ -n "${HPCRUN_SITE_CONF:-}" ] && [ -f "${HPCRUN_SITE_CONF}" ] && {
+        printf '%s' "${HPCRUN_SITE_CONF}"; return 0; }
 
     # A ~/.config copy holds ONE cluster and its path does not say which, so it
     # answers only for the cluster being asked for.  Otherwise the search falls
@@ -114,10 +114,10 @@ _find_cluster_conf () {
     return 1
 }
 
-_site_conf="$(_find_cluster_conf "${PBS_O_WORKDIR:-$(pwd)}" "${BENCH_CLUSTER:-derecho}")"
+_site_conf="$(_find_cluster_conf "${PBS_O_WORKDIR:-$(pwd)}" "${HPCRUN_CLUSTER:-derecho}")"
 if [ -z "${_site_conf}" ]; then
-    echo "cannot find a cluster profile for '${BENCH_CLUSTER:-derecho}'." >&2
-    echo "  looked for: \$BENCH_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/cluster.sh," >&2
+    echo "cannot find a cluster profile for '${HPCRUN_CLUSTER:-derecho}'." >&2
+    echo "  looked for: \$HPCRUN_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/cluster.sh," >&2
     echo "              and sites/*/<cluster>/cluster.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
     echo "  to submit from outside the checkout, copy" >&2
     echo "  sites/ncar/derecho/cluster.sh to ~/.config/hpcrun/" >&2
@@ -139,6 +139,6 @@ bench_site_modules || { echo "site module bootstrap failed" >&2; exit 1; }
 # shell FUNCTIONS do not.  The runner re-sources this file to recover the
 # bench_site_* lookups, and naming it here means it recovers the one this job
 # actually found rather than searching again from a different directory.
-export BENCH_SITE_CONF="${_site_conf}"
+export HPCRUN_SITE_CONF="${_site_conf}"
 
 exec "${HPCRUN_ROOT}/runner.sh"

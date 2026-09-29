@@ -99,7 +99,7 @@ def job_env(exp, job, results_dir, profile=None):
         "# configuration: the job never reads the experiment YAML, and reading",
         "# this directory never requires it either.",
         "",
-        # No HPCRUN_SITE or BENCH_CLUSTER here, deliberately.  Identity comes
+        # No HPCRUN_SITE or HPCRUN_CLUSTER here, deliberately.  Identity comes
         # from the cluster profile and from nowhere else.  This file used to
         # carry `HPCRUN_SITE`, and runner.sh sources it AFTER the profile, so it
         # silently overrode what the profile had just asserted -- which is how
@@ -107,21 +107,21 @@ def job_env(exp, job, results_dir, profile=None):
         # `HPCRUN_SITE='ncar'`.  Two files stating identity, one overriding the
         # other, is the duplication this whole phase exists to remove.  job.json
         # records both names for the reader; only the profile sets them.
-        "BENCH_EXPERIMENT=%s" % _sh(exp.name),
-        "BENCH_JOB_KEY=%s" % _sh(job.key),
-        "BENCH_PROFILE=%s" % _sh(profile or ""),
-        "BENCH_HARNESS=%s" % _sh(exp.cluster.bench_root),
+        "HPCRUN_EXPERIMENT=%s" % _sh(exp.name),
+        "HPCRUN_JOB_KEY=%s" % _sh(job.key),
+        "HPCRUN_PROFILE=%s" % _sh(profile or ""),
+        "HPCRUN_HARNESS=%s" % _sh(exp.cluster.bench_root),
         "",
         "RESULTS_DIR=%s" % _sh(results_dir),
         "container_img=%s" % _sh(exp.cluster.image_path(job.image)),
         "",
         "APP=%s" % _sh(job.app["name"]),
         "APP_ARGS=%s" % _sh(job.app.get("args", "")),
-        "BENCH_SCALE=%s" % _sh(job.scale),
-        "BENCH_TARGET_SECONDS=%s" % _sh(job.target_seconds),
-        "BENCH_NODES=%s" % _sh(job.nodes),
-        "BENCH_REPEATS=%s" % _sh(job.repeats),
-        "BENCH_ALLOW_UNDERSUBSCRIBED=%s"
+        "HPCRUN_SCALE=%s" % _sh(job.scale),
+        "HPCRUN_TARGET_SECONDS=%s" % _sh(job.target_seconds),
+        "HPCRUN_NODES=%s" % _sh(job.nodes),
+        "HPCRUN_REPEATS=%s" % _sh(job.repeats),
+        "HPCRUN_ALLOW_UNDERSUBSCRIBED=%s"
         % _sh("true" if exp.defaults["allow_undersubscribed"] else "false"),
     ]
 
@@ -137,15 +137,15 @@ def job_env(exp, job, results_dir, profile=None):
     lines += ["",
               "# The cells this job iterates, in order.  One placement x OMP",
               "# variant each; repeats are a loop in the runner, not cells here.",
-              "BENCH_CELL_COUNT=%s" % _sh(len(job.cells))]
+              "HPCRUN_CELL_COUNT=%s" % _sh(len(job.cells))]
     for i, cell in enumerate(job.cells):
         lines += [
-            "BENCH_CELL_%d_NAME=%s" % (i, _sh(cell.name)),
-            "BENCH_CELL_%d_RANKS_PER_NODE=%s" % (i, _sh(cell.placement["ranks_per_node"])),
-            "BENCH_CELL_%d_THREADS=%s" % (i, _sh(cell.placement["threads"])),
-            "BENCH_CELL_%d_OMP=%s" % (i, _sh(cell.omp["name"])),
-            "BENCH_CELL_%d_OMP_PROC_BIND=%s" % (i, _sh(cell.omp.get("OMP_PROC_BIND", ""))),
-            "BENCH_CELL_%d_OMP_PLACES=%s" % (i, _sh(cell.omp.get("OMP_PLACES", ""))),
+            "HPCRUN_CELL_%d_NAME=%s" % (i, _sh(cell.name)),
+            "HPCRUN_CELL_%d_RANKS_PER_NODE=%s" % (i, _sh(cell.placement["ranks_per_node"])),
+            "HPCRUN_CELL_%d_THREADS=%s" % (i, _sh(cell.placement["threads"])),
+            "HPCRUN_CELL_%d_OMP=%s" % (i, _sh(cell.omp["name"])),
+            "HPCRUN_CELL_%d_OMP_PROC_BIND=%s" % (i, _sh(cell.omp.get("OMP_PROC_BIND", ""))),
+            "HPCRUN_CELL_%d_OMP_PLACES=%s" % (i, _sh(cell.omp.get("OMP_PLACES", ""))),
         ]
     return "\n".join(lines) + "\n"
 

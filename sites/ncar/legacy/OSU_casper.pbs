@@ -19,21 +19,21 @@
 # in five places does eventually.
 #
 # The search is the same three places every entry point here looks, first found
-# wins: $BENCH_SITE_CONF, then ~/.config/hpcrun/cluster.sh, then
+# wins: $HPCRUN_SITE_CONF, then ~/.config/hpcrun/cluster.sh, then
 # sites/*/<cluster>/cluster.sh walking up from $PBS_O_WORKDIR.  PBS copies this script into its own spool, so
 # $0 does not point at the checkout and $PBS_O_WORKDIR is the only reliable
 # record of where you were.
 #-------------------------------------------------------------------------------
-_cluster="${BENCH_CLUSTER:-casper}"
+_cluster="${HPCRUN_CLUSTER:-casper}"
 # A ~/.config copy holds ONE cluster, and its path does not say which.  So it is
 # used only when it names the cluster being asked for; otherwise the search falls
 # through to the checkout, which has a profile per machine.  Without this, a
 # Derecho copy answers a Casper job and the run is silently wrong.
-_profile_cluster () { ( . "$1" >/dev/null 2>&1; printf '%s' "${BENCH_CLUSTER:-}" ); }
+_profile_cluster () { ( . "$1" >/dev/null 2>&1; printf '%s' "${HPCRUN_CLUSTER:-}" ); }
 
 _site_conf=""
-if [ -n "${BENCH_SITE_CONF:-}" ] && [ -f "${BENCH_SITE_CONF}" ]; then
-    _site_conf="${BENCH_SITE_CONF}"
+if [ -n "${HPCRUN_SITE_CONF:-}" ] && [ -f "${HPCRUN_SITE_CONF}" ]; then
+    _site_conf="${HPCRUN_SITE_CONF}"
 else
     _c="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/cluster.sh"
     [ -f "${_c}" ] && [ "$(_profile_cluster "${_c}")" = "${_cluster}" ] && _site_conf="${_c}"
@@ -65,9 +65,9 @@ nodes_list=$(cat $PBS_NODEFILE | sort | uniq)
 nodes_list=${nodes_list//.hpc.ucar.edu/}
 echo "NODES=\""${nodes_list}"\""
 
-# BENCH_IMAGE_DIR comes from the site profile, so this works from any
+# HPCRUN_IMAGE_DIR comes from the site profile, so this works from any
 # directory rather than only from inside the checkout.
-export container_img="${container_img:-${BENCH_IMAGE_DIR}/almalinux9-gcc14-openmpi-cuda.sif}"
+export container_img="${container_img:-${HPCRUN_IMAGE_DIR}/almalinux9-gcc14-openmpi-cuda.sif}"
 
 [ -f "${container_img}" ] || { echo "cannot locate requested image: ${container_img}"; exit 1; }
 

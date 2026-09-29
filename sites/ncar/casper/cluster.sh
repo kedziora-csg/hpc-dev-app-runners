@@ -30,15 +30,15 @@
 #   That path holds ONE cluster and does not say which, so a copy is used only
 #   for the cluster it names -- asking for another passes it over and finds the
 #   checkout's own profile instead.  So keep the copy for the machine you mostly
-#   work on; the others still work with no setup.  $BENCH_SITE_CONF overrides
+#   work on; the others still work with no setup.  $HPCRUN_SITE_CONF overrides
 #   both, and is refused if it names a profile for a different cluster.
 #
 #   A copy outside the checkout goes stale silently -- sitegen --check only sees
 #   the one in the repository.  Re-copy it after a description changes.
 #
 #   Want a one-off change?  Every generated setting honours an existing value,
-#   so `BENCH_QUEUE=develop hpcrun/submit ...` wins over the file, and an EMPTY
-#   value switches an optional setting off: `BENCH_PLACE= hpcrun/submit ...`.
+#   so `HPCRUN_QUEUE=develop hpcrun/submit ...` wins over the file, and an EMPTY
+#   value switches an optional setting off: `HPCRUN_PLACE= hpcrun/submit ...`.
 #===============================================================================
 
 
@@ -59,16 +59,16 @@ HPCRUN_ROOT="${HPCRUN_ROOT:-}"
 # Where the .sif images live.  Separate from the harness because images are big
 # and often kept on a different filesystem from the code.  Blank means the
 # clone's sif/, where `make` builds them.
-BENCH_IMAGE_DIR="${BENCH_IMAGE_DIR:-}"
+HPCRUN_IMAGE_DIR="${HPCRUN_IMAGE_DIR:-}"
 
 # Where results directories are created.  Blank means "the directory the job was
 # submitted from", so you submit where you want the output.  Point it at scratch
 # to collect every run in one place instead:
-#BENCH_RESULTS_ROOT=${SCRATCH}/hpcdev-bench
-BENCH_RESULTS_ROOT="${BENCH_RESULTS_ROOT:-}"
+#HPCRUN_RESULTS_ROOT=${SCRATCH}/hpcdev-bench
+HPCRUN_RESULTS_ROOT="${HPCRUN_RESULTS_ROOT:-}"
 
 # Big, fast, purgeable space, for apps that stage large input trees.
-BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
+HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 
 
 #-------------------------------------------------------------------------------
@@ -82,8 +82,8 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 # fails while it is stale.  Change the YAML instead.
 #
 # Every SETTING below honours a value already in the environment, so a
-# one-off `BENCH_QUEUE=develop hpcrun/submit ...` wins over the file.
-# An EMPTY value counts: `BENCH_PLACE= hpcrun/submit ...` switches an
+# one-off `HPCRUN_QUEUE=develop hpcrun/submit ...` wins over the file.
+# An EMPTY value counts: `HPCRUN_PLACE= hpcrun/submit ...` switches an
 # optional setting off, which is not the same as leaving it unset.
 #
 # The two IDENTITY variables are the exception: they are assigned, not
@@ -94,51 +94,51 @@ BENCH_SCRATCH="${BENCH_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
 
 #-- identity -------------------------------------------------------------
 HPCRUN_SITE='ncar'
-BENCH_CLUSTER='casper'
+HPCRUN_CLUSTER='casper'
 
 #-- scheduler ------------------------------------------------------------
-[ -n "${BENCH_SCHEDULER+set}" ] || BENCH_SCHEDULER='pbspro'
-[ -n "${BENCH_SUBMIT+set}" ] || BENCH_SUBMIT='qsub'
-[ -n "${BENCH_QUEUE+set}" ] || BENCH_QUEUE='casper'
-[ -n "${BENCH_WALLTIME_MAX+set}" ] || BENCH_WALLTIME_MAX='24:00:00'
+[ -n "${HPCRUN_SCHEDULER+set}" ] || HPCRUN_SCHEDULER='pbspro'
+[ -n "${HPCRUN_SUBMIT+set}" ] || HPCRUN_SUBMIT='qsub'
+[ -n "${HPCRUN_QUEUE+set}" ] || HPCRUN_QUEUE='casper'
+[ -n "${HPCRUN_WALLTIME_MAX+set}" ] || HPCRUN_WALLTIME_MAX='24:00:00'
 
 #-- node geometry: fallbacks, never measurements --------------------------
 # The job probes lscpu and topology.json carries THAT answer.  These
 # are what can be known before there is a node to ask, which is when
 # an illegal ranks x threads is still cheap to reject.
-[ -n "${BENCH_CORES_PER_NODE+set}" ] || BENCH_CORES_PER_NODE='64'
-[ -n "${BENCH_SMT+set}" ] || BENCH_SMT='2'
-[ -n "${BENCH_SOCKETS+set}" ] || BENCH_SOCKETS='1'
-[ -n "${BENCH_SMT_STRIDE+set}" ] || BENCH_SMT_STRIDE='64'
-[ -n "${BENCH_CORES_PER_L3+set}" ] || BENCH_CORES_PER_L3='8'
-[ -n "${BENCH_CORES_PER_NUMA+set}" ] || BENCH_CORES_PER_NUMA='64'
-[ -n "${BENCH_TOPOLOGY_MODE+set}" ] || BENCH_TOPOLOGY_MODE='probe'
+[ -n "${HPCRUN_CORES_PER_NODE+set}" ] || HPCRUN_CORES_PER_NODE='64'
+[ -n "${HPCRUN_SMT+set}" ] || HPCRUN_SMT='2'
+[ -n "${HPCRUN_SOCKETS+set}" ] || HPCRUN_SOCKETS='1'
+[ -n "${HPCRUN_SMT_STRIDE+set}" ] || HPCRUN_SMT_STRIDE='64'
+[ -n "${HPCRUN_CORES_PER_L3+set}" ] || HPCRUN_CORES_PER_L3='8'
+[ -n "${HPCRUN_CORES_PER_NUMA+set}" ] || HPCRUN_CORES_PER_NUMA='64'
+[ -n "${HPCRUN_TOPOLOGY_MODE+set}" ] || HPCRUN_TOPOLOGY_MODE='probe'
 
 # How to ask the scheduler for THIS node type.  Appended to the select
 # directive by hpcrun/submit.  Without it a job takes whatever the pool
 # offers, which is how the first Casper run measured hardware this file
 # did not describe.
-[ -n "${BENCH_NODE_SELECT+set}" ] || BENCH_NODE_SELECT='cpu_type=genoa'
+[ -n "${HPCRUN_NODE_SELECT+set}" ] || HPCRUN_NODE_SELECT='cpu_type=genoa'
 
 # What this hardware runs, in report_cpu_features' spelling.  Checked
 # against the app binary once at job start: a mismatch costs one line
 # before the first cell instead of a SIGILL on every rank, three hours
 # into a queue, with no output and exit 132.
-[ -n "${BENCH_TARGET_ARCH+set}" ] || BENCH_TARGET_ARCH='x86-64-v4'
+[ -n "${HPCRUN_TARGET_ARCH+set}" ] || HPCRUN_TARGET_ARCH='x86-64-v4'
 
 #-- the container --------------------------------------------------------
-[ -n "${BENCH_CONTAINER_RUNTIME+set}" ] || BENCH_CONTAINER_RUNTIME='apptainer'
-[ -n "${BENCH_BINDS+set}" ] || BENCH_BINDS='/glade /local_scratch /proc'
+[ -n "${HPCRUN_CONTAINER_RUNTIME+set}" ] || HPCRUN_CONTAINER_RUNTIME='apptainer'
+[ -n "${HPCRUN_BINDS+set}" ] || HPCRUN_BINDS='/glade /local_scratch /proc'
 # Bound only where the directory exists: apptainer treats a missing bind
 # SOURCE as fatal, so an unconditional bind of a filesystem this machine
 # may lack turns 'that mount is absent' into 'the job will not start'.
-[ -n "${BENCH_BINDS_IF_PRESENT+set}" ] || BENCH_BINDS_IF_PRESENT='/usr/lpp/mmfs /run /var/run'
+[ -n "${HPCRUN_BINDS_IF_PRESENT+set}" ] || HPCRUN_BINDS_IF_PRESENT='/usr/lpp/mmfs /run /var/run'
 # host:container pairs, for a directory that must NOT land on top of the
 # container's own tree.
-[ -n "${BENCH_BIND_MAP+set}" ] || BENCH_BIND_MAP='/usr/lib64:/host_lib64'
+[ -n "${HPCRUN_BIND_MAP+set}" ] || HPCRUN_BIND_MAP='/usr/lib64:/host_lib64'
 # LD_LIBRARY_PATH inside the container, in order, after whatever the MPI
 # overlay prepends.  A * entry is a glob and takes its newest match.
-[ -n "${BENCH_LIB_DIRS+set}" ] || BENCH_LIB_DIRS='${NCAR_ROOT_OPENMPI}/lib /usr/lpp/mmfs/lib /usr/lib64'
+[ -n "${HPCRUN_LIB_DIRS+set}" ] || HPCRUN_LIB_DIRS='${NCAR_ROOT_OPENMPI}/lib /usr/lpp/mmfs/lib /usr/lib64'
 
 #-- host modules ---------------------------------------------------------
 # Container compiler tag to host module.  The host MPI that
@@ -215,11 +215,11 @@ bench_site_modules () {
     } >/dev/null 2>&1
 }
 
-export HPCRUN_SITE BENCH_CLUSTER BENCH_SCHEDULER BENCH_SUBMIT BENCH_QUEUE
-export BENCH_CORES_PER_NODE BENCH_SMT BENCH_TOPOLOGY_MODE
-export BENCH_CONTAINER_RUNTIME BENCH_BINDS BENCH_BINDS_IF_PRESENT
-export BENCH_BIND_MAP BENCH_LIB_DIRS
-export BENCH_WALLTIME_MAX BENCH_SOCKETS BENCH_SMT_STRIDE BENCH_CORES_PER_L3 BENCH_CORES_PER_NUMA BENCH_TARGET_ARCH BENCH_NODE_SELECT
+export HPCRUN_SITE HPCRUN_CLUSTER HPCRUN_SCHEDULER HPCRUN_SUBMIT HPCRUN_QUEUE
+export HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_TOPOLOGY_MODE
+export HPCRUN_CONTAINER_RUNTIME HPCRUN_BINDS HPCRUN_BINDS_IF_PRESENT
+export HPCRUN_BIND_MAP HPCRUN_LIB_DIRS
+export HPCRUN_WALLTIME_MAX HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_TARGET_ARCH HPCRUN_NODE_SELECT
 # <<< END GENERATED
 
 
@@ -235,9 +235,9 @@ if [ -z "${HPCRUN_ROOT}" ] && [ -x "${_CLUSTER_HERE}/../../../hpcrun/runner.sh" 
     HPCRUN_ROOT="$(cd "${_CLUSTER_HERE}/../../../hpcrun" && pwd)"
 fi
 
-if [ -z "${BENCH_IMAGE_DIR}" ] && [ -d "${HPCRUN_ROOT}/../sif" ]; then
-    BENCH_IMAGE_DIR="$(cd "${HPCRUN_ROOT}/../sif" && pwd)"
+if [ -z "${HPCRUN_IMAGE_DIR}" ] && [ -d "${HPCRUN_ROOT}/../sif" ]; then
+    HPCRUN_IMAGE_DIR="$(cd "${HPCRUN_ROOT}/../sif" && pwd)"
 fi
-: "${BENCH_RESULTS_ROOT:=${PBS_O_WORKDIR:-$(pwd)}}"
+: "${HPCRUN_RESULTS_ROOT:=${PBS_O_WORKDIR:-$(pwd)}}"
 
-export HPCRUN_ROOT BENCH_IMAGE_DIR BENCH_RESULTS_ROOT BENCH_SCRATCH
+export HPCRUN_ROOT HPCRUN_IMAGE_DIR HPCRUN_RESULTS_ROOT HPCRUN_SCRATCH

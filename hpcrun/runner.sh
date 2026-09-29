@@ -10,14 +10,14 @@
 #
 # WHAT IT EXPECTS TO ALREADY BE TRUE
 #
-#   the cluster profile is sourced    HPCRUN_ROOT, BENCH_IMAGE_DIR,
-#                                     BENCH_RESULTS_ROOT, HPCRUN_SITE and
-#                                     BENCH_CLUSTER are set
+#   the cluster profile is sourced    HPCRUN_ROOT, HPCRUN_IMAGE_DIR,
+#                                     HPCRUN_RESULTS_ROOT, HPCRUN_SITE and
+#                                     HPCRUN_CLUSTER are set
 #   the module environment is up      bench_site_modules has run
 #
 # WHERE THE SWEEP COMES FROM
 #
-#   $BENCH_JOB_ENV, or $RESULTS_DIR/job.env    the expanded configuration
+#   $HPCRUN_JOB_ENV, or $RESULTS_DIR/job.env    the expanded configuration
 #                                              hpcrun/submit wrote
 #   nothing                                    a default three-cell sweep,
 #                                              DERIVED from the probed topology
@@ -28,13 +28,13 @@
 #
 # THE CELLS
 #
-#   BENCH_CELL_COUNT                   how many
-#   BENCH_CELL_<i>_NAME                the label its artifacts are named with
-#   BENCH_CELL_<i>_RANKS_PER_NODE      the decomposition
-#   BENCH_CELL_<i>_THREADS
-#   BENCH_CELL_<i>_OMP                 the OMP variant's name
-#   BENCH_CELL_<i>_OMP_PROC_BIND       and its settings
-#   BENCH_CELL_<i>_OMP_PLACES
+#   HPCRUN_CELL_COUNT                   how many
+#   HPCRUN_CELL_<i>_NAME                the label its artifacts are named with
+#   HPCRUN_CELL_<i>_RANKS_PER_NODE      the decomposition
+#   HPCRUN_CELL_<i>_THREADS
+#   HPCRUN_CELL_<i>_OMP                 the OMP variant's name
+#   HPCRUN_CELL_<i>_OMP_PROC_BIND       and its settings
+#   HPCRUN_CELL_<i>_OMP_PLACES
 #
 # A cell states only what it ASKS for.  What it should GET -- L3, NUMA and
 # socket footprint, threads per core -- follows from the topology probed at the
@@ -59,7 +59,7 @@
 #     run_<cell>[_r<n>]/       the app's own cwd: inputs, app.out, metrics.kv
 #
 # Stdout carries only the narrative: each cell's geometry and placement verdict,
-# its figure of merit, and anything that aborted it.  BENCH_VERBOSE=1 also echoes
+# its figure of merit, and anything that aborted it.  HPCRUN_VERBOSE=1 also echoes
 # the captured files as they are written -- for bringing up a new site or a new
 # app, where you are watching the job rather than reading it afterwards.  It
 # changes what is displayed, never what is recorded.
@@ -71,9 +71,9 @@
 #    submitted the job, and a runner that quietly found a different one would
 #    produce results in a directory nobody is watching.
 #-------------------------------------------------------------------------------
-[ -n "${BENCH_CLUSTER:-}" ] && [ -x "${HPCRUN_ROOT:-}/runner.sh" ] || {
+[ -n "${HPCRUN_CLUSTER:-}" ] && [ -x "${HPCRUN_ROOT:-}/runner.sh" ] || {
     echo "runner.sh: no cluster profile has been sourced." >&2
-    echo "  BENCH_CLUSTER=${BENCH_CLUSTER:-<unset>}  HPCRUN_ROOT=${HPCRUN_ROOT:-<unset>}" >&2
+    echo "  HPCRUN_CLUSTER=${HPCRUN_CLUSTER:-<unset>}  HPCRUN_ROOT=${HPCRUN_ROOT:-<unset>}" >&2
     echo "  Run this through a generated job script (hpcrun/submit) or through" >&2
     echo "  sites/ncar/derecho/App_benchmarker_derecho.pbs; both source the cluster" >&2
     echo "  profile, sites/<site>/<cluster>/cluster.sh," >&2
@@ -96,20 +96,20 @@
 # Sourcing the file again is idempotent -- every assignment in it honours a value
 # already set -- and it costs one read of a small file.
 #
-# Which file: BENCH_SITE_CONF when the caller exported it, which both entry
+# Which file: HPCRUN_SITE_CONF when the caller exported it, which both entry
 # points now do, so the job is driven by the same profile it was submitted with.
 # Otherwise derived from the two variables that DID survive, which keeps
 # runner.sh runnable by hand for debugging.
 if ! command -v bench_site_mpi_overlay >/dev/null 2>&1; then
-    _conf="${BENCH_SITE_CONF:-}"
-    [ -n "${_conf}" ] || _conf="$(echo "${HPCRUN_ROOT}"/../sites/*/"${BENCH_CLUSTER:-}"/cluster.sh)"
+    _conf="${HPCRUN_SITE_CONF:-}"
+    [ -n "${_conf}" ] || _conf="$(echo "${HPCRUN_ROOT}"/../sites/*/"${HPCRUN_CLUSTER:-}"/cluster.sh)"
     if [ -f "${_conf}" ]; then
         . "${_conf}" || { echo "runner.sh: cannot source ${_conf}" >&2; exit 1; }
     fi
     command -v bench_site_mpi_overlay >/dev/null 2>&1 || {
         echo "runner.sh: the cluster profile defines no bench_site_* functions." >&2
         echo "  tried: ${_conf}" >&2
-        echo "  That block is generated -- run: hpcrun/sitegen ${BENCH_CLUSTER:-<cluster>} --write" >&2
+        echo "  That block is generated -- run: hpcrun/sitegen ${HPCRUN_CLUSTER:-<cluster>} --write" >&2
         exit 1
     }
 fi
@@ -117,7 +117,7 @@ fi
 #-------------------------------------------------------------------------------
 # 2. This job's expanded configuration.
 #-------------------------------------------------------------------------------
-job_env="${BENCH_JOB_ENV:-}"
+job_env="${HPCRUN_JOB_ENV:-}"
 [ -n "${job_env}" ] || [ -z "${RESULTS_DIR:-}" ] || job_env="${RESULTS_DIR}/job.env"
 if [ -n "${job_env}" ] && [ -f "${job_env}" ]; then
     . "${job_env}" || { echo "cannot source ${job_env}" >&2; exit 1; }
@@ -125,10 +125,10 @@ fi
 
 APP="${APP:-}"
 APP_ARGS="${APP_ARGS:-}"
-BENCH_SCALE="${BENCH_SCALE:-node}"
-BENCH_TARGET_SECONDS="${BENCH_TARGET_SECONDS:-60}"
-BENCH_REPEATS="${BENCH_REPEATS:-1}"
-RESULTS_DIR="${RESULTS_DIR:-${BENCH_RESULTS_ROOT}}"
+HPCRUN_SCALE="${HPCRUN_SCALE:-node}"
+HPCRUN_TARGET_SECONDS="${HPCRUN_TARGET_SECONDS:-60}"
+HPCRUN_REPEATS="${HPCRUN_REPEATS:-1}"
+RESULTS_DIR="${RESULTS_DIR:-${HPCRUN_RESULTS_ROOT}}"
 
 # The nodefile is the authority on what the scheduler actually gave us, which is
 # not necessarily what was asked for.
@@ -136,7 +136,7 @@ if [ -n "${PBS_NODEFILE:-}" ] && [ -f "${PBS_NODEFILE}" ]; then
     NNODES="$(sort -u "${PBS_NODEFILE}" | wc -l | tr -d '[:space:]')"
     nodes_list="$(sort -u "${PBS_NODEFILE}" | tr '\n' ' ' | sed 's/ *$//')"
 else
-    NNODES="${BENCH_NODES:-1}"
+    NNODES="${HPCRUN_NODES:-1}"
     nodes_list="$(hostname -s 2>/dev/null)"
 fi
 
@@ -144,8 +144,8 @@ echo
 [ -n "${APP}" ] || echo "app       <none: placement verification only>"
 echo "nodes     ${NNODES}  (${nodes_list//.hpc.ucar.edu/})"
 echo "results   ${RESULTS_DIR}"
-[ -n "${BENCH_EXPERIMENT:-}" ] && \
-    echo "job       ${BENCH_EXPERIMENT} / ${BENCH_JOB_KEY:-?}${BENCH_PROFILE:+ (profile ${BENCH_PROFILE})}"
+[ -n "${HPCRUN_EXPERIMENT:-}" ] && \
+    echo "job       ${HPCRUN_EXPERIMENT} / ${HPCRUN_JOB_KEY:-?}${HPCRUN_PROFILE:+ (profile ${HPCRUN_PROFILE})}"
 
 # Create the output directory before generating helper scripts: the launcher
 # lives there too, and this script later cd's into it.
@@ -160,7 +160,7 @@ mkdir -p "${RESULTS_DIR}" \
 #   check_arch.sh               arch_check: the app binary against this CPU
 #   results.sh                  the results.jsonl record; pulls in provenance.sh
 #                               for emit_provenance, capture_run_context, the
-#                               sub-second clock and the BENCH_VERBOSE helpers
+#                               sub-second clock and the HPCRUN_VERBOSE helpers
 #   app_contract.sh             app.yaml + the prepare/launch/extract hooks
 #-------------------------------------------------------------------------------
 for lib in make_apptainer_launcher.sh check_placement.sh check_arch.sh results.sh app_contract.sh; do
@@ -170,7 +170,7 @@ done
 
 # leap because openSUSE Leap 15 is built from the same SLE 15 SP6 sources as
 # Derecho's host OS; oneapi because intel is the site default compiler family.
-export container_img="${container_img:-${BENCH_IMAGE_DIR}/leap-oneapi-mpich.sif}"
+export container_img="${container_img:-${HPCRUN_IMAGE_DIR}/leap-oneapi-mpich.sif}"
 
 comp_family="$(_launcher_sniff_compiler "${container_img}")"
 mpi_family="${container_mpi:-$(_launcher_sniff_family "${container_img}")}"
@@ -179,7 +179,7 @@ img_os="${img_tag%%-*}"
 echo "image     ${img_tag}.sif  (os=${img_os} compiler=${comp_family} mpi=${mpi_family})"
 load_host_modules "${comp_family}" "${mpi_family}" || exit 1
 
-launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST:-${BENCH_CLUSTER}}-${mpi_family}.sh"
+launcher="${RESULTS_DIR}/apptainer-launch-${NCAR_HOST:-${HPCRUN_CLUSTER}}-${mpi_family}.sh"
 make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" || exit 1
 
 REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
@@ -237,15 +237,15 @@ img_digest="$(sif_digest "${container_img}")"
 #-------------------------------------------------------------------------------
 cell_name=() cell_ppn=() cell_threads=() cell_omp=() cell_bind=() cell_places=()
 
-if [ "${BENCH_CELL_COUNT:-0}" -gt 0 ] 2>/dev/null; then
+if [ "${HPCRUN_CELL_COUNT:-0}" -gt 0 ] 2>/dev/null; then
     i=0
-    while [ "${i}" -lt "${BENCH_CELL_COUNT}" ]; do
-        eval "cell_name+=(\"\${BENCH_CELL_${i}_NAME}\")"
-        eval "cell_ppn+=(\"\${BENCH_CELL_${i}_RANKS_PER_NODE}\")"
-        eval "cell_threads+=(\"\${BENCH_CELL_${i}_THREADS}\")"
-        eval "cell_omp+=(\"\${BENCH_CELL_${i}_OMP:-}\")"
-        eval "cell_bind+=(\"\${BENCH_CELL_${i}_OMP_PROC_BIND:-}\")"
-        eval "cell_places+=(\"\${BENCH_CELL_${i}_OMP_PLACES:-}\")"
+    while [ "${i}" -lt "${HPCRUN_CELL_COUNT}" ]; do
+        eval "cell_name+=(\"\${HPCRUN_CELL_${i}_NAME}\")"
+        eval "cell_ppn+=(\"\${HPCRUN_CELL_${i}_RANKS_PER_NODE}\")"
+        eval "cell_threads+=(\"\${HPCRUN_CELL_${i}_THREADS}\")"
+        eval "cell_omp+=(\"\${HPCRUN_CELL_${i}_OMP:-}\")"
+        eval "cell_bind+=(\"\${HPCRUN_CELL_${i}_OMP_PROC_BIND:-}\")"
+        eval "cell_places+=(\"\${HPCRUN_CELL_${i}_OMP_PLACES:-}\")"
         i=$(( i + 1 ))
     done
 else
@@ -274,7 +274,7 @@ if [ -n "${APP}" ]; then
     if ! ${launcher} test -x "${APP_BINARY}" 2>/dev/null; then
         echo "app       ${app_name}: ${APP_BINARY} is not executable in this image"
         echo "          build or pull an image that carries it (cd sif && make derecho-<app>),"
-        echo "          or point BENCH_APP_DIR at a contract on a bound filesystem"
+        echo "          or point HPCRUN_APP_DIR at a contract on a bound filesystem"
         exit 1
     fi
 
@@ -303,8 +303,8 @@ fi
 
 # Job-level provenance.  Per-cell facts go into each placement_<cell>.out header.
 emit_provenance run.meta \
-    experiment   "${BENCH_EXPERIMENT:-none}" \
-    job_key      "${BENCH_JOB_KEY:-none}" \
+    experiment   "${HPCRUN_EXPERIMENT:-none}" \
+    job_key      "${HPCRUN_JOB_KEY:-none}" \
     nodes        "${NNODES}" \
     image        "${container_img}" \
     image_digest "${img_digest:-unknown}" \
@@ -315,10 +315,10 @@ emit_provenance run.meta \
     app          "${app_name:-none}" \
     app_path     "${APP:-none}" \
     app_args     "${APP_ARGS:-none}" \
-    app_scale    "${BENCH_SCALE}" \
-    target_arch  "${BENCH_TARGET_ARCH:-unset}" \
+    app_scale    "${HPCRUN_SCALE}" \
+    target_arch  "${HPCRUN_TARGET_ARCH:-unset}" \
     arch_verdict "${ARCH_VERDICT:-unchecked}" \
-    repeats      "${BENCH_REPEATS}" \
+    repeats      "${HPCRUN_REPEATS}" \
     launcher     "${launcher}" \
     report_exe   "${REPORT_EXE}"
 vshow run.meta "run.meta"
@@ -355,11 +355,11 @@ stats () {
 record_common () {
     result_reset
     result_set  site           "${HPCRUN_SITE}"
-    result_set  cluster        "${BENCH_CLUSTER}"
+    result_set  cluster        "${HPCRUN_CLUSTER}"
     result_set  job_id         "${PBS_JOBID:-none}"
     result_set  nodes          "${NNODES}"
-    result_str  experiment     "${BENCH_EXPERIMENT:-}"
-    result_str  job_key        "${BENCH_JOB_KEY:-}"
+    result_str  experiment     "${HPCRUN_EXPERIMENT:-}"
+    result_str  job_key        "${HPCRUN_JOB_KEY:-}"
     result_str  image.sif      "${img_tag}.sif"
     result_set  image.digest   "${img_digest}"
     result_str  image.os       "${img_os}"
@@ -367,7 +367,7 @@ record_common () {
     result_set  image.mpi      "${mpi_family}"
     result_set  app.name       "${app_name}"
     result_str  app.version    "${app_version}"
-    result_str  app.scale      "${BENCH_SCALE}"
+    result_str  app.scale      "${HPCRUN_SCALE}"
     result_set  app.app_dir_override "${app_override}"
     result_str  placement.name           "$1"
     result_set  placement.ranks_per_node "$2"
@@ -407,7 +407,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
     legal_smt=$(( TOPO_CORES_PER_NODE * TOPO_SMT ))
     if [ "${product}" -ne "${TOPO_CORES_PER_NODE}" ] && \
        [ "${product}" -ne "${legal_smt}" ] && \
-       [ "${BENCH_ALLOW_UNDERSUBSCRIBED:-false}" != true ]; then
+       [ "${HPCRUN_ALLOW_UNDERSUBSCRIBED:-false}" != true ]; then
         echo "    skipped: ${ppn} x ${nthreads} = ${product} on a ${TOPO_CORES_PER_NODE}-core node"
         echo "             (legal products: ${TOPO_CORES_PER_NODE}, or ${legal_smt} with SMT)"
         record_common "${name}" "${ppn}" "${nthreads}" "${omp_name}"
@@ -456,13 +456,13 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
     # The timed runs.  repeats:, because a single sample of a shared machine is
     # not a measurement.  Each gets its own private, empty directory: an app may
     # read and write relative to the cwd, so sharing one across runs would have
-    # them overwrite each other.  That directory is $BENCH_RUNDIR, and it is the
+    # them overwrite each other.  That directory is $HPCRUN_RUNDIR, and it is the
     # only place a hook may write.
     #---------------------------------------------------------------------------
     scores=() walls=()
     repeat=1
-    while [ "${repeat}" -le "${BENCH_REPEATS}" ]; do
-        if [ "${BENCH_REPEATS}" -gt 1 ]; then rundir="run_${name}_r${repeat}"
+    while [ "${repeat}" -le "${HPCRUN_REPEATS}" ]; do
+        if [ "${HPCRUN_REPEATS}" -gt 1 ]; then rundir="run_${name}_r${repeat}"
         else                                  rundir="run_${name}"; fi
         rm -rf "${rundir}" && mkdir -p "${rundir}" || exit 1
 
@@ -472,7 +472,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
         # The app may DECLINE a geometry it cannot run -- eight ranks when it
         # needs a square number, say.  That is recorded and skipped, not fatal:
         # one refused cell must not cost the other cells their node hours.
-        if ! app_prepare "${BENCH_RUNDIR}"; then
+        if ! app_prepare "${HPCRUN_RUNDIR}"; then
             skip="$(tail -3 "${rundir}/prepare.log" 2>/dev/null | tr '\n' ' ')"
             echo "    skipped: ${app_name} declined this geometry${skip:+ -- ${skip}}"
             record_common "${name}" "${ppn}" "${nthreads}" "${omp_name}"
@@ -514,7 +514,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
 
         # Figures of merit, as `key=value`, from the app's own extractor.  This
         # script does not know what any of them mean.
-        app_extract "${BENCH_RUNDIR}" "${rundir}/metrics.kv"
+        app_extract "${HPCRUN_RUNDIR}" "${rundir}/metrics.kv"
         vshow "${rundir}/metrics.kv" "${rundir}/metrics.kv"
 
         #-----------------------------------------------------------------------
@@ -528,7 +528,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
         result_set  placement.omp.OMP_PLACES    "${OMP_PLACES:-}"
         for fired in $(placement_rules_fired "${out}"); do result_rule "${fired}"; done
         result_set  repeat "${repeat}"
-        result_set  repeats "${BENCH_REPEATS}"
+        result_set  repeats "${HPCRUN_REPEATS}"
         result_set  wall_s "${wall}"
         result_set  exit   "${rc}"
         result_set  warm   "${warm}"
@@ -540,7 +540,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
             score="$(sed -n "s/^${fom}=//p" "${rundir}/metrics.kv" | tail -1)"
         [ -n "${score}" ] && scores+=("${score}")
         walls+=("${wall}")
-        echo "    run ${repeat}/${BENCH_REPEATS}  wall=${wall}s  exit=${rc}${score:+  ${fom}=${score}}  placement=${place}"
+        echo "    run ${repeat}/${HPCRUN_REPEATS}  wall=${wall}s  exit=${rc}${score:+  ${fom}=${score}}  placement=${place}"
 
         warm=true
         repeat=$(( repeat + 1 ))
@@ -565,7 +565,7 @@ done
 if [ "${#summary[@]}" -gt 0 ]; then
     echo
     echo "======================================================================="
-    echo "SUMMARY  ${app_name:-${APP}}  on ${img_tag}  (${BENCH_REPEATS} repeat(s))"
+    echo "SUMMARY  ${app_name:-${APP}}  on ${img_tag}  (${HPCRUN_REPEATS} repeat(s))"
     echo "======================================================================="
     printf "  %-10s %-9s %-8s %-10s %10s %10s %9s\n" \
         cell geometry omp metric min median placement
@@ -587,8 +587,8 @@ fi
 
 echo
 echo "  results.jsonl written to ${RESULTS_DIR}"
-_collect="${BENCH_HARNESS:-${HPCRUN_ROOT:-<checkout>/hpcrun}}/collect"
-if [ -n "${BENCH_EXPERIMENT:-}" ]; then
+_collect="${HPCRUN_HARNESS:-${HPCRUN_ROOT:-<checkout>/hpcrun}}/collect"
+if [ -n "${HPCRUN_EXPERIMENT:-}" ]; then
     # One job of a sweep: the useful table is the whole experiment, which is the
     # directory above this one.
     echo "  tabulate the whole sweep with:  ${_collect} $(dirname "${RESULTS_DIR}") --best"

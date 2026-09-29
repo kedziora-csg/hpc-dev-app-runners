@@ -52,7 +52,7 @@ want () { # want <description> <expected> <actual>
 # Default to Derecho, which is what the hand-written cases below assume, and
 # override per file where an experiment names a different machine -- a second
 # site is exactly the thing that made a single pinned profile wrong.
-export BENCH_SITE_CONF="${HERE}/../sites/ncar/derecho/cluster.sh"
+export HPCRUN_SITE_CONF="${HERE}/../sites/ncar/derecho/cluster.sh"
 
 conf_for () { # conf_for <experiment.yaml> -- the profile that file's cluster: names
     local cluster
@@ -62,10 +62,10 @@ conf_for () { # conf_for <experiment.yaml> -- the profile that file's cluster: n
 
 # A directory of empty files standing in for the .sif set, so the image check
 # has something to find.  An empty file is enough: nothing here opens one.
-export BENCH_IMAGE_DIR="${TMP}/img"
-mkdir -p "${BENCH_IMAGE_DIR}"
+export HPCRUN_IMAGE_DIR="${TMP}/img"
+mkdir -p "${HPCRUN_IMAGE_DIR}"
 for img in $(cd ../sif && make --no-print-directory echo-derecho-hpcg); do
-    : > "${BENCH_IMAGE_DIR}/${img}"
+    : > "${HPCRUN_IMAGE_DIR}/${img}"
 done
 
 echo "bench host side"
@@ -92,12 +92,12 @@ done
 echo
 echo "shipped files"
 for f in experiments/*.yaml; do
-    BENCH_SITE_CONF="$(conf_for "$f")" ./validate "$f" >/dev/null 2>&1
+    HPCRUN_SITE_CONF="$(conf_for "$f")" ./validate "$f" >/dev/null 2>&1
     rc=$?
     # 5 is image-missing, which depends on what is on this disk, not on the file.
     if [ "${rc}" -eq 0 ] || [ "${rc}" -eq 5 ]; then ok "$(basename "$f") validates"
     else bad "$(basename "$f") does not validate (exit ${rc})" \
-             "$(BENCH_SITE_CONF="$(conf_for "$f")" ./validate "$f" 2>&1 | tail -5)"; fi
+             "$(HPCRUN_SITE_CONF="$(conf_for "$f")" ./validate "$f" 2>&1 | tail -5)"; fi
 done
 ./validate --app ../scripts/app.d/*/app.yaml >/dev/null 2>&1 \
     && ok "every app.yaml satisfies hpcrun/schema/app.json" \
@@ -125,9 +125,9 @@ echo "schema reference"
 echo
 echo "identity"
 idout="$(bash -c '
-    export HPCRUN_SITE=derecho BENCH_CLUSTER=casper BENCH_QUEUE=develop
+    export HPCRUN_SITE=derecho HPCRUN_CLUSTER=casper HPCRUN_QUEUE=develop
     . "$1" >/dev/null 2>&1
-    echo "site=${HPCRUN_SITE} cluster=${BENCH_CLUSTER} queue=${BENCH_QUEUE}"
+    echo "site=${HPCRUN_SITE} cluster=${HPCRUN_CLUSTER} queue=${HPCRUN_QUEUE}"
 ' _ "${HERE}/../sites/ncar/derecho/cluster.sh" 2>&1)"
 want "an inherited identity is overwritten by the profile" \
      "site=ncar cluster=derecho queue=develop" "${idout}"
@@ -143,7 +143,7 @@ echo "profile search"
 ( export XDG_CONFIG_HOME="${TMP}/xdg"
   mkdir -p "${XDG_CONFIG_HOME}/hpcdev"
   cp ../sites/ncar/derecho/cluster.sh "${XDG_CONFIG_HOME}/hpcdev/cluster.sh"
-  unset BENCH_SITE_CONF
+  unset HPCRUN_SITE_CONF
 
   # Asking for derecho: the copy matches and is used.
   got="$(python3 -c 'import sys
@@ -168,11 +168,11 @@ print(cluster.find_conf("casper"))' 2>&1)"
 
   # Naming the wrong profile outright is explicit, and still refused: an
   # override may say WHERE a profile is, never which machine it describes.
-  out="$(BENCH_SITE_CONF="${XDG_CONFIG_HOME}/hpcdev/cluster.sh" ./validate casper-hpcg 2>&1)"
+  out="$(HPCRUN_SITE_CONF="${XDG_CONFIG_HOME}/hpcdev/cluster.sh" ./validate casper-hpcg 2>&1)"
   case "${out}" in
       *"describes cluster 'derecho'"*)
           echo "  ok    an explicitly named wrong-cluster profile is refused" ;;
-      *) echo "  FAIL  BENCH_SITE_CONF pointing at another cluster was accepted" ;;
+      *) echo "  FAIL  HPCRUN_SITE_CONF pointing at another cluster was accepted" ;;
   esac
 ) | tee "${TMP}/search.out"
 pass=$((pass + $(grep -c '^  ok ' "${TMP}/search.out")))
@@ -316,9 +316,9 @@ defaults: {walltime: half an hour}"
 
 for f in experiments/*.yaml; do
     c="$(conf_for "$f")"
-    BENCH_SITE_CONF="${c}" ./validate "$f" >/dev/null 2>&1; v=$?
+    HPCRUN_SITE_CONF="${c}" ./validate "$f" >/dev/null 2>&1; v=$?
     rm -rf "${TMP}/gate.d"
-    BENCH_SITE_CONF="${c}" ./submit "$f" --dry-run --results-dir "${TMP}/gate.d" \
+    HPCRUN_SITE_CONF="${c}" ./submit "$f" --dry-run --results-dir "${TMP}/gate.d" \
         >/dev/null 2>&1; s=$?
     want "$(basename "$f"): validate and submit agree" "${v}" "${s}"
 done
@@ -367,7 +367,7 @@ want "two OMP variants give six distinctly named cells" "6 6" "${names}"
 # the line broke three tests the first time somebody added `mem=` to the site
 # file, which is a test being wrong rather than a change being wrong.
 sel_suffix="$( . "${HERE}/../sites/ncar/derecho/cluster.sh" >/dev/null 2>&1
-               printf '%s' "${BENCH_NODE_SELECT:+:${BENCH_NODE_SELECT}}" )"
+               printf '%s' "${HPCRUN_NODE_SELECT:+:${HPCRUN_NODE_SELECT}}" )"
 
 echo
 echo "generated jobs"
@@ -427,7 +427,7 @@ sf = sitefile.load('${TMP}/nosel/derecho.yaml')
 text = open('${TMP}/nosel/derecho/site.sh').read()
 open('${TMP}/nosel/derecho/site.sh', 'w').write(sitefile.splice(text, sitefile.render(sf)))" 2>/dev/null
 rm -rf "${TMP}/nosel.d"
-BENCH_SITE_CONF="${TMP}/nosel/derecho/site.sh" ./submit derecho-hpcg --dry-run \
+HPCRUN_SITE_CONF="${TMP}/nosel/derecho/site.sh" ./submit derecho-hpcg --dry-run \
     --results-dir "${TMP}/nosel.d" >/dev/null 2>&1
 want "no node.select appends nothing" \
      "#PBS -l select=2:ncpus=128:mpiprocs=128:ompthreads=1" \
@@ -436,7 +436,7 @@ want "no node.select appends nothing" \
 rm -rf "${TMP}/sel.d"
 # casper-hpcg names the openmpi third of the same image set, so the stand-in
 # files created at the top of this script already cover it.
-BENCH_SITE_CONF="${HERE}/../sites/ncar/casper/cluster.sh" ./submit \
+HPCRUN_SITE_CONF="${HERE}/../sites/ncar/casper/cluster.sh" ./submit \
     "${HERE}/experiments/casper-hpcg.yaml" --dry-run \
     --results-dir "${TMP}/sel.d" >/dev/null 2>&1
 sel="$(grep -h '^#PBS -l select' "${TMP}/sel.d"/*/job.pbs 2>/dev/null | head -1)"
@@ -468,7 +468,7 @@ text = open('derecho/site.sh').read()
 open('derecho/site.sh', 'w').write(sitefile.splice(text, sitefile.render(sf)))
 " ) 2>/dev/null
 rm -rf "${TMP}/pl.d"
-BENCH_SITE_CONF="${TMP}/psite/derecho/site.sh" ./submit derecho-hpcg --dry-run \
+HPCRUN_SITE_CONF="${TMP}/psite/derecho/site.sh" ./submit derecho-hpcg --dry-run \
     --results-dir "${TMP}/pl.d" >/dev/null 2>&1
 want "scheduler.place becomes its own directive" "#PBS -l place=scatter:excl" \
      "$(grep -h '^#PBS -l place' "${TMP}/pl.d"/*/job.pbs 2>/dev/null | head -1)"
@@ -481,22 +481,22 @@ want "and does not leak into the select chunk" \
 # how `site: derecho` reached 54 rows from a profile that said `ncar`.  The
 # profile asserting its identity did not help, because the override came later
 # and from a file the operator never reads.  So job.env must not mention them.
-grep -qE "^BENCH_(SITE|CLUSTER)=" "${d}/job.env" \
+grep -qE "^HPCRUN_(SITE|CLUSTER)=" "${d}/job.env" \
     && bad "job.env carries an identity variable" \
-           "$(grep -E '^BENCH_(SITE|CLUSTER)=' "${d}/job.env")" \
+           "$(grep -E '^HPCRUN_(SITE|CLUSTER)=' "${d}/job.env")" \
     || ok "job.env states no identity, so it cannot override the profile"
 
 idout="$(bash -c '
     . "$1" >/dev/null 2>&1
     . "$2"
-    echo "site=${HPCRUN_SITE} cluster=${BENCH_CLUSTER}"
+    echo "site=${HPCRUN_SITE} cluster=${HPCRUN_CLUSTER}"
 ' _ "${HERE}/../sites/ncar/derecho/cluster.sh" "${d}/job.env" 2>&1)"
 want "profile then job.env leaves the identity the profile set" \
      "site=ncar cluster=derecho" "${idout}"
 
 # The job names its profile outright, and PBS runs it from its own spool
 # directory -- so a relative path, which is how anyone would type
-# $BENCH_SITE_CONF on a login node, would resolve to nothing once the job
+# $HPCRUN_SITE_CONF on a login node, would resolve to nothing once the job
 # started rather than when it was submitted.
 grep -q '^\. "/' "${d}/job.pbs" \
     && ok "job.pbs names the site profile by absolute path" \
@@ -506,11 +506,11 @@ grep -q '^\. "/' "${d}/job.pbs" \
 # submit writes.  This is the seam the whole "the job never parses YAML" design
 # rests on, and nothing else checks it.
 ( . "${d}/job.env" >/dev/null 2>&1
-  [ "${BENCH_CELL_COUNT}" = 3 ] || exit 1
-  [ "${BENCH_CELL_1_NAME}" = ccd ] || exit 1
-  [ "${BENCH_CELL_1_RANKS_PER_NODE}" = 16 ] || exit 1
-  [ "${BENCH_CELL_1_THREADS}" = 8 ] || exit 1
-  [ "${BENCH_CELL_1_OMP_PLACES}" = cores ] || exit 1
+  [ "${HPCRUN_CELL_COUNT}" = 3 ] || exit 1
+  [ "${HPCRUN_CELL_1_NAME}" = ccd ] || exit 1
+  [ "${HPCRUN_CELL_1_RANKS_PER_NODE}" = 16 ] || exit 1
+  [ "${HPCRUN_CELL_1_THREADS}" = 8 ] || exit 1
+  [ "${HPCRUN_CELL_1_OMP_PLACES}" = cores ] || exit 1
   [ -n "${APP}" ] && [ -n "${RESULTS_DIR}" ] && [ -n "${container_img}" ]
 ) && ok "job.env sources in bash and defines every cell field" \
   || bad "job.env does not define what runner.sh reads"
@@ -557,8 +557,8 @@ echo
 echo "cwd independence"
 mkdir -p "${TMP}/elsewhere"
 ( cd "${TMP}/elsewhere"
-  unset BENCH_SITE_CONF
-  # No BENCH_SITE_CONF, no ~/.config copy, and nothing named derecho above this
+  unset HPCRUN_SITE_CONF
+  # No HPCRUN_SITE_CONF, no ~/.config copy, and nothing named derecho above this
   # directory: the only way to find the profile is from where the CODE lives.
   XDG_CONFIG_HOME="${TMP}/no-such-config" python3 -c "
 import sys
@@ -585,24 +585,24 @@ esac
 #-- env.sh -----------------------------------------------------------------------
 # One line in ~/.bashrc, then `submit derecho-hpcg` from any directory.  What it
 # must NOT do matters as much as what it does: exporting HPCRUN_ROOT or
-# BENCH_IMAGE_DIR would be honoured by every clone's cluster.sh, so one line
+# HPCRUN_IMAGE_DIR would be honoured by every clone's cluster.sh, so one line
 # naming one checkout would drive every other checkout's jobs at the first
 # one's runner and images.
 echo
 echo "env.sh"
 bash -n env.sh && ok "env.sh parses" || bad "env.sh has a syntax error"
 
-# This suite exports BENCH_SITE_CONF and BENCH_IMAGE_DIR for its own reasons;
+# This suite exports HPCRUN_SITE_CONF and HPCRUN_IMAGE_DIR for its own reasons;
 # unset them here or the check below would be testing the harness rather than
 # env.sh.
 envout="$(bash -c '
-    unset BENCH_SITE_CONF BENCH_IMAGE_DIR
+    unset HPCRUN_SITE_CONF HPCRUN_IMAGE_DIR
     cd "$1" || exit 1
     . "$2/env.sh" || exit 1
     . "$2/env.sh" || exit 1
     echo "submit=$(command -v submit)"
     echo "onpath=$(tr : "\n" <<< "${PATH}" | grep -c "/hpcrun$")"
-    echo "imagedir=[${BENCH_IMAGE_DIR:-}] benchroot=[${HPCRUN_ROOT:-}] siteconf=[${BENCH_SITE_CONF:-}]"
+    echo "imagedir=[${HPCRUN_IMAGE_DIR:-}] benchroot=[${HPCRUN_ROOT:-}] siteconf=[${HPCRUN_SITE_CONF:-}]"
 ' _ "${TMP}" "${HERE}" 2>&1)"
 
 case "${envout}" in
@@ -623,7 +623,7 @@ esac
 echo
 echo "runner"
 bash -n runner.sh && ok "runner.sh parses" || bad "runner.sh has a syntax error"
-( unset HPCRUN_ROOT BENCH_CLUSTER BENCH_SITE_CONF; ./runner.sh >/dev/null 2>&1 )
+( unset HPCRUN_ROOT HPCRUN_CLUSTER HPCRUN_SITE_CONF; ./runner.sh >/dev/null 2>&1 )
 want "runner.sh refuses to run without a site profile" 1 "$?"
 
 # The exec boundary.  Both entry points source the site profile and then `exec`
@@ -647,9 +647,9 @@ esac
 
 # And the generator's half of it: the job names the profile so the runner
 # recovers the one this job was submitted with, not one it searched for.
-grep -q '^export BENCH_SITE_CONF=' "${d}/job.pbs" \
+grep -q '^export HPCRUN_SITE_CONF=' "${d}/job.pbs" \
     && ok "job.pbs exports the profile path across the exec" \
-    || bad "job.pbs does not export BENCH_SITE_CONF"
+    || bad "job.pbs does not export HPCRUN_SITE_CONF"
 
 #-- results ---------------------------------------------------------------------
 echo

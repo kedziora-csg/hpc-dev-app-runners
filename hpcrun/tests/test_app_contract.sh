@@ -43,9 +43,9 @@ has  () { # has <description> <file> <key=value>
     else bad "$1" "no '$3' in $2" "$(sed 's/^/          /' "$2" 2>/dev/null)"; fi
 }
 
-# Every app is resolved through BENCH_APP_DIR, which is also the development
+# Every app is resolved through HPCRUN_APP_DIR, which is also the development
 # override the runner offers -- so this exercises that path too.
-export BENCH_APP_DIR="${APPD}"
+export HPCRUN_APP_DIR="${APPD}"
 load_topology ""            # built-in fallback: Derecho geometry
 
 echo "app contract"
@@ -64,7 +64,7 @@ for d in "${APPD}"/*/; do
         fi
         [ -f "${out}/app.yaml" ] && ok "${app}: app.yaml copied into the results directory" \
                                  || bad "${app}: app.yaml was not copied for provenance"
-        [ "${APP_DIR_OVERRIDE}" = true ] && ok "${app}: BENCH_APP_DIR is recorded as an override" \
+        [ "${APP_DIR_OVERRIDE}" = true ] && ok "${app}: HPCRUN_APP_DIR is recorded as an override" \
                                          || bad "${app}: override not flagged"
     else
         bad "${app}: app_resolve failed" "$(cat "${TMP}/err")"
@@ -80,7 +80,7 @@ app_export_geometry "${run}" ccd 2 32 16 8
 if app_prepare "${run}"; then
     ok "hpcg: prepare accepted the cell"
     if [ -f "${run}/hpcg.dat" ]; then
-        want "hpcg: prepare sized the local problem from BENCH_TARGET_SECONDS" \
+        want "hpcg: prepare sized the local problem from HPCRUN_TARGET_SECONDS" \
              "60" "$(sed -n 4p "${run}/hpcg.dat")"
         nx="$(awk 'NR==3{print $1}' "${run}/hpcg.dat")"
         [ $(( nx % 8 )) -eq 0 ] && ok "hpcg: nx=${nx} is a multiple of 8, as HPCG requires" \
@@ -90,16 +90,16 @@ if app_prepare "${run}"; then
     fi
     # nothing outside the run directory
     [ -z "$(find "${TMP}/hpcg" -maxdepth 1 -newer "${LAUNCH}" -name 'hpcg.dat')" ] \
-        && ok "hpcg: prepare wrote only inside BENCH_RUNDIR" \
-        || bad "hpcg: prepare wrote outside BENCH_RUNDIR"
+        && ok "hpcg: prepare wrote only inside HPCRUN_RUNDIR" \
+        || bad "hpcg: prepare wrote outside HPCRUN_RUNDIR"
 else
     bad "hpcg: prepare declined a cell it should accept"
 fi
 
 # A smoke-scale cell must be seconds, not a minute -- this is what keeps CI cheap.
-BENCH_SCALE=smoke app_export_geometry "${run}" ccd 2 32 16 8
+HPCRUN_SCALE=smoke app_export_geometry "${run}" ccd 2 32 16 8
 rm -f "${run}/hpcg.dat"; app_prepare "${run}" >/dev/null 2>&1
-want "hpcg: BENCH_SCALE=smoke shortens the run" "5" "$(sed -n 4p "${run}/hpcg.dat")"
+want "hpcg: HPCRUN_SCALE=smoke shortens the run" "5" "$(sed -n 4p "${run}/hpcg.dat")"
 
 # extract against a real captured report
 cat > "${run}/HPCG-Benchmark_3.1_test.txt" <<'REPORT'
@@ -169,7 +169,7 @@ app_extract "${run}" "${TMP}/osu-empty.kv"
 
 #-- a bare executable is a legal, hook-free app --------------------------------
 echo
-unset BENCH_APP_DIR
+unset HPCRUN_APP_DIR
 if app_resolve /usr/bin/true "${LAUNCH}" "${TMP}" >/dev/null 2>&1; then
     want "a bare path needs no contract at all" "/usr/bin/true" "${APP_BINARY}"
     want "  ...and is named after its binary"   "true"          "${APP_NAME}"
@@ -180,5 +180,11 @@ else
 fi
 
 echo
+# Hooks inside images built before the HPCRUN_ rename read BENCH_*.
+old="$( app_export_geometry /tmp/rundir ccd 2 32 16 8
+        echo "${BENCH_RUNDIR}|${BENCH_RANKS}|${BENCH_THREADS}|${BENCH_PLACEMENT}" )"
+want "hooks in older images still get their geometry under BENCH_ names" \
+     "/tmp/rundir|32|8|ccd" "${old}"
+
 echo "  ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]

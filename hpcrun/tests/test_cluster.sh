@@ -43,18 +43,18 @@ mkdir -p "${TMP}/fs"/{bound,optional,libs,usrlib,mpi/lib,cray/lib-abi-mpich,vers
 
 cat > "${TMP}/cluster.sh" <<EOF
 HPCRUN_SITE='ncar'
-BENCH_CLUSTER='testville'
-BENCH_CONTAINER_RUNTIME='apptainer'
-BENCH_BINDS='${TMP}/fs/bound'
-BENCH_BINDS_IF_PRESENT='${TMP}/fs/optional ${TMP}/fs/absent'
-BENCH_BIND_MAP='${TMP}/fs/usrlib:/host_lib64'
-BENCH_LIB_DIRS='${TMP}/fs/libs ${TMP}/fs/vers/*/lib \${TEST_MODULE_ROOT}/lib ${TMP}/fs/absent'
-BENCH_CORES_PER_NODE='64'
-BENCH_SMT='2'
-BENCH_SOCKETS='2'
-BENCH_SMT_STRIDE='64'
-BENCH_CORES_PER_L3='4'
-BENCH_CORES_PER_NUMA='8'
+HPCRUN_CLUSTER='testville'
+HPCRUN_CONTAINER_RUNTIME='apptainer'
+HPCRUN_BINDS='${TMP}/fs/bound'
+HPCRUN_BINDS_IF_PRESENT='${TMP}/fs/optional ${TMP}/fs/absent'
+HPCRUN_BIND_MAP='${TMP}/fs/usrlib:/host_lib64'
+HPCRUN_LIB_DIRS='${TMP}/fs/libs ${TMP}/fs/vers/*/lib \${TEST_MODULE_ROOT}/lib ${TMP}/fs/absent'
+HPCRUN_CORES_PER_NODE='64'
+HPCRUN_SMT='2'
+HPCRUN_SOCKETS='2'
+HPCRUN_SMT_STRIDE='64'
+HPCRUN_CORES_PER_L3='4'
+HPCRUN_CORES_PER_NUMA='8'
 bench_site_compiler_module () { case "\$1" in oneapi) echo 'intel' ;; *) echo '' ;; esac; }
 bench_site_mpi_module    () { case "\$1" in openmpi) echo 'openmpi' ;; *) echo '' ;; esac; }
 bench_site_mpi_unload    () { case "\$1" in mpich) echo 'openmpi' ;; *) echo '' ;; esac; }

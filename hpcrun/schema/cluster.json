@@ -43,7 +43,7 @@
         },
         "queue": {
           "type": "string",
-          "description": "Default queue. An experiment's defaults.queue overrides it, and so does BENCH_QUEUE in the environment."
+          "description": "Default queue. An experiment's defaults.queue overrides it, and so does HPCRUN_QUEUE in the environment."
         },
         "place": {
           "type": "string",

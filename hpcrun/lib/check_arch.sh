@@ -32,7 +32,7 @@
 # it does catch is the class that has actually bitten this project: an nvhpc
 # binary that took `-tp znver4` from the build runner and met an AVX2-only node.
 #
-# WHAT IT DOES WITH BENCH_TARGET_ARCH
+# WHAT IT DOES WITH HPCRUN_TARGET_ARCH
 #
 # Two different comparisons, and they answer different questions:
 #
@@ -44,7 +44,7 @@
 #-------------------------------------------------------------------------------
 
 command -v vecho >/dev/null 2>&1 \
-    || vecho () { [ "${BENCH_VERBOSE:-0}" != "0" ] && echo "$@"; return 0; }
+    || vecho () { [ "${HPCRUN_VERBOSE:-0}" != "0" ] && echo "$@"; return 0; }
 
 # The x86-64 psABI levels, as far as ISA flags can tell them apart.  Ordered, so
 # they can be compared as numbers.
@@ -87,11 +87,11 @@ _arch_declared_level () {
 # Writes the full report to <outfile> (default cpu_features.txt) and one or two
 # lines to stdout.  Sets ARCH_VERDICT to ok | over-built | claim-mismatch |
 # unknown.  Returns 1 only for over-built, and only when the operator has not
-# said to proceed anyway with BENCH_ALLOW_ARCH_MISMATCH=1.
+# said to proceed anyway with HPCRUN_ALLOW_ARCH_MISMATCH=1.
 #-------------------------------------------------------------------------------
 arch_check () {
     local launcher="$1" binary="$2" out="${3:-cpu_features.txt}"
-    local tool="${BENCH_CPU_FEATURES:-/container/bin/report_cpu_features}"
+    local tool="${HPCRUN_CPU_FEATURES:-/container/bin/report_cpu_features}"
     local flags host_level want_level needs_wide
 
     ARCH_VERDICT="unknown"
@@ -136,10 +136,10 @@ arch_check () {
             echo "    ${binary}"
             echo "    see ${out}"
             echo "    The image was built for a different machine.  Rebuild it with"
-            echo "    MARCH_FLAGS matching this site (${BENCH_TARGET_ARCH:-unset}), or"
-            echo "    set BENCH_ALLOW_ARCH_MISMATCH=1 to run it anyway and watch it fail."
-            [ "${BENCH_ALLOW_ARCH_MISMATCH:-0}" = 1 ] || return 1
-            echo "    BENCH_ALLOW_ARCH_MISMATCH=1: continuing."
+            echo "    MARCH_FLAGS matching this site (${HPCRUN_TARGET_ARCH:-unset}), or"
+            echo "    set HPCRUN_ALLOW_ARCH_MISMATCH=1 to run it anyway and watch it fail."
+            [ "${HPCRUN_ALLOW_ARCH_MISMATCH:-0}" = 1 ] || return 1
+            echo "    HPCRUN_ALLOW_ARCH_MISMATCH=1: continuing."
             return 0
         fi
     fi
@@ -147,12 +147,12 @@ arch_check () {
     # 2. The claim, checked against the measurement.  Never fatal: the job can
     #    run perfectly well while the site file is out of date, and finding out
     #    the file is wrong is worth more than refusing.
-    want_level="$(_arch_declared_level "${BENCH_TARGET_ARCH:-}")"
-    if [ -n "${BENCH_TARGET_ARCH:-}" ] && [ "${want_level}" -gt 0 ] 2>/dev/null; then
+    want_level="$(_arch_declared_level "${HPCRUN_TARGET_ARCH:-}")"
+    if [ -n "${HPCRUN_TARGET_ARCH:-}" ] && [ "${want_level}" -gt 0 ] 2>/dev/null; then
         if [ "${host_level}" -ne "${want_level}" ]; then
             ARCH_VERDICT="claim-mismatch"
-            echo "note      sites/${HPCRUN_SITE}/${BENCH_CLUSTER}.yaml says"
-            echo "          node.target_arch: ${BENCH_TARGET_ARCH},"
+            echo "note      sites/${HPCRUN_SITE}/${HPCRUN_CLUSTER}.yaml says"
+            echo "          node.target_arch: ${HPCRUN_TARGET_ARCH},"
             echo "          but this node reports $(_arch_level_name "${host_level}")."
             echo "          The job is fine; the description is not.  Results built"
             echo "          on the declared value -- an app's microarchitecture override"

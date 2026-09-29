@@ -45,7 +45,7 @@
         },
         "scale": {
           "type": "string",
-          "description": "BENCH_SCALE: an app-defined size class (smoke, node, weak, strong)."
+          "description": "HPCRUN_SCALE: an app-defined size class (smoke, node, weak, strong)."
         },
         "target_seconds": {
           "type": "integer",
