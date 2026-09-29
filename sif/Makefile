@@ -123,7 +123,11 @@ ifeq ($(words $(sif_sites)),1)
 SIF_ENV ?= ../sites/$(sif_sites)/sif_env.sh
 endif
 
-%.sif: %.def Makefile $(SIF_ENV)
+# Not on the Makefile itself: a .sif is determined by its .def -- the template
+# and the digest it is pinned to -- and any edit to this file, a comment
+# included, used to make `make derecho` rebuild every image.  A change to the
+# build recipe below that should reach existing images needs `rm` or `--force`.
+%.sif: %.def $(SIF_ENV)
 	@[ -n "$(SIF_ENV)" ] || { \
 	    echo "clusters of more than one site are described here ($(sif_sites));" ; \
 	    echo "  name the one to build for:  make $@ SIF_ENV=../sites/<site>/sif_env.sh" ; \
