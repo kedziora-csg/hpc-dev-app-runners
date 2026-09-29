@@ -24,17 +24,16 @@
 #   under the repository finds this file by walking up, and works out the paths
 #   from where this file itself lives.
 #
-#   Want to submit from anywhere on the machine?  Copy this file to
-#   ~/.config/hpcrun/cluster.sh and set HPCRUN_ROOT below to your clone's hpcrun/.
+#   Want to submit from anywhere on the machine?  Export HPCRUN_ROOT as your
+#   clone's hpcrun/ and pass it to the job, `qsub -v HPCRUN_ROOT,...`.  The job
+#   then finds this file inside that clone, and the other clusters' files the
+#   same way, so one setting serves every machine that shares your home
+#   directory.  $HPCRUN_SITE_CONF overrides that, and is refused if it names a
+#   profile for a different cluster.
 #
-#   That path holds ONE cluster and does not say which, so a copy is used only
-#   for the cluster it names -- asking for another passes it over and finds the
-#   checkout's own profile instead.  So keep the copy for the machine you mostly
-#   work on; the others still work with no setup.  $HPCRUN_SITE_CONF overrides
-#   both, and is refused if it names a profile for a different cluster.
-#
-#   A copy outside the checkout goes stale silently -- sitegen --check only sees
-#   the one in the repository.  Re-copy it after a description changes.
+#   A copy of this file in ~/.config/hpcrun/cluster.sh also works, for this
+#   cluster only; set HPCRUN_ROOT below in the copy.  It goes stale silently --
+#   sitegen --check only sees the one in the repository.
 #
 #   Want a one-off change?  Every generated setting honours an existing value,
 #   so `HPCRUN_QUEUE=develop hpcrun/submit ...` wins over the file, and an EMPTY

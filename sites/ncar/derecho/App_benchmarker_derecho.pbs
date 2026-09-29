@@ -69,13 +69,17 @@
 # Inline here rather than in hpcrun/lib/, because the runner is one of the
 # things the profile locates.
 #
-# Looked for in three places, first one found wins:
+# Looked for in four places, first one found wins:
 #   1. $HPCRUN_SITE_CONF                                    named outright
-#   2. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/cluster.sh your own copy
-#   3. sites/*/<cluster>/cluster.sh, walking up from $PBS_O_WORKDIR
+#   2. sites/*/<cluster>/cluster.sh in the clone $HPCRUN_ROOT names
+#   3. ${XDG_CONFIG_HOME:-$HOME/.config}/hpcrun/cluster.sh  your own copy
+#   4. sites/*/<cluster>/cluster.sh, walking up from $PBS_O_WORKDIR
 #
-# 3 keeps a submit-from-the-checkout workflow working with no setup at all.
-# 2 is what lets this script be submitted from any directory on the machine.
+# 2 is the usual way to submit from anywhere: the clone has a profile for every
+# cluster, so one HPCRUN_ROOT serves Derecho and Casper alike and there is no
+# copy to go stale.  A job sees it only if qsub passes it -- `qsub -v
+# HPCRUN_ROOT,...`, where a name with no value is copied from the submitting
+# shell.  4 keeps a submit-from-the-checkout workflow working with no setup.
 #
 # PBS copies this script into its own spool, so $0 does not point at the
 # checkout; $PBS_O_WORKDIR is the only reliable record of where you were.
@@ -93,13 +97,19 @@ _find_cluster_conf () {
     [ -n "${HPCRUN_SITE_CONF:-}" ] && [ -f "${HPCRUN_SITE_CONF}" ] && {
         printf '%s' "${HPCRUN_SITE_CONF}"; return 0; }
 
+    if [ -n "${HPCRUN_ROOT:-}" ]; then
+        for p in "${HPCRUN_ROOT}"/../sites/*/"${cluster}"/cluster.sh; do
+            [ -f "${p}" ] && { printf '%s/cluster.sh' "$(cd "$(dirname "${p}")" && pwd)"; return 0; }
+        done
+    fi
+
     # A ~/.config copy holds ONE cluster and its path does not say which, so it
     # answers only for the cluster being asked for.  Otherwise the search falls
     # through to the checkout, which has a profile per machine.  Without this a
     # Derecho copy answers a Casper job and the run is silently wrong: the core
     # count, the bind list and the host-MPI recipe would all be the other
     # machine's, and nothing in the results would say so.
-    d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/cluster.sh"
+    d="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcrun/cluster.sh"
     [ -f "${d}" ] && [ "$(_profile_cluster "${d}")" = "${cluster}" ] && {
         printf '%s' "${d}"; return 0; }
 
@@ -117,12 +127,12 @@ _find_cluster_conf () {
 _site_conf="$(_find_cluster_conf "${PBS_O_WORKDIR:-$(pwd)}" "${HPCRUN_CLUSTER:-derecho}")"
 if [ -z "${_site_conf}" ]; then
     echo "cannot find a cluster profile for '${HPCRUN_CLUSTER:-derecho}'." >&2
-    echo "  looked for: \$HPCRUN_SITE_CONF, \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcdev/cluster.sh," >&2
+    echo "  looked for: \$HPCRUN_SITE_CONF (${HPCRUN_SITE_CONF:-unset})," >&2
+    echo "              sites/*/<cluster>/cluster.sh in \$HPCRUN_ROOT/.. (HPCRUN_ROOT=${HPCRUN_ROOT:-unset in this job})," >&2
+    echo "              \${XDG_CONFIG_HOME:-\$HOME/.config}/hpcrun/cluster.sh," >&2
     echo "              and sites/*/<cluster>/cluster.sh above ${PBS_O_WORKDIR:-$(pwd)}" >&2
-    echo "  to submit from outside the checkout, copy" >&2
-    echo "  sites/ncar/derecho/cluster.sh to ~/.config/hpcrun/" >&2
-    echo "  as cluster.sh, and set" >&2
-    echo "  HPCRUN_ROOT in it to your clone's hpcrun/." >&2
+    echo "  to submit from outside the checkout, pass your clone to the job:" >&2
+    echo "      qsub -v HPCRUN_ROOT,... <script>     (HPCRUN_ROOT=<clone>/hpcrun in your shell)" >&2
     exit 1
 fi
 . "${_site_conf}" || { echo "cannot source ${_site_conf}" >&2; exit 1; }

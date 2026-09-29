@@ -50,10 +50,8 @@ phase 4.7a)?  After `git pull`, once:
   `HPCRUN_IMAGE_DIR` to wherever you keep them.  Git does not move ignored files,
   so they are still in the old directory; the `.def` files need not move, `make`
   regenerates them.
-* if you copied a profile to `~/.config/hpcdev/cluster.sh`, move it:
-  `mv ~/.config/hpcdev ~/.config/hpcrun`.  The old directory is no longer
-  searched.  Then replace its `NCAR_HPC_ROOT=` line with
-  `HPCRUN_ROOT=<clone>/hpcrun` -- or copy the profile again.
+* if you copied a profile to `~/.config/hpcdev/`, delete it and use
+  `HPCRUN_ROOT` instead (Step 4.2a).  The old directory is no longer searched.
 * every `BENCH_` variable is now `HPCRUN_`: `BENCH_IMAGE_DIR` is
   `HPCRUN_IMAGE_DIR`, `BENCH_SITE_CONF` is `HPCRUN_SITE_CONF`, `BENCH_APP_DIR`
   is `HPCRUN_APP_DIR`, and so on.  Set them by their new names wherever you set
@@ -128,28 +126,35 @@ submitted from. So a run can live wherever you want its results.
 from the submission directory, find `sites/ncar/derecho/cluster.sh`, and work the paths
 out from where that file itself lives.
 
-**Submitting from anywhere else: one copy, one edited line.**
+**Submitting from anywhere else: name your clone.** Set `HPCRUN_ROOT` once, in
+`~/.bashrc`, and pass it to the job by name:
 
 ```bash
-mkdir -p ~/.config/hpcrun
-cp <checkout>/sites/ncar/derecho/cluster.sh ~/.config/hpcrun/
-$EDITOR ~/.config/hpcrun/cluster.sh  # set HPCRUN_ROOT to <checkout>/hpcrun
+export HPCRUN_ROOT=<checkout>/hpcrun          # once, in ~/.bashrc
+qsub -A <PROJECT> -v HPCRUN_ROOT,APP=hpcg,container_img=<checkout>/sif/leap-oneapi-mpich-hpcg.sif \
+    <checkout>/sites/ncar/derecho/App_benchmarker_derecho.pbs
 ```
 
-`HPCRUN_ROOT` is the only line that must change; it is the first setting in
-the file. A copy inside the checkout can work its own location out, one outside
-cannot, so it has to be told.
+PBS does not hand your environment to a job, so the name has to be in the `-v`
+list; a name with no `=value` is copied from the shell you run `qsub` in. The
+job then finds `sites/*/<cluster>/cluster.sh` inside that clone. The clone has
+a profile for every cluster, so the same line works on Derecho and on Casper,
+which share a home directory, and there is no copy to go stale. If the job
+cannot find a profile, its error says what `HPCRUN_ROOT` it received.
 
-Alternatively, name the file outright and skip the copy — this always uses the
-repository's current version:
+A copy in `~/.config/hpcrun/cluster.sh` still works, for the one cluster it
+describes, but it goes stale whenever a description changes; `HPCRUN_ROOT` is
+the better choice. Or name one profile outright for the session:
 
 ```bash
 export HPCRUN_SITE_CONF=<checkout>/sites/ncar/derecho/cluster.sh
 ```
 
-The scripts look in three places, first one found wins: `$HPCRUN_SITE_CONF`, then
-`~/.config/hpcrun/cluster.sh`, then `sites/*/<cluster>/cluster.sh` walking up from the
-submission directory.
+The scripts look in four places, first one found wins: `$HPCRUN_SITE_CONF`,
+then `sites/*/<cluster>/cluster.sh` in the clone `$HPCRUN_ROOT` names, then
+`~/.config/hpcrun/cluster.sh` if it describes that cluster, then
+`sites/*/<cluster>/cluster.sh` walking up from the submission directory.
+`hpcrun/submit` and `hpcrun/validate` search the same way.
 
 **What the profile sets:**
 

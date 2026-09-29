@@ -18,9 +18,11 @@
 # profile said 25.10, and nothing compared them -- which is what a value stated
 # in five places does eventually.
 #
-# The search is the same three places every entry point here looks, first found
-# wins: $HPCRUN_SITE_CONF, then ~/.config/hpcrun/cluster.sh, then
-# sites/*/<cluster>/cluster.sh walking up from $PBS_O_WORKDIR.  PBS copies this script into its own spool, so
+# The search is the same four places every entry point here looks, first found
+# wins: $HPCRUN_SITE_CONF, then sites/*/<cluster>/cluster.sh in the clone
+# $HPCRUN_ROOT names (pass it with `qsub -v HPCRUN_ROOT,...`), then
+# ~/.config/hpcrun/cluster.sh, then sites/*/<cluster>/cluster.sh walking up
+# from $PBS_O_WORKDIR.  PBS copies this script into its own spool, so
 # $0 does not point at the checkout and $PBS_O_WORKDIR is the only reliable
 # record of where you were.
 #-------------------------------------------------------------------------------
@@ -34,8 +36,13 @@ _profile_cluster () { ( . "$1" >/dev/null 2>&1; printf '%s' "${HPCRUN_CLUSTER:-}
 _site_conf=""
 if [ -n "${HPCRUN_SITE_CONF:-}" ] && [ -f "${HPCRUN_SITE_CONF}" ]; then
     _site_conf="${HPCRUN_SITE_CONF}"
-else
-    _c="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcdev/cluster.sh"
+elif [ -n "${HPCRUN_ROOT:-}" ]; then
+    for _p in "${HPCRUN_ROOT}"/../sites/*/"${_cluster}"/cluster.sh; do
+        [ -f "${_p}" ] && _site_conf="$(cd "$(dirname "${_p}")" && pwd)/cluster.sh"
+    done
+fi
+if [ -z "${_site_conf}" ]; then
+    _c="${XDG_CONFIG_HOME:-${HOME}/.config}/hpcrun/cluster.sh"
     [ -f "${_c}" ] && [ "$(_profile_cluster "${_c}")" = "${_cluster}" ] && _site_conf="${_c}"
 fi
 _d="$(cd "${PBS_O_WORKDIR:-$(pwd)}" 2>/dev/null && pwd)"
@@ -47,8 +54,8 @@ while [ -z "${_site_conf}" ] && [ -n "${_d}" ] && [ "${_d}" != "/" ]; do
 done
 [ -n "${_site_conf}" ] || {
     echo "cannot find a cluster profile for '${_cluster}'." >&2
-    echo "  copy that cluster's cluster.sh to ~/.config/hpcrun/" >&2
-    echo "  and set HPCRUN_ROOT in it, or submit from inside the checkout." >&2
+    echo "  HPCRUN_ROOT=${HPCRUN_ROOT:-unset in this job}; pass your clone with" >&2
+    echo "  qsub -v HPCRUN_ROOT,... or submit from inside the checkout." >&2
     exit 1
 }
 . "${_site_conf}" || { echo "cannot source ${_site_conf}" >&2; exit 1; }

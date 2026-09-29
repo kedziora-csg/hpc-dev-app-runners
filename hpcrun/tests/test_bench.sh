@@ -133,7 +133,7 @@ want "an inherited identity is overwritten by the profile" \
      "site=ncar cluster=derecho queue=develop" "${idout}"
 
 #-- one ~/.config copy must not answer for every machine ------------------------
-# The path ~/.config/hpcrun/site.sh has no site in it, so a copy made for one
+# The path ~/.config/hpcrun/cluster.sh has no cluster in it, so a copy made for one
 # machine used to answer a request for another -- and a Site takes its name from
 # the profile it read, so an experiment saying `site: casper` ran Derecho's core
 # count, bind list and MPI recipe without a word.  Nothing in the results would
@@ -141,9 +141,9 @@ want "an inherited identity is overwritten by the profile" \
 echo
 echo "profile search"
 ( export XDG_CONFIG_HOME="${TMP}/xdg"
-  mkdir -p "${XDG_CONFIG_HOME}/hpcdev"
-  cp ../sites/ncar/derecho/cluster.sh "${XDG_CONFIG_HOME}/hpcdev/cluster.sh"
-  unset HPCRUN_SITE_CONF
+  mkdir -p "${XDG_CONFIG_HOME}/hpcrun"
+  cp ../sites/ncar/derecho/cluster.sh "${XDG_CONFIG_HOME}/hpcrun/cluster.sh"
+  unset HPCRUN_SITE_CONF HPCRUN_ROOT
 
   # Asking for derecho: the copy matches and is used.
   got="$(python3 -c 'import sys
@@ -168,12 +168,41 @@ print(cluster.find_conf("casper"))' 2>&1)"
 
   # Naming the wrong profile outright is explicit, and still refused: an
   # override may say WHERE a profile is, never which machine it describes.
-  out="$(HPCRUN_SITE_CONF="${XDG_CONFIG_HOME}/hpcdev/cluster.sh" ./validate casper-hpcg 2>&1)"
+  out="$(HPCRUN_SITE_CONF="${XDG_CONFIG_HOME}/hpcrun/cluster.sh" ./validate casper-hpcg 2>&1)"
   case "${out}" in
       *"describes cluster 'derecho'"*)
           echo "  ok    an explicitly named wrong-cluster profile is refused" ;;
       *) echo "  FAIL  HPCRUN_SITE_CONF pointing at another cluster was accepted" ;;
   esac
+
+  # HPCRUN_ROOT names the clone, and the clone has a profile per cluster: from
+  # outside any checkout, with a Derecho copy in ~/.config, each cluster still
+  # gets its own profile.  This is what lets one home directory shared by
+  # Derecho and Casper need no copy at all.
+  for c in derecho casper; do
+      got="$(cd "${TMP}" && HPCRUN_ROOT="${HERE}" python3 -c 'import sys
+sys.path.insert(0, sys.argv[1])
+from benchlib import cluster
+print(cluster.find_conf(sys.argv[2], start="."))' "${HERE}" "${c}" 2>&1)"
+      case "${got}" in
+          "$(cd "${HERE}/.." && pwd)/sites/ncar/${c}/cluster.sh")
+              echo "  ok    HPCRUN_ROOT finds the clone's ${c} profile from outside it" ;;
+          *) echo "  FAIL  HPCRUN_ROOT did not find the clone's ${c} profile"; echo "        ${got}" ;;
+      esac
+  done
+
+  # And the PBS scripts' own search, which must agree with the host's.
+  for pbs in ../sites/ncar/derecho/App_benchmarker_derecho.pbs \
+             ../sites/ncar/derecho/Placement_derecho.pbs; do
+      fn="$(sed -n '/^_profile_cluster ()/p; /^_find_cluster_conf ()/,/^}/p' "${pbs}")"
+      got="$(cd "${TMP}" && HPCRUN_ROOT="${HERE}" bash -c "${fn}"'
+          _find_cluster_conf "$1" casper' _ "${TMP}" 2>&1)"
+      case "${got}" in
+          "$(cd "${HERE}/.." && pwd)/sites/ncar/casper/cluster.sh")
+              echo "  ok    $(basename "${pbs}") finds a profile through HPCRUN_ROOT" ;;
+          *) echo "  FAIL  $(basename "${pbs}") ignored HPCRUN_ROOT"; echo "        ${got:-<nothing>}" ;;
+      esac
+  done
 ) | tee "${TMP}/search.out"
 pass=$((pass + $(grep -c '^  ok ' "${TMP}/search.out")))
 fail=$((fail + $(grep -c '^  FAIL' "${TMP}/search.out")))

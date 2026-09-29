@@ -135,9 +135,10 @@ def profile_cluster(conf):
 
 
 def find_conf(name, start=None):
-    """The site profile, looked for the same three places a PBS script looks.
+    """The site profile, looked for in the same places a PBS script looks.
 
-    $HPCRUN_SITE_CONF, then ~/.config/hpcrun/cluster.sh, then
+    $HPCRUN_SITE_CONF, then sites/*/<cluster>/cluster.sh in the clone
+    $HPCRUN_ROOT names, then ~/.config/hpcrun/cluster.sh, then
     sites/*/<cluster>/cluster.sh walking up from `start`.  Keeping the order
     identical to the one inlined in the PBS scripts is the point: the host and
     the job must never disagree about which profile is in force.
@@ -156,14 +157,17 @@ def find_conf(name, start=None):
     if named and os.path.isfile(named):
         return named
 
+    # The clone named outright.  It holds a profile for every cluster, so one
+    # HPCRUN_ROOT serves every machine that shares a home directory.
+    clone = os.environ.get("HPCRUN_ROOT")
+    if clone:
+        for candidate in sorted(glob.glob(os.path.join(
+                clone, os.pardir, "sites", "*", name, "cluster.sh"))):
+            return os.path.normpath(candidate)
+
     home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
         os.path.expanduser("~"), ".config")
-    candidate = os.path.join(home, "hpcdev", "cluster.sh")
-    if not os.path.isfile(candidate):
-        # The name this file had before phase 4.5.  Still honoured, because it
-        # is a copy in somebody's home directory that no rename here can reach.
-        legacy = os.path.join(home, "hpcdev", "site.sh")
-        candidate = legacy if os.path.isfile(legacy) else candidate
+    candidate = os.path.join(home, "hpcrun", "cluster.sh")
     if os.path.isfile(candidate) and profile_cluster(candidate) in (name, ""):
         return candidate
 
@@ -183,7 +187,9 @@ def find_conf(name, start=None):
     raise BenchError(
         "cannot find a site profile for %r" % name, EXIT_ERROR,
         ["looked for: $HPCRUN_SITE_CONF, "
-         "${XDG_CONFIG_HOME:-$HOME/.config}/hpcdev/cluster.sh,",
+         "sites/*/%s/cluster.sh in $HPCRUN_ROOT/.. (HPCRUN_ROOT=%s)," % (
+             name, clone or "unset"),
+         "            ${XDG_CONFIG_HOME:-$HOME/.config}/hpcrun/cluster.sh,",
          "            sites/*/%s/cluster.sh above %s" % (name, start or os.getcwd()),
          "            and sites/*/%s/cluster.sh above %s" % (name, from_here),
          "a ~/.config copy for a DIFFERENT cluster is skipped, not used"])
