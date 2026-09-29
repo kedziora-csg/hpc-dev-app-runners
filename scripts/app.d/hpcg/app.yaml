@@ -16,6 +16,7 @@ requires:
 
 figures_of_merit:
   gflops: {units: GFLOP/s, better: higher}
+  app_time_s: {units: s, better: lower}
   wall_s: {units: s, better: lower, provided_by: runner}
 
 success_criteria:

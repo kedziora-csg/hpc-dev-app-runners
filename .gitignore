@@ -27,3 +27,7 @@ RunOSU
 /ldd_*.txt
 /placement_*.out
 /run_*/
+
+# Results copied back from Derecho for reading here.
+/scratch-hpcrun-test/
+/derecho-hpcg/
