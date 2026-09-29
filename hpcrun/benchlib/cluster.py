@@ -58,7 +58,7 @@ class Cluster(object):
         self.results_root = values.get("HPCRUN_RESULTS_ROOT", "")
         self.scratch = values.get("HPCRUN_SCRATCH", "")
         self.bench_root = values.get("HPCRUN_ROOT", "")
-        # The delivery step's Makefile, beside the runner in the same clone.
+        # The delivery step, beside the runner in the same clone.
         self.sif_dir = (os.path.normpath(os.path.join(self.bench_root, "..", "sif"))
                         if self.bench_root else "")
         self.scheduler = values.get("HPCRUN_SCHEDULER") or ""
@@ -92,27 +92,28 @@ class Cluster(object):
     def image_path(self, sif):
         return os.path.join(self.image_dir, sif)
 
-    def make_images(self, target):
-        """Ask sif/Makefile for a named image set.
+    def image_set(self, name):
+        """One of the image sets the cluster's description states.
 
-        The Makefile is where "the six" is defined -- which OS, which compilers,
-        which MPIs, and why -- so the experiment names the target rather than
-        listing files that would drift out of step with it.
+        The `images:` block of sites/<site>/<cluster>.yaml is where "the six" is
+        defined -- which OS, which compilers, which MPI families, and why -- so
+        an experiment names a set rather than listing files that would drift
+        out of step with it.  sif/Makefile builds the same sets by the same
+        names, through the images.mk sitegen writes from that block.  Read from
+        the clone this profile points at, so the host and the Makefile beside
+        it cannot disagree.
         """
-        try:
-            out = subprocess.check_output(
-                ["make", "--no-print-directory", "echo-" + target],
-                cwd=self.sif_dir, stderr=subprocess.PIPE)
-        except (OSError, subprocess.CalledProcessError) as exc:
+        from . import sitefile
+        start = os.path.dirname(self.bench_root) if self.bench_root else None
+        sets = sitefile.image_sets(sitefile.load(self.name, start))
+        if name not in sets:
             raise BenchError(
-                "sif/Makefile has no image list for %r" % target,
-                EXIT_ERROR,
-                ["ran: make echo-%s in %s" % (target, self.sif_dir),
-                 "     %s" % exc,
-                 "images.from_make must name a Makefile target that has a "
-                 "matching echo- rule (derecho, derecho-hpcg, ...);",
-                 "or list the .sif files explicitly with images.list"])
-        return out.decode().split()
+                "cluster %s has no image set %r" % (self.name, name), EXIT_ERROR,
+                ["sets it states: %s" % (", ".join(sorted(sets)) or
+                                         "none -- its YAML has no images: block"),
+                 "images.from_make names a set from the images: block of the",
+                 "cluster's description; or list the .sif files with images.list"])
+        return list(sets[name])
 
 
 def _int(text):

@@ -61,6 +61,15 @@ scheduler:
   queue: casper
   walltime_max: "24:00:00"
 
+# The openmpi half of Derecho's set, and nothing else: Casper's Genoa runs
+# Derecho's Zen 3 builds, and with no mpich family under mpi: below, an mpich
+# image is refused here rather than built for a cluster that cannot run it.
+images:
+  os: leap
+  compilers: [oneapi, gcc14, nvhpc]
+  mpi: [openmpi]
+  apps: [hpcg]
+
 modules:
   # Beyond the site bootstrap.  Casper is a GPU cluster and its jobs want the
   # CUDA runtime; Derecho's CPU nodes do not.
@@ -110,6 +119,9 @@ mpi:
   openmpi:
     launcher: openmpi
     overlay: host-openmpi
+    # Set by NCAR's openmpi module, and named in lib_dirs above for the same
+    # reason: expanded only once the module is loaded.
+    root: '${NCAR_ROOT_OPENMPI}'
     env:
       UCX_POSIX_USE_PROC_LINK: n
     notes: |

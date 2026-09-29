@@ -3,7 +3,8 @@
 
     sitegen                      check every cluster described in this checkout
     sitegen derecho              print what the block would be
-    sitegen derecho --write      write it into sites/ncar/derecho/cluster.sh
+    sitegen derecho --write      write it into sites/<site>/derecho/cluster.sh,
+                                 and the image sets into images.mk beside it
     sitegen --check              exit 1 if any cluster.sh block is stale
     sitegen --all --write        regenerate every one
 
@@ -22,6 +23,13 @@ where results go, which scratch -- is above the marker and is never touched.
 That split is not arbitrary: those four are properties of the OPERATOR, and
 everything this tool writes is a property of the MACHINE.  One of them belongs
 in version control and the other does not.
+
+IMAGES.MK
+
+A cluster's images: block becomes sites/<site>/<cluster>/images.mk, which
+sif/Makefile includes.  It is generated whole -- nothing in it belongs to the
+operator -- and checked by the same --check, so the images a cluster says it
+runs and the images `make <cluster>` builds cannot drift apart.
 
 WHAT --check IS FOR
 
@@ -64,6 +72,11 @@ def target(sf):
     return os.path.join(os.path.dirname(sf.path), sf.name, "cluster.sh")
 
 
+def images_target(sf):
+    """sites/<site>/<cluster>/images.mk, beside cluster.sh."""
+    return os.path.join(os.path.dirname(sf.path), sf.name, "images.mk")
+
+
 def block_for(name):
     sf = sitefile.load(name)
     if sf.name != name:
@@ -104,6 +117,13 @@ def check_one(name, verbose=True):
         print("  FAIL  %s: cluster.sh is stale -- run sitegen %s --write"
               % (name, name), file=sys.stderr)
         return 1
+    mk = images_target(sf)
+    have = io.open(mk, encoding="utf-8").read() if os.path.isfile(mk) else None
+    if have != sitefile.render_images_mk(sf):
+        print("  FAIL  %s: %s is %s -- run sitegen %s --write"
+              % (name, os.path.relpath(mk, SITES_DIR),
+                 "missing" if have is None else "stale", name), file=sys.stderr)
+        return 1
     if verbose:
         note = "" if sf.verified else "   (UNVERIFIED)"
         print("  ok    %s: cluster.sh matches %s%s"
@@ -122,11 +142,19 @@ def write_one(name):
     new = sitefile.splice(text, block)
     if new == text:
         print("%s already current" % os.path.relpath(path, SITES_DIR))
-        return EXIT_OK
-    io.open(path, "w", encoding="utf-8").write(new)
-    os.chmod(path, 0o755)
-    print("wrote the generated block of %s (%d lines)"
-          % (os.path.relpath(path, SITES_DIR), block.count("\n")))
+    else:
+        io.open(path, "w", encoding="utf-8").write(new)
+        os.chmod(path, 0o755)
+        print("wrote the generated block of %s (%d lines)"
+              % (os.path.relpath(path, SITES_DIR), block.count("\n")))
+
+    mk, mk_text = images_target(sf), sitefile.render_images_mk(sf)
+    if os.path.isfile(mk) and io.open(mk, encoding="utf-8").read() == mk_text:
+        print("%s already current" % os.path.relpath(mk, SITES_DIR))
+    else:
+        io.open(mk, "w", encoding="utf-8").write(mk_text)
+        print("wrote %s (%d image set(s))"
+              % (os.path.relpath(mk, SITES_DIR), len(sitefile.image_sets(sf))))
     if not sf.verified:
         print("  note: %s is marked verified: false -- nothing in it"
               % os.path.relpath(sf.path, SITES_DIR))

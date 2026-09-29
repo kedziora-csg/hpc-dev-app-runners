@@ -89,6 +89,15 @@ This automated flow will:
 3. Call `apptainer build` using the corresponding Docker image hosted on the container registry.
 4. Set up an executable shortcut under `sif/bin/` automatically mapping to [sif/wrap_apptainer.sh](../../sif/wrap_apptainer.sh) for execution.
 
+To build the whole set a cluster runs, name the cluster: `make derecho` and
+`make derecho-hpcg` build Derecho's six base and six HPCG images, `make casper`
+and `make casper-hpcg` Casper's three.  Each set is stated once, in the
+`images:` block of [derecho.yaml](derecho.yaml) or [casper.yaml](casper.yaml),
+as an OS, a list of compilers and a list of MPI families; `hpcrun/sitegen
+--write` turns it into the `images.mk` beside that cluster's `cluster.sh`, which
+`sif/Makefile` includes.  A compiler with no host module, or an MPI family the
+cluster cannot host, is refused there rather than built.
+
 ---
 
 ## 4. How to Test Your Containers on Derecho and Casper

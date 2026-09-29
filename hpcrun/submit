@@ -131,7 +131,7 @@ def main():
         print("error: these .sif images do not exist:", file=sys.stderr)
         for result in missing:
             print("    %s" % result.detail, file=sys.stderr)
-        target = (exp.data["images"].get("from_make") or "derecho")
+        target = (exp.data["images"].get("from_make") or exp.cluster.name)
         print("  build them with:  cd %s && make %s"
               % (exp.cluster.sif_dir, target), file=sys.stderr)
         return EXIT_IMAGE

@@ -230,6 +230,29 @@ want "regenerating leaves the hand-edited half alone" "${before}" "${after}"
 ./sitegen --check >/dev/null 2>&1
 want "regenerating is idempotent" 0 "$?"
 
+# images.mk is generated whole from the images: block, and a hand edit to it is
+# exactly the drift it exists to prevent.
+cp ../sites/ncar/casper/images.mk "${TMP}/images.mk.keep"
+echo '# a hand edit' >> ../sites/ncar/casper/images.mk
+./sitegen --check >/dev/null 2>&1
+want "a hand-edited images.mk fails --check" 1 "$?"
+cp "${TMP}/images.mk.keep" ../sites/ncar/casper/images.mk
+
+# The six, in the order the Makefile listed them by hand before 4.7c, so the
+# jobs of an existing sweep keep their order.
+want "derecho's base set is the six, mpich first" \
+    "leap-oneapi-mpich.sif leap-gcc14-mpich.sif leap-nvhpc-mpich.sif leap-oneapi-openmpi.sif leap-gcc14-openmpi.sif leap-nvhpc-openmpi.sif" \
+    "$(cd ../sif && make --no-print-directory echo-derecho)"
+want "casper's hpcg set is the openmpi half" \
+    "leap-oneapi-openmpi-hpcg.sif leap-gcc14-openmpi-hpcg.sif leap-nvhpc-openmpi-hpcg.sif" \
+    "$(cd ../sif && make --no-print-directory echo-casper-hpcg)"
+want "the host reads the same set the Makefile builds" \
+    "$(cd ../sif && make --no-print-directory echo-derecho-hpcg)" \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+print(" ".join(sitefile.image_sets(sitefile.load("derecho"))["derecho-hpcg"]))')"
+
 # Rules the schema cannot state, plus the generator's own refusal to quote a
 # value it cannot safely write.  Each case is a file that is individually
 # well-formed and still describes a machine no job could run on.
@@ -260,9 +283,25 @@ modules:
 node: {cores: 64, smt: 1}
 container: {runtime: apptainer, binds: [/glade]}
 mpi:
-  openmpi: {launcher: openmpi, overlay: host-openmpi}'
+  openmpi: {launcher: openmpi, overlay: host-openmpi, root: "${OMPI_ROOT}"}'
 
 cluster_case "a good site description is accepted" ok "${cluster_base}"
+cluster_case "host-openmpi with no root: is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/, root: "${OMPI_ROOT}"//')"
+
+# The image set is axes, and each axis is checked against what the cluster can
+# host: a compiler with no host module, or an MPI family mpi: does not list, is
+# an image no job there could run.
+cluster_images='images: {os: leap, compilers: [gcc14], mpi: [openmpi], apps: [hpcg]}'
+cluster_case "an image set the cluster can host is accepted" ok \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
+${cluster_images}"
+cluster_case "an image set naming a compiler with no host module is refused" reject \
+    "${cluster_base}
+${cluster_images}"
+cluster_case "an image set naming an MPI family mpi: omits is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
+${cluster_images/openmpi/mpich}"
 cluster_case "an unknown key is config-invalid" reject "${cluster_base}
 bogus: 1"
 cluster_case "a scheduler nobody implemented is refused" reject \
@@ -279,6 +318,20 @@ cluster_case "an unknown MPI family is refused" reject \
     "$(printf '%s\n' "${cluster_base}" | sed 's/  openmpi: {launcher/  intelmpi: {launcher/;s/mpi_map: {openmpi: openmpi}/mpi_map: {intelmpi: impi}/')"
 cluster_case "a description with no cluster: is refused" reject \
     "$(printf '%s\n' "${cluster_base}" | sed '/^cluster: /d')"
+
+# images: in a SITE file would be concatenated with each cluster's, not replaced.
+mkdir -p "${TMP}/desc/sites/ncar"
+printf 'schema: 1\nsite: ncar\nimages: {os: leap, compilers: [gcc14], mpi: [openmpi]}\n' \
+    > "${TMP}/desc/sites/ncar.yaml"
+printf '%s\n' "${cluster_base}" > "${TMP}/desc/sites/ncar/testville.yaml"
+out="$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import BenchError, sitefile
+try:
+    sitefile.load(sys.argv[1]); print("ok")
+except BenchError:
+    print("reject")' "${TMP}/desc/sites/ncar/testville.yaml" 2>&1)"
+want "an image set in a site file is refused" reject "${out}"
 
 # The generator writes into a shell file every job sources, so a value it cannot
 # spell safely is refused rather than quoted.  Quoting arbitrary text correctly

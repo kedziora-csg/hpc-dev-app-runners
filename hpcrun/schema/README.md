@@ -68,7 +68,7 @@ Exactly one of from_make or list.
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
-| `from_make` | string |  | matches `/^[a-z0-9][a-z0-9._-]*$/` | A sif/Makefile target such as derecho-hpcg, asked via its echo-<target> rule. One definition of 'the six' rather than a copy that drifts. |
+| `from_make` | string |  | matches `/^[a-z0-9][a-z0-9._-]*$/` | One of the image sets the cluster's description states in its images: block -- <cluster> for the base images, <cluster>-<app> for each app -- such as derecho-hpcg. sif/Makefile builds the same set under the same name, so there is one definition of 'the six' rather than a copy that drifts. The key keeps its old name until the schema change that brings sub-clusters. |
 | `list` | list of string |  | at least 1 entry |  |
 
 #### `experiment.omp_variants`
@@ -176,6 +176,7 @@ What one cluster provides, stated once and split across two files. sites/<site>.
 | `cluster` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | The cluster: the name an experiment selects with `cluster:`, the directory holding its cluster.sh, and the value recorded in every result row beside the site. Its presence is what distinguishes a cluster file from a site file. |
 | [`container`](#clustercontainer) | object |  | no other keys | How a container is run here. The bind list is site-specific in the strongest sense: apptainer treats a missing bind source as fatal, so binding a filesystem this machine does not have turns 'that mount is absent' into 'the job will not start'. |
 | `description` | string |  |  | What this machine is, for whoever reads a results directory a year from now. Copied into the generated block as a comment. |
+| [`images`](#clusterimages) | object |  | no other keys | The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.from_make names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced. |
 | [`modules`](#clustermodules) | object |  | no other keys | The module environment, which is the one thing every job here must do identically and the thing that was copied into five PBS scripts before this file existed. |
 | [`mpi`](#clustermpi) | object |  | no other keys | One entry per container MPI family this site can host. A family absent here is one this machine cannot run, which the runner reports as such rather than attempting and failing inside the container. |
 | [`node`](#clusternode) | object |  | no other keys | What one compute node has. FALLBACKS, not measurements: the job probes lscpu and topology.json carries its answer. These are what can be known before there is a node to ask, which is the only moment an illegal ranks x threads is still cheap to reject. |
@@ -204,6 +205,17 @@ host path to in-container path, for a directory that must not land on top of the
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `<name>` | string |  | key matches `/^/[^ ]*$/`, matches `/^/[^ ]*$/` | Where the host path appears inside the container. |
+
+#### `cluster.images`
+
+The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.from_make names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `apps` | list of string |  | no duplicates | Apps built on top of the base set, one set of images each: <os>-<compiler>-<mpi>-<app>.sif, named <cluster>-<app>. |
+| `compilers` | list of string | yes | at least 1 entry, no duplicates | Container compiler tags. Each must be a key of modules.compiler_map: the host MPI that displaces the container's is loaded to match the compiler, so a compiler with no host module is an image no job here can run. |
+| `mpi` | list of `openmpi` \| `mpich` \| `mpich3` | yes | at least 1 entry, no duplicates | Container MPI families. Each must be listed under mpi:, which is what says this cluster can host it -- why Casper's set has no mpich. |
+| `os` | string | yes | matches `/^[a-z][a-z0-9]*$/` | The container OS, the first word of every image name. The one closest to the host's own userspace -- leap for Derecho's SLE 15. |
 
 #### `cluster.modules`
 
@@ -258,6 +270,7 @@ How this site hosts one container MPI family: which mpiexec dialect places its r
 | `launcher` | `pals` \| `openmpi` \| `srun` | yes |  | Which mpiexec dialect emits this family's placement flags. PALS spells procs-per-node -ppn N and binding --cpu-bind core -d D; Open MPI spells the same two things -N N and --map-by ppr:P:node:pe=D --bind-to core. |
 | `notes` | string |  |  | Free text. What was checked, and what would make it stop being true. |
 | `overlay` | `cray-mpich-abi` \| `host-openmpi` \| `none` | yes |  | Which recipe in hpcrun/lib/make_apptainer_launcher.sh swaps the host MPI in. A NAME, not a description: the recipe body encodes reasoning -- which of Cray's two library directories carries the MPICH ABI, why OPAL_PREFIX must be pinned -- and reasoning does not belong in a data file. |
+| `root` | string |  | matches `/^[A-Za-z0-9_./${}-]+$/` | Where the host MPI is installed, for an overlay that binds the whole tree -- host-openmpi, which also pins OPAL_PREFIX to it. Usually `${NAME}` for a variable the MPI module sets, single-quoted in the YAML like a lib_dirs entry, and expanded only once that module is loaded. Required by host-openmpi. |
 
 ###### `cluster.mpi.<name>.env`
 

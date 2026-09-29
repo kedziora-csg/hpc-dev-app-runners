@@ -26,9 +26,10 @@ defaults:
   target_seconds: 60
 
 images:
-  from_make: derecho-hpcg     # ask sif/Makefile -- one definition of "the six"
-  # or use a list of images to sweep, e.g. if you want to run only one of the six
-  # todo: implement site dependent Makefiles
+  # A set from the images: block of sites/ncar/derecho.yaml -- one definition
+  # of "the six", which sif/Makefile builds under the same name.
+  from_make: derecho-hpcg
+  # or list the images to sweep, e.g. to run only some of the six:
   # list: [leap-oneapi-mpich-hpcg.sif, leap-gcc14-mpich-hpcg.sif]
 
 

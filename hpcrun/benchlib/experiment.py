@@ -233,7 +233,7 @@ def image_list(exp):
     images = exp.data["images"]
     if "list" in images:
         return list(images["list"])
-    return exp.cluster.make_images(images["from_make"])
+    return exp.cluster.image_set(images["from_make"])
 
 
 def geometry_problem(exp, placement):

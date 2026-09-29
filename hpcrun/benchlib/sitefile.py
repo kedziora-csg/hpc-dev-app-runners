@@ -192,6 +192,12 @@ def load(name_or_path, start=None):
         raise BenchError("%s has a `cluster:` key" % site_path, EXIT_CONFIG,
                          ["that key is what marks a file as describing ONE",
                           "cluster, so a site file must not carry it"])
+    if "images" in site:
+        raise BenchError("%s has an `images:` key" % site_path, EXIT_CONFIG,
+                         ["which images a machine runs is a property of the",
+                          "cluster, and a site's list would be concatenated",
+                          "with each cluster's rather than replaced by it;",
+                          "state it in each sites/%s/<cluster>.yaml" % site_name])
 
     data = merge(site, cluster)
     problems = complete_checks(data, path, site_path)
@@ -338,6 +344,29 @@ def cross_checks(data):
         if family not in FAMILIES:
             out.append("unknown MPI family %r (expected %s)"
                        % (family, ", ".join(FAMILIES)))
+
+    for family, spec in sorted(mpi.items()):
+        if spec.get("overlay") == "host-openmpi" and not spec.get("root"):
+            out.append(
+                "mpi.%s uses the host-openmpi overlay but states no root:. The "
+                "recipe binds the host Open MPI's whole tree and pins OPAL_PREFIX "
+                "to it, so it has to be told where that tree is -- usually "
+                "'${NAME}' for the variable the MPI module sets." % family)
+
+    images = data.get("images") or {}
+    compiler_map = (data.get("modules") or {}).get("compiler_map") or {}
+    for compiler in images.get("compilers") or []:
+        if compiler not in compiler_map:
+            out.append(
+                "images.compilers names %s, which has no modules.compiler_map "
+                "entry. The host MPI is loaded to match the container's compiler, "
+                "so no job here could run that image." % compiler)
+    for family in images.get("mpi") or []:
+        if family not in mpi:
+            out.append(
+                "images.mpi names %s, which mpi: does not list. This cluster has "
+                "no way to give such an image the host's MPI, so building it "
+                "would produce .sif files no job here could use." % family)
 
     select = (data.get("node") or {}).get("select") or ""
     for clause in select.split(":"):
@@ -595,6 +624,13 @@ def render(sf, source_rel=None):
                          "MPI in.  A name, not a description: the recipe body encodes\n"
                          "reasoning, and reasoning does not belong in a data file.")
     out.append("")
+    out += _case("bench_site_mpi_root",
+                 dict((f, s["root"]) for f, s in mpi.items() if s.get("root")),
+                 FAMILIES,
+                 comment="Where the host MPI is installed, for an overlay that binds its whole\n"
+                         "tree.  Literal text: a ${NAME} in it is expanded by the recipe, once\n"
+                         "the MPI module that sets NAME has been loaded.")
+    out.append("")
     out += _case("bench_site_mpi_env",
                  dict((f, ["%s=%s" % (k, v)
                            for k, v in sorted((s.get("env") or {}).items())])
@@ -634,6 +670,73 @@ def render(sf, source_rel=None):
     if present:
         out.append("export " + " ".join(present))
     out.append(END)
+    return "\n".join(out) + "\n"
+
+
+#-------------------------------------------------------------------------------
+# Image sets, and the images.mk that hands them to sif/Makefile
+#-------------------------------------------------------------------------------
+
+def image_sets(sf):
+    """{set name: [.sif, ...]}, in the order a sweep should run them.
+
+    `<cluster>` is the base set, every compiler crossed with every MPI family;
+    `<cluster>-<app>` is the same images with that app layered on.  MPI is the
+    outer loop, so each family's images are adjacent -- which is how the
+    Makefile listed Derecho's six before this was generated.
+    """
+    images = sf.data.get("images")
+    if not images:
+        return {}
+    base = ["%s-%s-%s.sif" % (images["os"], compiler, family)
+            for family in images["mpi"] for compiler in images["compilers"]]
+    sets = {sf.name: base}
+    for app in images.get("apps") or []:
+        sets["%s-%s" % (sf.name, app)] = [i[:-4] + "-" + app + ".sif" for i in base]
+    return sets
+
+
+def render_images_mk(sf, source_rel=None):
+    """sites/<site>/<cluster>/images.mk: the cluster's sets as make variables.
+
+    The whole file is generated; there is no hand-edited half, because nothing
+    about it is a property of the operator.  Its `_site` line is what tells
+    sif/Makefile whose sif_env.sh applies.
+    """
+    source_rel = source_rel or source_label(sf)
+    sets = image_sets(sf)
+    c = sf.name
+    out = ["# images.mk -- %s's image sets, for sif/Makefile." % c,
+           "#",
+           "# Written from %s.  Do not edit: the next" % source_rel,
+           "# `hpcrun/sitegen %s --write` overwrites it, and hpcrun/tests/test_bench.sh" % c,
+           "# fails while it is stale.  Change the YAML instead.",
+           "#",
+           "# Included by sif/Makefile, so `make %s` builds the set below." % c,
+           ""]
+    if not sets:
+        out += ["# %s states no images:, so it has no sets to build." % c, "",
+                "HPCRUN_CLUSTERS += %s" % c,
+                "%s_site := %s" % (c, sf.site)]
+        return "\n".join(out) + "\n"
+
+    out += ["HPCRUN_CLUSTERS += %s" % c,
+            "%s_site := %s" % (c, sf.site),
+            ""]
+    names = [c] + sorted(n for n in sets if n != c)
+    for name in names:
+        var = name.replace("-", "_") + "_images"
+        files = sets[name]
+        out.append("%s := %s" % (var, " \\\n    ".join(files)))
+    out.append("cluster_images += " + " ".join(
+        "$(%s_images)" % n.replace("-", "_") for n in names))
+    out.append("")
+    for name in names:
+        var = name.replace("-", "_") + "_images"
+        out.append("%s: $(%s)" % (name, var))
+        out.append("echo-%s:" % name)
+        out.append("\t@echo \"$(%s)\"" % var)
+    out.append(".PHONY: " + " ".join(names + ["echo-" + n for n in names]))
     return "\n".join(out) + "\n"
 
 

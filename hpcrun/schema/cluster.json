@@ -219,6 +219,55 @@
         }
       }
     },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "compilers",
+        "mpi"
+      ],
+      "description": "The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.from_make names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced.",
+      "properties": {
+        "os": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*$",
+          "description": "The container OS, the first word of every image name. The one closest to the host's own userspace -- leap for Derecho's SLE 15."
+        },
+        "compilers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*$"
+          },
+          "description": "Container compiler tags. Each must be a key of modules.compiler_map: the host MPI that displaces the container's is loaded to match the compiler, so a compiler with no host module is an image no job here can run."
+        },
+        "mpi": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "openmpi",
+              "mpich",
+              "mpich3"
+            ]
+          },
+          "description": "Container MPI families. Each must be listed under mpi:, which is what says this cluster can host it -- why Casper's set has no mpich."
+        },
+        "apps": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "Apps built on top of the base set, one set of images each: <os>-<compiler>-<mpi>-<app>.sif, named <cluster>-<app>."
+        }
+      }
+    },
     "mpi": {
       "type": "object",
       "additionalProperties": false,
@@ -248,6 +297,11 @@
                 "none"
               ],
               "description": "Which recipe in hpcrun/lib/make_apptainer_launcher.sh swaps the host MPI in. A NAME, not a description: the recipe body encodes reasoning -- which of Cray's two library directories carries the MPICH ABI, why OPAL_PREFIX must be pinned -- and reasoning does not belong in a data file."
+            },
+            "root": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_./${}-]+$",
+              "description": "Where the host MPI is installed, for an overlay that binds the whole tree -- host-openmpi, which also pins OPAL_PREFIX to it. Usually `${NAME}` for a variable the MPI module sets, single-quoted in the YAML like a lib_dirs entry, and expanded only once that module is loaded. Required by host-openmpi."
             },
             "env": {
               "type": "object",
