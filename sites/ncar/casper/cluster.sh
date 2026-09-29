@@ -105,25 +105,49 @@ HPCRUN_CLUSTER='casper'
 # The job probes lscpu and topology.json carries THAT answer.  These
 # are what can be known before there is a node to ask, which is when
 # an illegal ranks x threads is still cheap to reject.
-[ -n "${HPCRUN_CORES_PER_NODE+set}" ] || HPCRUN_CORES_PER_NODE='64'
-[ -n "${HPCRUN_SMT+set}" ] || HPCRUN_SMT='2'
-[ -n "${HPCRUN_SOCKETS+set}" ] || HPCRUN_SOCKETS='1'
-[ -n "${HPCRUN_SMT_STRIDE+set}" ] || HPCRUN_SMT_STRIDE='64'
-[ -n "${HPCRUN_CORES_PER_L3+set}" ] || HPCRUN_CORES_PER_L3='8'
-[ -n "${HPCRUN_CORES_PER_NUMA+set}" ] || HPCRUN_CORES_PER_NUMA='64'
-[ -n "${HPCRUN_TOPOLOGY_MODE+set}" ] || HPCRUN_TOPOLOGY_MODE='probe'
-
-# How to ask the scheduler for THIS node type.  Appended to the select
-# directive by hpcrun/submit.  Without it a job takes whatever the pool
-# offers, which is how the first Casper run measured hardware this file
-# did not describe.
-[ -n "${HPCRUN_NODE_SELECT+set}" ] || HPCRUN_NODE_SELECT='cpu_type=genoa'
-
-# What this hardware runs, in report_cpu_features' spelling.  Checked
-# against the app binary once at job start: a mismatch costs one line
-# before the first cell instead of a SIGILL on every rank, three hours
-# into a queue, with no output and exit 132.
-[ -n "${HPCRUN_TARGET_ARCH+set}" ] || HPCRUN_TARGET_ARCH='x86-64-v4'
+#
+# One arm per sub-cluster, chosen by HPCRUN_SUBCLUSTER when this file is
+# sourced.  The chosen arm ASSIGNS its geometry rather than offering it:
+# the sub-cluster is the override, and a value inherited from a shell
+# that sourced this file for a different node type would describe the
+# wrong hardware.  Keys an arm does not state are unset, for the same
+# reason.  An unknown name leaves no geometry at all, which every
+# consumer refuses by name.
+HPCRUN_SUBCLUSTERS='htc-cascadelake htc-genoa'
+[ -n "${HPCRUN_SUBCLUSTER:-}" ] || HPCRUN_SUBCLUSTER='htc-genoa'
+case "${HPCRUN_SUBCLUSTER}" in
+    htc-cascadelake)
+        # High-throughput Intel Xeon Gold 6240 (Cascade Lake): 2 x 18 cores, SMT on
+        HPCRUN_CORES_PER_NODE='36'
+        HPCRUN_SMT='2'
+        HPCRUN_SOCKETS='2'
+        HPCRUN_SMT_STRIDE='36'
+        HPCRUN_CORES_PER_L3='18'
+        HPCRUN_CORES_PER_NUMA='18'
+        HPCRUN_NCPUS='34'
+        HPCRUN_TOPOLOGY_MODE='probe'
+        HPCRUN_NODE_SELECT='cpu_type=cascadelake'
+        HPCRUN_TARGET_ARCH='x86-64-v4'
+        HPCRUN_SUBCLUSTER_VERIFIED='1'
+        ;;
+    htc-genoa)
+        # High-throughput AMD EPYC 9554 (Genoa): 64 cores, one socket, SMT on
+        HPCRUN_CORES_PER_NODE='64'
+        HPCRUN_SMT='2'
+        HPCRUN_SOCKETS='1'
+        HPCRUN_SMT_STRIDE='64'
+        HPCRUN_CORES_PER_L3='8'
+        HPCRUN_CORES_PER_NUMA='64'
+        HPCRUN_NCPUS='62'
+        HPCRUN_TOPOLOGY_MODE='probe'
+        HPCRUN_NODE_SELECT='cpu_type=genoa'
+        HPCRUN_TARGET_ARCH='x86-64-v4'
+        HPCRUN_SUBCLUSTER_VERIFIED='1'
+        ;;
+    *)
+        unset HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_NCPUS HPCRUN_TOPOLOGY_MODE HPCRUN_NODE_SELECT HPCRUN_TARGET_ARCH HPCRUN_SUBCLUSTER_VERIFIED
+        ;;
+esac
 
 #-- the container --------------------------------------------------------
 [ -n "${HPCRUN_CONTAINER_RUNTIME+set}" ] || HPCRUN_CONTAINER_RUNTIME='apptainer'
@@ -228,7 +252,8 @@ export HPCRUN_SITE HPCRUN_CLUSTER HPCRUN_SCHEDULER HPCRUN_SUBMIT HPCRUN_QUEUE
 export HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_TOPOLOGY_MODE
 export HPCRUN_CONTAINER_RUNTIME HPCRUN_BINDS HPCRUN_BINDS_IF_PRESENT
 export HPCRUN_BIND_MAP HPCRUN_LIB_DIRS
-export HPCRUN_WALLTIME_MAX HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_TARGET_ARCH HPCRUN_NODE_SELECT
+export HPCRUN_SUBCLUSTERS HPCRUN_SUBCLUSTER HPCRUN_SUBCLUSTER_VERIFIED
+export HPCRUN_WALLTIME_MAX HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_NCPUS HPCRUN_TARGET_ARCH HPCRUN_NODE_SELECT
 # <<< END GENERATED
 
 

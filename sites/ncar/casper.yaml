@@ -21,7 +21,7 @@
 #     crhtc55  36 cores  2 sockets  18 cores/L3  2 NUMA   Xeon Gold 6240
 #     crhtc73  64 cores  1 socket    8 cores/L3  1 NUMA   EPYC 9554
 #
-# Describing both at once is what the subclusters: map is for.
+# Both are described now, as the two entries of subclusters: below.
 #
 # WHAT THE FIRST RUN PROVED, AND WHAT IT DID NOT
 #
@@ -79,26 +79,58 @@ modules:
   mpi_map:
     openmpi: openmpi
 
-# Measured on crhtc73 with hpcrun/lib/probe_topology.sh during the first run,
-# 2026-09-03.  Still fallbacks in the sense that matters -- the job re-probes and
-# topology.json carries that answer -- but these are no longer guesses, and the
-# previous guesses being wrong is what made this file describe the right nodes.
-node:
-  cores: 64
-  smt: 2
-  sockets: 1              # single-socket Genoa, unlike the Cascade Lake nodes
-  smt_stride: 64          # block layout: sibling of CPU c is c + 64
-  cores_per_l3: 8         # one CCX, as on Derecho's Milan -- not the socket
-  cores_per_numa: 64      # one NUMA domain: the whole node
-  # Genoa has AVX-512.  So does Cascade Lake, which is why this value agreed
-  # with the run while describing the wrong nodes -- see the header.
-  target_arch: x86-64-v4
-  # How to ask for these nodes.  Verified working in a select line, 2026-09-03.
-  # cpu_type only, not the node's Qlist tag: those name EXECUTION queues, and on
-  # Casper a job is submitted to the `casper` routing queue which assigns one.
-  # Selecting on Qlist would fight the router rather than direct it.
-  select: cpu_type=genoa
-  topology: probe
+# Two of the high-throughput pool's node types, which is all that pool holds
+# apart from four Skylake nodes.  Each entry states its node in full, because
+# the two share almost nothing: one socket against two, 8 cores per L3 against
+# 18, one NUMA domain against two.  An experiment picks one with `subcluster:`,
+# and one that names none gets the default.
+#
+# ncpus is what PBS hands out, from `pbsnodes -a` on 2026-09-29: two cores of
+# every htc node are held back for the operating system, so Genoa offers 62 of
+# its 64 and Cascade Lake 34 of its 36.  The geometry still reasons in hardware
+# cores; ncpus is what a request may ask for, and asking for more queues
+# forever rather than failing.
+#
+# select carries cpu_type only, not the node's Qlist tag: those name EXECUTION
+# queues, and a Casper job is submitted to the `casper` routing queue, which
+# assigns one.  Selecting on Qlist would fight the router rather than direct it.
+default_subcluster: htc-genoa
+
+subclusters:
+  htc-genoa:
+    description: "High-throughput AMD EPYC 9554 (Genoa): 64 cores, one socket, SMT on"
+    # Measured on crhtc73 with hpcrun/lib/probe_topology.sh during the first
+    # run, 2026-09-03, and run on by every Casper job since.
+    node:
+      cores: 64
+      smt: 2
+      ncpus: 62
+      sockets: 1              # single-socket Genoa, unlike the Cascade Lake nodes
+      smt_stride: 64          # block layout: sibling of CPU c is c + 64
+      cores_per_l3: 8         # one CCX, as on Derecho's Milan -- not the socket
+      cores_per_numa: 64      # one NUMA domain: the whole node
+      # Genoa has AVX-512.  So does Cascade Lake, which is why this value agreed
+      # with the first run while the file described the wrong nodes.
+      target_arch: x86-64-v4
+      select: cpu_type=genoa
+      topology: probe
+
+  htc-cascadelake:
+    description: "High-throughput Intel Xeon Gold 6240 (Cascade Lake): 2 x 18 cores, SMT on"
+    # Measured on crhtc53 with probe_topology.sh, 2026-09-29, and confirmed the
+    # same day by the first HPCG job here (6083942, crhtc53 and crhtc62): the
+    # job's own probe agreed with every value below.
+    node:
+      cores: 36
+      smt: 2
+      ncpus: 34
+      sockets: 2
+      smt_stride: 36
+      cores_per_l3: 18        # one L3 per socket
+      cores_per_numa: 18      # one NUMA domain per socket
+      target_arch: x86-64-v4
+      select: cpu_type=cascadelake
+      topology: probe
 
 container:
   # Added to the site's /glade and /local_scratch.  /proc is bound here and not

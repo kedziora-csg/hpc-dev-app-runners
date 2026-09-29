@@ -21,11 +21,12 @@ What to sweep: which images, which apps, which rank/thread decompositions, and h
 | [`apps`](#experimentapps) | list of object | yes | at least 1 entry |  |
 | `cluster` | string | yes | matches `/^[a-z][a-z0-9_-]*$/` | The machine this runs on. Names sites/<site>/<cluster>.yaml, which supplies the queue, the node geometry and the host-MPI recipe, and sites/<site>/<cluster>/cluster.sh, which supplies the paths and the module bootstrap. It is the CLUSTER, not the site: NCAR is the site, and Derecho and Casper are two clusters of it. |
 | [`defaults`](#experimentdefaults) | object |  | no other keys | Job-level settings. Anything an app does not override itself. |
-| [`images`](#experimentimages) | object | yes | at least 1 key, no other keys | Exactly one of from_make or list. |
+| [`images`](#experimentimages) | object | yes | at least 1 key, no other keys | Exactly one of set or list. |
 | [`omp_variants`](#experimentomp_variants) | list of object |  | at least 1 entry | Defaults to one variant. Crossing two doubles every sweep, and on HPCG the difference measured 2026-08-19 was minor -- opt in per experiment instead. |
 | [`placements`](#experimentplacements) | list of object | yes | at least 1 entry | A placement states only what it ASKS for. What it should get -- L3, NUMA and socket footprint -- follows from the topology probed at job start, so there is no expectation field for a checker to assert against. |
 | [`profiles`](#experimentprofiles) | object |  | no other keys | Named single cells -- the answer a sweep produced. hpcrun/submit --profile <name> runs only that. hpcrun/collect --emit-profile generates one from results, so the benchmark's output is the production configuration rather than something transcribed by hand. |
-| `schema` | `1` | yes |  | Format version of this file. Bumped only for a change that an older hpcrun/submit would misread. |
+| `schema` | `2` | yes |  | Format version of this file. 2 since the sub-cluster change, which renamed images.from_make to images.set and added subcluster:; a version-1 file is refused with what to change. Bumped only for a change that an older hpcrun/submit would misread. |
+| `subcluster` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | Which node type of the cluster to run on, for a cluster whose description has subclusters:. Omitted, the description's default_subcluster applies. --subcluster overrides it. Naming one on a cluster of a single node type is refused, as is a name the cluster does not have. |
 | [`sweep`](#experimentsweep) | object | yes | no other keys |  |
 
 #### `experiment.apps`
@@ -64,12 +65,12 @@ Job-level settings. Anything an app does not override itself.
 
 #### `experiment.images`
 
-Exactly one of from_make or list.
+Exactly one of set or list.
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
-| `from_make` | string |  | matches `/^[a-z0-9][a-z0-9._-]*$/` | One of the image sets the cluster's description states in its images: block -- <cluster> for the base images, <cluster>-<app> for each app -- such as derecho-hpcg. sif/Makefile builds the same set under the same name, so there is one definition of 'the six' rather than a copy that drifts. The key keeps its old name until the schema change that brings sub-clusters. |
 | `list` | list of string |  | at least 1 entry |  |
+| `set` | string |  | matches `/^[a-z0-9][a-z0-9._-]*$/` | One of the image sets the cluster's description states in its images: block -- <cluster> for the base images, <cluster>-<app> for each app -- such as derecho-hpcg. sif/Makefile builds the same set under the same name, so there is one definition of 'the six' rather than a copy that drifts. |
 
 #### `experiment.omp_variants`
 
@@ -175,15 +176,16 @@ What one cluster provides, stated once and split across two files. sites/<site>.
 | --- | --- | --- | --- | --- |
 | `cluster` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | The cluster: the name an experiment selects with `cluster:`, the directory holding its cluster.sh, and the value recorded in every result row beside the site. Its presence is what distinguishes a cluster file from a site file. |
 | [`container`](#clustercontainer) | object |  | no other keys | How a container is run here. The bind list is site-specific in the strongest sense: apptainer treats a missing bind source as fatal, so binding a filesystem this machine does not have turns 'that mount is absent' into 'the job will not start'. |
+| `default_subcluster` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | The sub-cluster used when an experiment names none. Required once subclusters: exists, and must be one of its keys: which node type a job lands on is a decision, so it is written down rather than taken from whichever entry comes first. |
 | `description` | string |  |  | What this machine is, for whoever reads a results directory a year from now. Copied into the generated block as a comment. |
-| [`images`](#clusterimages) | object |  | no other keys | The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.from_make names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced. |
+| [`images`](#clusterimages) | object |  | no other keys | The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.set names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced. |
 | [`modules`](#clustermodules) | object |  | no other keys | The module environment, which is the one thing every job here must do identically and the thing that was copied into five PBS scripts before this file existed. |
 | [`mpi`](#clustermpi) | object |  | no other keys | One entry per container MPI family this site can host. A family absent here is one this machine cannot run, which the runner reports as such rather than attempting and failing inside the container. |
 | [`node`](#clusternode) | object |  | no other keys | What one compute node has. FALLBACKS, not measurements: the job probes lscpu and topology.json carries its answer. These are what can be known before there is a node to ask, which is the only moment an illegal ranks x threads is still cheap to reject. |
 | [`scheduler`](#clusterscheduler) | object |  | no other keys | Which batch system, and how a job reaches it. |
 | `schema` | `1` |  |  | Format version of this file. Bumped only for a change that an older hpcrun/sitegen would misread. |
 | `site` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | The site this belongs to. In a site file it names the file itself; in a cluster file it names the parent, and is what sitegen merges with. |
-| [`subclusters`](#clustersubclusters) | object |  | at least 1 key, no other keys | Node types within this cluster, each overriding `node:`. Casper has at least seven processor types and Derecho's GPU partition differs from its CPU nodes, so one node: block cannot describe either machine. An experiment names which one it wants. Not yet read by anything -- the key is declared so a file may be written against it. |
+| [`subclusters`](#clustersubclusters) | object |  | at least 1 key, no other keys | Node types within this cluster. Casper has seven processor types and Derecho's GPU partition differs from its CPU nodes, so one node: block cannot describe either machine. Each entry states its node: IN FULL -- nothing is inherited from another entry, because a geometry key a node type forgot to state would otherwise silently take a different node's value -- and a cluster with sub-clusters has no top-level node: at all. default_subcluster names the one used when an experiment names none. hpcrun/sitegen emits every entry into cluster.sh, and HPCRUN_SUBCLUSTER, set when the profile is sourced, chooses between them. |
 | `verified` | boolean |  | default `true` | False means nothing here has been confirmed by a job that actually ran. hpcrun/validate says so out loud rather than letting an untested description pass for a measured one. |
 
 #### `cluster.container`
@@ -208,7 +210,7 @@ host path to in-container path, for a directory that must not land on top of the
 
 #### `cluster.images`
 
-The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.from_make names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced.
+The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.set names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced.
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
@@ -289,6 +291,7 @@ What one compute node has. FALLBACKS, not measurements: the job probes lscpu and
 | `cores` | integer |  | at least 1 | Physical cores per node. |
 | `cores_per_l3` | integer |  | at least 1 | Cores sharing one last-level cache -- a CCD on AMD. Never inferred from a placement report: a run that does not fill a node touches only part of each CCD and would under-count, then declare the result optimal. |
 | `cores_per_numa` | integer |  | at least 1 | Cores in one NUMA domain. On a machine with NPS4 this is a quarter of a socket, not the whole one. |
+| `ncpus` | integer |  | at least 1 | CPUs per node the scheduler will actually hand out -- PBS's resources_available.ncpus -- which can be fewer than the hardware has: Casper's high-throughput Genoa nodes have 64 cores and offer 62, its Cascade Lake nodes 36 and offer 34. The geometry check still reasons in hardware cores; this is what a request may ask for. An exclusive job asks for exactly this many, and hpcrun/validate refuses a cell that needs more, because a request no node can satisfy does not fail -- it queues forever. Omit it where the two are equal. |
 | `select` | string |  | matches `/^[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+(:[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+)*$/` | Scheduler resource clauses that ask for THIS node type, appended to the select directive -- on Casper, cpu_type=genoa. Without it a description says what the hardware is but not how to obtain it, which is worse than saying nothing because it looks authoritative: the first Casper run named no processor and landed on a node type the file did not describe. Use only resources that steer node CHOICE. A node's queue-eligibility tag is not one of them: on a system with a routing queue, selecting on it fights the router rather than directing it. |
 | `smt` | integer |  | at least 1 | Hardware threads per physical core. |
 | `smt_stride` | integer |  | at least 1 | Under a block SMT layout, the sibling of CPU c is c + stride. Equal to cores on a machine that enumerates all first siblings before any second. |
@@ -310,7 +313,7 @@ Which batch system, and how a job reaches it.
 
 #### `cluster.subclusters`
 
-Node types within this cluster, each overriding `node:`. Casper has at least seven processor types and Derecho's GPU partition differs from its CPU nodes, so one node: block cannot describe either machine. An experiment names which one it wants. Not yet read by anything -- the key is declared so a file may be written against it.
+Node types within this cluster. Casper has seven processor types and Derecho's GPU partition differs from its CPU nodes, so one node: block cannot describe either machine. Each entry states its node: IN FULL -- nothing is inherited from another entry, because a geometry key a node type forgot to state would otherwise silently take a different node's value -- and a cluster with sub-clusters has no top-level node: at all. default_subcluster names the one used when an experiment names none. hpcrun/sitegen emits every entry into cluster.sh, and HPCRUN_SUBCLUSTER, set when the profile is sourced, chooses between them.
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
@@ -323,7 +326,8 @@ One node type: a description of it, and its own node: block.
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `description` | string |  |  | What this node type is. |
-| [`node`](#clustersubclustersnamenode) | object |  | no other keys | What one compute node has. FALLBACKS, not measurements: the job probes lscpu and topology.json carries its answer. These are what can be known before there is a node to ask, which is the only moment an illegal ranks x threads is still cheap to reject. |
+| [`node`](#clustersubclustersnamenode) | object | yes | no other keys | What one compute node has. FALLBACKS, not measurements: the job probes lscpu and topology.json carries its answer. These are what can be known before there is a node to ask, which is the only moment an illegal ranks x threads is still cheap to reject. |
+| `verified` | boolean |  | default `true` | False means no job has yet run on this node type. hpcrun/validate says so, as it does for an unverified cluster. |
 
 ###### `cluster.subclusters.<name>.node`
 
@@ -334,6 +338,7 @@ What one compute node has. FALLBACKS, not measurements: the job probes lscpu and
 | `cores` | integer | yes | at least 1 | Physical cores per node. |
 | `cores_per_l3` | integer |  | at least 1 | Cores sharing one last-level cache -- a CCD on AMD. Never inferred from a placement report: a run that does not fill a node touches only part of each CCD and would under-count, then declare the result optimal. |
 | `cores_per_numa` | integer |  | at least 1 | Cores in one NUMA domain. On a machine with NPS4 this is a quarter of a socket, not the whole one. |
+| `ncpus` | integer |  | at least 1 | CPUs per node the scheduler will actually hand out -- PBS's resources_available.ncpus -- which can be fewer than the hardware has: Casper's high-throughput Genoa nodes have 64 cores and offer 62, its Cascade Lake nodes 36 and offer 34. The geometry check still reasons in hardware cores; this is what a request may ask for. An exclusive job asks for exactly this many, and hpcrun/validate refuses a cell that needs more, because a request no node can satisfy does not fail -- it queues forever. Omit it where the two are equal. |
 | `select` | string |  | matches `/^[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+(:[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+)*$/` | Scheduler resource clauses that ask for THIS node type, appended to the select directive -- on Casper, cpu_type=genoa. Without it a description says what the hardware is but not how to obtain it, which is worse than saying nothing because it looks authoritative: the first Casper run named no processor and landed on a node type the file did not describe. Use only resources that steer node CHOICE. A node's queue-eligibility tag is not one of them: on a system with a routing queue, selecting on it fights the router rather than directing it. |
 | `smt` | integer | yes | at least 1 | Hardware threads per physical core. |
 | `smt_stride` | integer |  | at least 1 | Under a block SMT layout, the sibling of CPU c is c + stride. Equal to cores on a machine that enumerates all first siblings before any second. |

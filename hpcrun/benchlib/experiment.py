@@ -46,6 +46,7 @@ import os
 from . import BenchError, EXIT_CONFIG, EXIT_GEOMETRY
 from . import schema as schema_mod
 from . import cluster as cluster_mod
+from . import jobfile
 from . import yamlish
 
 AXES = ("images", "apps", "placements", "omp_variants")
@@ -155,7 +156,7 @@ def resolve_path(name):
                      ["    " + os.path.splitext(k)[0] for k in known])
 
 
-def load(name, cluster_name=None, start=None):
+def load(name, cluster_name=None, start=None, subcluster=None):
     path = resolve_path(name)
     try:
         data = yamlish.load(path)
@@ -164,12 +165,24 @@ def load(name, cluster_name=None, start=None):
     if not isinstance(data, dict):
         raise BenchError("%s is not a mapping" % path, EXIT_CONFIG)
 
+    # Said in words rather than left to the schema, whose answer would be
+    # "must be 2" and one line about an unknown key, neither naming the fix.
+    if data.get("schema") == 1:
+        raise BenchError(
+            "%s is a version-1 experiment" % path, EXIT_CONFIG,
+            ["version 2 renamed one key and added one:",
+             "    schema: 1               ->  schema: 2",
+             "    images: {from_make: X}  ->  images: {set: X}",
+             "    subcluster: <name>      optional, for a cluster with sub-clusters",
+             "nothing else changed"])
+
     problems = schema_mod.validate(data, "experiment")
     if problems:
         raise BenchError("%s fails hpcrun/schema/experiment.json" % path,
                          EXIT_CONFIG, problems)
 
-    cluster = cluster_mod.load(cluster_name or data["cluster"], start)
+    cluster = cluster_mod.load(cluster_name or data["cluster"], start,
+                               subcluster or data.get("subcluster"))
     exp = Experiment(path, data, cluster)
     _check_semantics(exp)
     return exp
@@ -179,8 +192,8 @@ def _check_semantics(exp):
     """The rules a JSON Schema cannot state, because they relate two fields."""
     problems = []
     images = exp.data["images"]
-    if ("from_make" in images) == ("list" in images):
-        problems.append("images: give exactly one of from_make or list")
+    if ("set" in images) == ("list" in images):
+        problems.append("images: give exactly one of set or list")
 
     for axis in exp.per_job:
         if axis not in exp.matrix:
@@ -233,7 +246,7 @@ def image_list(exp):
     images = exp.data["images"]
     if "list" in images:
         return list(images["list"])
-    return exp.cluster.image_set(images["from_make"])
+    return exp.cluster.image_set(images["set"])
 
 
 def geometry_problem(exp, placement):
@@ -296,7 +309,54 @@ def expand(exp, profile=None, images=None):
         key = "-".join([_coord_name("images", image)] +
                        [_coord_name(a, fixed[a]) for a in naming])
         jobs.append(Job(key, image, app, cells, exp.defaults))
+
+    problems = []
+    for job in jobs:
+        problem = request_problem(exp, job)
+        if problem and problem not in problems:
+            problems.append(problem)
+    if problems:
+        raise BenchError("%s asks the scheduler for more than a node offers"
+                         % exp.path, EXIT_GEOMETRY, problems)
     return jobs
+
+
+def _cores_used(exp, placement):
+    """Hardware cores one node's worth of this placement occupies."""
+    cores = exp.cluster.cores_per_node
+    smt = exp.cluster.smt or 1
+    product = placement["ranks_per_node"] * placement["threads"]
+    return product if product <= cores else -(-product // smt)
+
+
+def request_problem(exp, job):
+    """Why this job's select chunk cannot be granted, or None.
+
+    Hardware cores and schedulable CPUs are two numbers, and on Casper's
+    high-throughput nodes they differ by two.  A request above what PBS offers
+    does not fail; it queues forever with nothing anywhere saying why, which is
+    how the first whole-node Casper sweep spent its life.  So it is refused
+    here, where the reason can still be printed.
+    """
+    offered = exp.cluster.ncpus
+    ncpus, _ = jobfile.select_size(exp, job)
+    where = exp.cluster.name + ("/" + exp.cluster.subcluster
+                                if exp.cluster.subcluster else "")
+    if ncpus > offered:
+        return ("job %s asks for ncpus=%d per node, but %s offers at most %d"
+                % (job.key, ncpus, where, offered))
+    # Capped at the hardware: a product beyond every core is oversubscription,
+    # which geometry_problem and allow_undersubscribed already rule on.  This
+    # check is only about the cores the scheduler keeps back.
+    need = min(max(_cores_used(exp, c.placement) for c in job.cells),
+               exp.cluster.cores_per_node)
+    if need > ncpus:
+        return ("a cell of job %s needs %d cores per node, but a node of %s "
+                "can only be requested with %d (node.ncpus; it has %d cores). "
+                "Ask for fewer ranks x threads, or set defaults.exclusive: false "
+                "and allow_undersubscribed: true for a plumbing check."
+                % (job.key, need, where, ncpus, exp.cluster.cores_per_node))
+    return None
 
 
 def _axis_values(exp, profile, images):

@@ -10,7 +10,7 @@
 # The job never reads this file.  hpcrun/submit expands the matrix and writes a
 # flat job.env into each results directory, which is both what the job sources
 # and the record of what that job was asked to do.
-schema: 1
+schema: 2
 cluster: derecho
 
 # No default account on purpose: this is a billable allocation, and qsub
@@ -28,7 +28,7 @@ defaults:
 images:
   # A set from the images: block of sites/ncar/derecho.yaml -- one definition
   # of "the six", which sif/Makefile builds under the same name.
-  from_make: derecho-hpcg
+  set: derecho-hpcg
   # or list the images to sweep, e.g. to run only some of the six:
   # list: [leap-oneapi-mpich-hpcg.sif, leap-gcc14-mpich-hpcg.sif]
 

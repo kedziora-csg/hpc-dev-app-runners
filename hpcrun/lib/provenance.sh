@@ -133,8 +133,12 @@ pbs_resource () {
     local key="$1"
     [ -n "${PBS_JOBID:-}" ] || return 0
     command -v qstat >/dev/null 2>&1 || return 0
+    # qstat -f wraps a long value at 80 columns and continues it on a line
+    # that starts with a TAB; fields themselves start with spaces.  So the
+    # newline and that tab are both dropped, which rejoins the value -- turning
+    # the tab into a space instead cut `cpu_type=cascadelake` to `cascadela`.
     qstat -f "${PBS_JOBID}" 2>/dev/null \
-        | tr -d '\n' | tr '\t' ' ' \
+        | tr -d '\n\t' \
         | sed -n "s/.*Resource_List\.${key} = \([^ ]*\).*/\1/p" | head -1
 }
 
@@ -162,6 +166,7 @@ emit_provenance () {
         # to know that `derecho` implies NCAR.
         printf '# %-16s %s\n' site          "${HPCRUN_SITE:-unknown}"
         printf '# %-16s %s\n' cluster       "${HPCRUN_CLUSTER:-unknown}"
+        printf '# %-16s %s\n' subcluster    "${HPCRUN_SUBCLUSTER:-none}"
         printf '# %-16s %s\n' host          "$(hostname -s 2>/dev/null)"
         printf '# %-16s %s\n' job_id        "${PBS_JOBID:-${SLURM_JOB_ID:-none}}"
         printf '# %-16s %s\n' harness_sha   "$(harness_sha)"

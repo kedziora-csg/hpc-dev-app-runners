@@ -1568,7 +1568,8 @@ resolved by guessing. A `~/.config/hpcdev/site.sh` from before the rename is
 still honoured, since no rename here can reach a copy in somebody's home
 directory.
 
-**What is left.** `subclusters:` is declared in the schema so a file can be
+**What is left.** *(Done 2026-09-29; see "sub-clusters as built" below.)*
+`subclusters:` is declared in the schema so a file can be
 written against it, and nothing reads it yet. That is the second commit: each
 entry overriding `node:` -- including the `select` this project learned the hard
 way is not optional -- and an experiment key naming which one it wants. Casper's
@@ -1622,6 +1623,76 @@ affects a number -- the right machine, the right geometry, the right binds, the
 right MPI, a clean placement verdict on all eighteen cells. Only the label was
 wrong, and it was wrong in a field that exists precisely so results can be
 grouped by organisation. That is a good argument for having added the field.
+
+### Phase 4.5, sub-clusters as built (2026-09-29)
+
+The second commit, on the branch `phase-4.5-subclusters`, written at the
+paths phase 4.7 left.
+
+**The description.** `subclusters:` maps a name to a node type, and each entry
+states its `node:` **in full**. Nothing is inherited from another entry or from
+a cluster-wide block, and a cluster with sub-clusters has no top-level `node:`.
+Casper's two node types share almost nothing: one socket against two, 8 cores
+per L3 against 18, one NUMA domain against two. So a key one entry forgot
+would otherwise be taken silently from the other, which is the failure the
+three-level model exists to remove. `default_subcluster:` names the entry used
+when an experiment names none. It is required, because which hardware a job
+lands on is a decision.
+
+**What a job sources is still flat.** `sitegen` emits one `case` arm per entry
+into `cluster.sh`, chosen by `HPCRUN_SUBCLUSTER` when the profile is sourced.
+The chosen arm **assigns** its geometry and unsets what it does not state. It
+does not offer it, the way other settings honour the environment: the
+sub-cluster is itself the override, and a value left in a shell that sourced
+the file for the other node type would describe the wrong hardware. An unknown
+name leaves no geometry at all, which the host tools and `runner.sh` refuse by
+name. A cluster of one node type generates the same block as before, so
+Derecho's profile did not change.
+
+**Hardware cores and schedulable CPUs are two numbers** (§11 item 9). This is
+`node.ncpus`, taken from `resources_available.ncpus` on 2026-09-29: Casper's
+htc Genoa nodes offer 62 of 64 cores, and its Cascade Lake nodes 34 of 36. The
+geometry check still reasons in hardware cores. An exclusive job asks for
+`ncpus`, and `validate` refuses (exit 4) any request above it, so it no longer
+queues forever. That closes the whole-node Casper sweep's failure: 64 ranks on
+a node that offers 62 is refused before submission, with the reason.
+
+**Choosing one.** The experiment format goes to **schema 2**: `images.from_make`
+becomes `images.set` (4.7c deferred the rename to this change), and
+`subcluster:` is new. `submit` and `validate` take `--subcluster`. A version-1
+file is refused with the two-line fix. The generated `job.pbs` exports
+`HPCRUN_SUBCLUSTER` before it sources the profile, or unsets it. The host side
+sources the profile with the variable set to the experiment's choice or
+removed. So a leftover in the operator's shell never chooses, which a check
+confirms. `job.json`, `run.meta` and every results row record the sub-cluster.
+Rows from a one-node-type cluster carry `null`.
+
+**Casper's two.** `htc-genoa` is the default and holds the nodes every Casper
+job has used. `htc-cascadelake` was measured by a one-CPU `probe_topology` job
+on crhtc53: 2 x 18 cores, SMT 2, stride 36, 18 cores per L3 and per NUMA
+domain. It was then confirmed by the first HPCG job there. Derecho has one CPU
+node type and no sub-clusters.
+
+**Checked.** 219 checks, 21 of them new: the description rules, choosing by
+file, by flag and by default, the shell-leftover case, the `ncpus` refusals,
+what `job.pbs` and the sourced profile contain, and the version-1 refusal. On
+Casper the same experiment ran on both node types at harness `2b4ee0e` with a
+clean tree. Job 6083942 ran on `htc-cascadelake` (crhtc53, crhtc62), and job
+6083944 on `htc-genoa` (crhtc69, crhtc80). Each job's own probe matched its
+sub-cluster's description, `select` carried the matching `cpu_type`, and all six
+runs exited 0 with the expected shared-node `placement=warn`. Results are in
+`/glade/derecho/scratch/kedziora/hpcrun-subclusters-casper`.
+
+**Found on the way, and fixed.** `run.meta`'s `pbs_select` read
+`cpu_type=cascadela`. `qstat -f` wraps a long value at 80 columns onto a
+tab-led line, and `provenance.sh` turned that tab into a space, which ended the
+value. Derecho's shorter select line never reached the wrap.
+
+**Not done here.** Per-sub-cluster build flags (F2 in the addendum) belong to
+phase 5. `Placement_derecho.pbs` and the legacy scripts hard-code their own
+`#PBS -l select`, so a sub-cluster reaches them only through
+`qsub -v HPCRUN_SUBCLUSTER=...` for the geometry, not for the request. Neither
+runs on a cluster that has sub-clusters today.
 
 ### Phase 4.7, proposed: lay the repository out by concern
 

@@ -319,6 +319,25 @@ cluster_case "an unknown MPI family is refused" reject \
 cluster_case "a description with no cluster: is refused" reject \
     "$(printf '%s\n' "${cluster_base}" | sed '/^cluster: /d')"
 
+# Sub-clusters: each entry states its node in full, a default is named, and no
+# cluster-wide node: sits beside them to be half-inherited.
+sc_base="$(printf '%s\n' "${cluster_base}" | sed '/^node: /d')
+default_subcluster: a
+subclusters:
+  a: {node: {cores: 64, smt: 2, ncpus: 62}}
+  b: {verified: false, node: {cores: 36, smt: 2}}"
+cluster_case "sub-clusters with a default are accepted" ok "${sc_base}"
+cluster_case "sub-clusters beside a cluster-wide node: are refused" reject "${sc_base}
+node: {cores: 64, smt: 1}"
+cluster_case "sub-clusters with no default are refused" reject \
+    "$(printf '%s\n' "${sc_base}" | sed '/^default_subcluster/d')"
+cluster_case "a default that is not a sub-cluster is refused" reject \
+    "$(printf '%s\n' "${sc_base}" | sed 's/^default_subcluster: a/default_subcluster: c/')"
+cluster_case "a default with no sub-clusters is refused" reject "${cluster_base}
+default_subcluster: a"
+cluster_case "ncpus beyond the hardware threads is refused" reject \
+    "$(printf '%s\n' "${sc_base}" | sed 's/ncpus: 62/ncpus: 200/')"
+
 # images: in a SITE file would be concatenated with each cluster's, not replaced.
 mkdir -p "${TMP}/desc/sites/ncar"
 printf 'schema: 1\nsite: ncar\nimages: {os: leap, compilers: [gcc14], mpi: [openmpi]}\n' \
@@ -343,7 +362,7 @@ cluster_case "a value carrying a quote is refused, not quoted" reject \
 #-- exit codes are the interface -----------------------------------------------
 echo
 echo "exit codes"
-base='schema: 1
+base='schema: 2
 cluster: derecho
 defaults: {nodes: 1}
 images: {list: [leap-oneapi-mpich-hpcg.sif]}
@@ -370,6 +389,81 @@ case_exit "allow_undersubscribed permits it (0)"  0 "$(printf '%s\n' "${base}" |
 case_exit "a missing .sif is image-missing (5)"   5 "$(printf '%s\n' "${base}" | sed 's/leap-oneapi-mpich-hpcg.sif/nosuch.sif/')"
 ./validate no-such-experiment >/dev/null 2>&1
 want "an unknown experiment name is config-invalid (3)" 3 "$?"
+case_exit "a version-1 experiment is refused with the fix (3)" 3 \
+    "$(printf '%s\n' "${base}" | sed 's/^schema: 2/schema: 1/')"
+case_exit "subcluster: on a cluster of one node type is refused" 1 "${base}
+subcluster: cpu"
+
+#-- sub-clusters ----------------------------------------------------------------
+# A cluster of several node types describes the one HPCRUN_SUBCLUSTER names, and
+# which one a job lands on is the experiment's choice -- or the description's
+# default, never a value left over in somebody's shell.
+echo
+echo "sub-clusters"
+casper_conf="$(echo ../sites/*/casper/cluster.sh)"
+casper_case='schema: 2
+cluster: casper
+defaults: {nodes: 1, exclusive: false, allow_undersubscribed: true}
+images: {list: [leap-gcc14-openmpi-hpcg.sif]}
+apps: [{name: hpcg}]
+placements: [{name: pureMPI, ranks_per_node: 8, threads: 1}]
+sweep: {matrix: [images, apps, placements], per_job: [placements]}'
+: > "${HPCRUN_IMAGE_DIR}/leap-gcc14-openmpi-hpcg.sif"
+node_of () { # node_of <yaml> [validate args...] -- "subcluster cores ncpus"
+    printf '%s\n' "$1" > "${TMP}/sc.yaml"; shift
+    HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" --format json "$@" 2>/dev/null \
+        | python3 -c 'import json, sys
+d = json.load(sys.stdin)
+print(d.get("subcluster"), d["node"]["cores_per_node"], d["node"]["ncpus"])'
+}
+want "no subcluster: takes the description's default" "htc-genoa 64 62" \
+    "$(node_of "${casper_case}")"
+want "subcluster: picks the other node type" "htc-cascadelake 36 34" \
+    "$(node_of "${casper_case}
+subcluster: htc-cascadelake")"
+want "--subcluster overrides the file" "htc-cascadelake 36 34" \
+    "$(node_of "${casper_case}
+subcluster: htc-genoa" --subcluster htc-cascadelake)"
+want "a leftover HPCRUN_SUBCLUSTER in the shell does not choose" "htc-genoa 64 62" \
+    "$(HPCRUN_SUBCLUSTER=htc-cascadelake node_of "${casper_case}")"
+
+printf '%s\n' "${casper_case}
+subcluster: nosuch" > "${TMP}/sc.yaml"
+HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" >/dev/null 2>&1
+want "an unknown sub-cluster is refused" 1 "$?"
+
+# Hardware cores are not schedulable CPUs: 64 ranks on a node that offers 62
+# would queue forever, so it is refused before it is submitted.
+printf '%s\n' "${casper_case}" | sed 's/, exclusive: false, allow_undersubscribed: true//;s/ranks_per_node: 8/ranks_per_node: 64/' \
+    > "${TMP}/sc.yaml"
+HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" >/dev/null 2>&1
+want "a whole Genoa node (64 of 62 schedulable) is geometry-rejected (4)" 4 "$?"
+printf '%s\n' "${casper_case}" | sed 's/ranks_per_node: 8/ranks_per_node: 63/' > "${TMP}/sc.yaml"
+HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" >/dev/null 2>&1
+want "a shared request above ncpus is refused too (4)" 4 "$?"
+
+# The job script names its node type BEFORE sourcing the profile, which reads it.
+printf '%s\n' "${casper_case}
+subcluster: htc-cascadelake" > "${TMP}/sc.yaml"
+HPCRUN_SITE_CONF="${casper_conf}" ./submit "${TMP}/sc.yaml" --dry-run \
+    --results-dir "${TMP}/scjob" >/dev/null 2>&1
+pbs="$(echo "${TMP}"/scjob/*/job.pbs)"
+want "job.pbs asks for the sub-cluster's processor" 1 \
+    "$(grep -c '^#PBS -l select=1:ncpus=8:mpiprocs=8:ompthreads=1:cpu_type=cascadelake$' "${pbs}")"
+want "job.pbs exports HPCRUN_SUBCLUSTER before sourcing the profile" "export source" \
+    "$(grep -E "^export HPCRUN_SUBCLUSTER='htc-cascadelake'|^\. " "${pbs}" | awk '{print ($1 == "export") ? "export" : "source"}' | tr '\n' ' ' | sed 's/ $//')"
+./submit derecho-hpcg --dry-run --results-dir "${TMP}/dejob" >/dev/null 2>&1
+want "a one-node-type cluster's job.pbs unsets it" 6 \
+    "$(cat "${TMP}"/dejob/*/job.pbs | grep -c '^unset HPCRUN_SUBCLUSTER$')"
+
+# What a job sources: the chosen arm's geometry, and none at all for a name the
+# cluster does not have.
+want "the profile describes the named node type" "36 34 cpu_type=cascadelake 1" \
+    "$(HPCRUN_SUBCLUSTER=htc-cascadelake bash -c ". ${casper_conf}; echo \${HPCRUN_CORES_PER_NODE} \${HPCRUN_NCPUS} \${HPCRUN_NODE_SELECT} \${HPCRUN_SUBCLUSTER_VERIFIED}")"
+want "switching node type re-states every key, inheriting none" "64 62 1" \
+    "$(HPCRUN_SUBCLUSTER=htc-cascadelake bash -c ". ${casper_conf}; HPCRUN_SUBCLUSTER=htc-genoa; . ${casper_conf}; echo \${HPCRUN_CORES_PER_NODE} \${HPCRUN_NCPUS} \${HPCRUN_SOCKETS}")"
+want "an unknown node type leaves no geometry" "[]" \
+    "$(HPCRUN_SUBCLUSTER=nosuch bash -c ". ${casper_conf}; echo [\${HPCRUN_CORES_PER_NODE:-}]")"
 
 #-- validate and submit apply one gate ------------------------------------------
 # A green validate followed by a submit that refuses would make validate

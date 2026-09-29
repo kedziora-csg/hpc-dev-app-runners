@@ -15,8 +15,8 @@
   ],
   "properties": {
     "schema": {
-      "const": 1,
-      "description": "Format version of this file. Bumped only for a change that an older hpcrun/submit would misread."
+      "const": 2,
+      "description": "Format version of this file. 2 since the sub-cluster change, which renamed images.from_make to images.set and added subcluster:; a version-1 file is refused with what to change. Bumped only for a change that an older hpcrun/submit would misread."
     },
     "account": {
       "type": "string",
@@ -66,12 +66,12 @@
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
-      "description": "Exactly one of from_make or list.",
+      "description": "Exactly one of set or list.",
       "properties": {
-        "from_make": {
+        "set": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9._-]*$",
-          "description": "One of the image sets the cluster's description states in its images: block -- <cluster> for the base images, <cluster>-<app> for each app -- such as derecho-hpcg. sif/Makefile builds the same set under the same name, so there is one definition of 'the six' rather than a copy that drifts. The key keeps its old name until the schema change that brings sub-clusters."
+          "description": "One of the image sets the cluster's description states in its images: block -- <cluster> for the base images, <cluster>-<app> for each app -- such as derecho-hpcg. sif/Makefile builds the same set under the same name, so there is one definition of 'the six' rather than a copy that drifts."
         },
         "list": {
           "type": "array",
@@ -269,6 +269,11 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_-]*$",
       "description": "The machine this runs on. Names sites/<site>/<cluster>.yaml, which supplies the queue, the node geometry and the host-MPI recipe, and sites/<site>/<cluster>/cluster.sh, which supplies the paths and the module bootstrap. It is the CLUSTER, not the site: NCAR is the site, and Derecho and Casper are two clusters of it."
+    },
+    "subcluster": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Which node type of the cluster to run on, for a cluster whose description has subclusters:. Omitted, the description's default_subcluster applies. --subcluster overrides it. Naming one on a cluster of a single node type is refused, as is a name the cluster does not have."
     }
   }
 }

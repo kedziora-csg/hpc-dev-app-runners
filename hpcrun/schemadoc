@@ -15,7 +15,7 @@ from the format it describes if nothing is maintained twice.
 
 WHAT IS NOT HERE
 
-Cross-field rules a schema cannot state (exactly one of images.from_make and
+Cross-field rules a schema cannot state (exactly one of images.set and
 images.list; per_job a subset of matrix; a legal ranks x threads product) live in
 benchlib/experiment.py and are what `bench validate` adds on top.  This file is a
 reference, not a tutorial: the annotated experiment in experiments/ is the place
