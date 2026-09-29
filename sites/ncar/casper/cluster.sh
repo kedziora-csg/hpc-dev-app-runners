@@ -118,7 +118,6 @@ HPCRUN_SUBCLUSTERS='htc-cascadelake htc-genoa'
 case "${HPCRUN_SUBCLUSTER}" in
     htc-cascadelake)
         # High-throughput Intel Xeon Gold 6240 (Cascade Lake): 2 x 18 cores, SMT on
-        # UNVERIFIED: no job has run on this node type yet.
         HPCRUN_CORES_PER_NODE='36'
         HPCRUN_SMT='2'
         HPCRUN_SOCKETS='2'
@@ -129,7 +128,7 @@ case "${HPCRUN_SUBCLUSTER}" in
         HPCRUN_TOPOLOGY_MODE='probe'
         HPCRUN_NODE_SELECT='cpu_type=cascadelake'
         HPCRUN_TARGET_ARCH='x86-64-v4'
-        HPCRUN_SUBCLUSTER_VERIFIED='0'
+        HPCRUN_SUBCLUSTER_VERIFIED='1'
         ;;
     htc-genoa)
         # High-throughput AMD EPYC 9554 (Genoa): 64 cores, one socket, SMT on

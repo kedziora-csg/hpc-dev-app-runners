@@ -117,9 +117,9 @@ subclusters:
 
   htc-cascadelake:
     description: "High-throughput Intel Xeon Gold 6240 (Cascade Lake): 2 x 18 cores, SMT on"
-    # Measured on crhtc53 with probe_topology.sh, 2026-09-29, by a one-CPU job
-    # that ran nothing else.  No benchmark has run here yet.
-    verified: false
+    # Measured on crhtc53 with probe_topology.sh, 2026-09-29, and confirmed the
+    # same day by the first HPCG job here (6083942, crhtc53 and crhtc62): the
+    # job's own probe agreed with every value below.
     node:
       cores: 36
       smt: 2

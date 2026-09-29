@@ -458,7 +458,7 @@ want "a one-node-type cluster's job.pbs unsets it" 6 \
 
 # What a job sources: the chosen arm's geometry, and none at all for a name the
 # cluster does not have.
-want "the profile describes the named node type" "36 34 cpu_type=cascadelake 0" \
+want "the profile describes the named node type" "36 34 cpu_type=cascadelake 1" \
     "$(HPCRUN_SUBCLUSTER=htc-cascadelake bash -c ". ${casper_conf}; echo \${HPCRUN_CORES_PER_NODE} \${HPCRUN_NCPUS} \${HPCRUN_NODE_SELECT} \${HPCRUN_SUBCLUSTER_VERIFIED}")"
 want "switching node type re-states every key, inheriting none" "64 62 1" \
     "$(HPCRUN_SUBCLUSTER=htc-cascadelake bash -c ". ${casper_conf}; HPCRUN_SUBCLUSTER=htc-genoa; . ${casper_conf}; echo \${HPCRUN_CORES_PER_NODE} \${HPCRUN_NCPUS} \${HPCRUN_SOCKETS}")"
