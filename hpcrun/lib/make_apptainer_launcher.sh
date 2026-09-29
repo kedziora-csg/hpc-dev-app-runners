@@ -102,6 +102,16 @@ _launcher_expand_dir () {
     return 0
 }
 
+# Expand an mpi.<family>.root: `${VAR}`, `${VAR}/sub` or a plain path, to the
+# directory it names, or to nothing if VAR is unset or the directory is absent.
+# The same indirect expansion as a lib_dirs entry, and for the same reason.
+_launcher_expand_root () {
+    case "$1" in
+        '${'*'}') _launcher_expand_dir "$1/." | sed 's|/\.$||' ;;
+        *)        _launcher_expand_dir "$1" ;;
+    esac
+}
+
 # Join arguments with ':', dropping any that are empty or name a nonexistent
 # directory.  This matters more than it looks: an EMPTY element in
 # LD_LIBRARY_PATH means "the current working directory", so a path built by
@@ -192,8 +202,8 @@ _launcher_sniff_compiler () {
 #-------------------------------------------------------------------------------
 # Host modules.  The host MPI that displaces the container's must be built with
 # a compatible compiler, so the compiler MUST be loaded before the MPI: Lmod
-# resolves the MPI build against the loaded compiler, and a variable like
-# NCAR_ROOT_OPENMPI is only set once that MPI is loaded.
+# resolves the MPI build against the loaded compiler, and the variable an
+# mpi.<family>.root names is only set once that MPI is loaded.
 #
 # Which module answers to which container tag is the site's business and comes
 # from bench_site_compiler_module / bench_site_mpi_module.
@@ -339,15 +349,25 @@ make_apptainer_launcher () {
             # lib_dirs.  Cray MPICH's ABI shim has no such dependency, which is
             # why only this recipe needed it.
             #-------------------------------------------------------------------
-            # Normally loaded by load_host_modules (compiler first, then the
-            # matching openmpi build).  Loaded here too so a standalone call
-            # still resolves NCAR_ROOT_OPENMPI.
-            [ -n "${NCAR_ROOT_OPENMPI:-}" ] \
+            # Where the host tree is comes from the cluster description's
+            # mpi.<family>.root -- usually ${NAME} for a variable the MPI module
+            # sets.  That module is normally loaded by load_host_modules
+            # (compiler first, then the matching build); it is loaded here too
+            # so a standalone call still resolves the root.
+            local root_spec ompi_root
+            root_spec="$(bench_site_mpi_root "${family}" 2>/dev/null)"
+            [ -n "${root_spec}" ] || {
+                echo "make_apptainer_launcher: the cluster profile states no"
+                echo "  mpi.${family}.root, which the host-openmpi overlay needs."
+                echo "  Add it to the cluster's YAML and run hpcrun/sitegen --write."
+                return 1
+            }
+            ompi_root="$(_launcher_expand_root "${root_spec}")"
+            [ -n "${ompi_root}" ] \
                 || module load "$(bench_site_mpi_module "${family}")" 2>/dev/null
-
-            local ompi_root="${NCAR_ROOT_OPENMPI:-}"
+            [ -n "${ompi_root}" ] || ompi_root="$(_launcher_expand_root "${root_spec}")"
             [ -n "${ompi_root}" ] || {
-                echo "make_apptainer_launcher: NCAR_ROOT_OPENMPI is unset."
+                echo "make_apptainer_launcher: ${root_spec} resolves to nothing."
                 echo "  Load the host OpenMPI first:  module load $(bench_site_mpi_module "${family}")"
                 echo "  (if no openmpi module exists here, the container's own"
                 echo "   OpenMPI cannot be displaced and will not use the fabric)"

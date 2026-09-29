@@ -191,6 +191,16 @@ bench_site_mpi_overlay () {
     esac
 }
 
+# Where the host MPI is installed, for an overlay that binds its whole
+# tree.  Literal text: a ${NAME} in it is expanded by the recipe, once
+# the MPI module that sets NAME has been loaded.
+bench_site_mpi_root () {
+    case "$1" in
+        openmpi ) echo '${NCAR_ROOT_OPENMPI}' ;;
+        *       ) echo '' ;;
+    esac
+}
+
 # NAME=VALUE, space separated, set inside the container for this
 # family.  Where a workaround specific to this machine goes.
 bench_site_mpi_env () {

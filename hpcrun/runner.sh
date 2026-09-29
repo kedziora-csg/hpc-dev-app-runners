@@ -273,7 +273,7 @@ if [ -n "${APP}" ]; then
 
     if ! ${launcher} test -x "${APP_BINARY}" 2>/dev/null; then
         echo "app       ${app_name}: ${APP_BINARY} is not executable in this image"
-        echo "          build or pull an image that carries it (cd sif && make derecho-<app>),"
+        echo "          build or pull an image that carries it (cd sif && make ${HPCRUN_CLUSTER}-${app_name}),"
         echo "          or point HPCRUN_APP_DIR at a contract on a bound filesystem"
         exit 1
     fi

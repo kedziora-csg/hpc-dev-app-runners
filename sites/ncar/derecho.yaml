@@ -26,6 +26,20 @@ scheduler:
   queue: main
   walltime_max: "12:00:00"
 
+# The blessed Derecho set: leap x {oneapi, gcc14, nvhpc} x {mpich, openmpi}.
+# leap because openSUSE Leap 15 is built from the same SLE 15 SP6 sources as
+# Derecho's host OS; those three compilers because they are the ones NCAR
+# provides modules for (gcc14 matches gcc/14.3.0 exactly); mpich because only
+# MPICH can be displaced by Cray MPICH's ABI shim, openmpi to test the
+# alternative.  sitegen writes it into derecho/images.mk, so `make derecho` and
+# `make derecho-hpcg` in sif/ build it and `images.from_make: derecho-hpcg` in
+# an experiment runs it.
+images:
+  os: leap
+  compilers: [oneapi, gcc14, nvhpc]
+  mpi: [mpich, openmpi]
+  apps: [hpcg]
+
 modules:
   # Cray MPICH ships in the default ncarenv, so there is nothing to load for it.
   # An empty value is a decision; an absent family is one this cluster cannot
@@ -106,6 +120,9 @@ mpi:
   openmpi:
     launcher: openmpi
     overlay: host-openmpi
+    # Set by NCAR's openmpi module.  Quoted so it stays text until the recipe
+    # expands it, after load_host_modules has loaded that module.
+    root: '${NCAR_ROOT_OPENMPI}'
     env:
       UCX_POSIX_USE_PROC_LINK: n
       OMPI_MCA_btl_vader_single_copy_mechanism: none

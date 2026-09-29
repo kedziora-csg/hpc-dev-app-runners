@@ -4,7 +4,19 @@
 # environment
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 selfdir="$(dirname $(readlink -f ${BASH_SOURCE[0]}))"
-source "${SIF_ENV:-${selfdir}/../sites/ncar/sif_env.sh}" || { echo "cannot locate the site's sif_env.sh!" ; exit 1; }
+# The site's Apptainer setup: $SIF_ENV if set, as sif/Makefile honours it, or
+# else the one sites/<site>/sif_env.sh in this checkout.  Several sites and no
+# SIF_ENV is a question only the operator can answer, so it is asked, not guessed.
+if [ -z "${SIF_ENV:-}" ]; then
+    sif_envs=( "${selfdir}"/../sites/*/sif_env.sh )
+    if [ "${#sif_envs[@]}" -ne 1 ] || [ ! -f "${sif_envs[0]}" ]; then
+        echo "cannot choose a site's sif_env.sh: found ${#sif_envs[@]} under ${selfdir}/../sites;"
+        echo "  set SIF_ENV to the one to use"
+        exit 1
+    fi
+    SIF_ENV="${sif_envs[0]}"
+fi
+source "${SIF_ENV}" || { echo "cannot source ${SIF_ENV}" ; exit 1; }
 #----------------------------------------------------------------------------
 
 topdir="$(pwd)"

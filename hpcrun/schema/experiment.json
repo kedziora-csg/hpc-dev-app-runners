@@ -71,7 +71,7 @@
         "from_make": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9._-]*$",
-          "description": "A sif/Makefile target such as derecho-hpcg, asked via its echo-<target> rule. One definition of 'the six' rather than a copy that drifts."
+          "description": "One of the image sets the cluster's description states in its images: block -- <cluster> for the base images, <cluster>-<app> for each app -- such as derecho-hpcg. sif/Makefile builds the same set under the same name, so there is one definition of 'the six' rather than a copy that drifts. The key keeps its old name until the schema change that brings sub-clusters."
         },
         "list": {
           "type": "array",
