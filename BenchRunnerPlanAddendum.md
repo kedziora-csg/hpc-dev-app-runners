@@ -652,10 +652,31 @@ tools. `hpcrun/validate derecho-hpcg` succeeds when run from the repository
 root, and the hand-qsub profile search now finds `sites/ncar/derecho/cluster.sh`
 from the root, where the old layout's search finds nothing.
 
-**Still to check, on the clusters:** `hpcrun/validate` on a Derecho and a
-Casper login node, `make check-images` in `sif/` after moving the images, and
-one real job through each entry point (a hand-submitted
-`App_benchmarker_derecho.pbs` and one `hpcrun/submit` job).
+**Checked, on the clusters (2026-09-29).** Every check the plan lists passed,
+with the images moved into `sif/` by hand. The off-cluster tests, re-run on
+Casper, number 189 by then.
+
+- **Derecho, hand-submitted.** `App_benchmarker_derecho.pbs` with
+  `leap-oneapi-mpich-hpcg.sif`, job 7644523, harness `64711d8`, clean tree:
+  three cells (pureMPI 128x1, ccd 16x8, numa 8x16), every run exit 0 and
+  `placement=ok`. Results in `/glade/derecho/scratch/kedziora/hpcrun-test`.
+- **Derecho, `hpcrun/submit derecho-hpcg`.** All six images, jobs
+  7644666-7644671, harness `64711d8`, clean tree: every run exit 0 and
+  `placement=ok`. Results are the ignored `derecho-hpcg/` in the checkout.
+- **Casper.** `hpcrun/validate casper-hpcg` from the repository root: 3 jobs,
+  all three app contracts ok with apptainer loaded. `make check-images` in
+  `sif/`: all 12 images `current`, so a moved `.sif` keeps its digest label.
+  Then `hpcrun/submit casper-hpcg --images leap-gcc14-openmpi-hpcg.sif`, job
+  6082128, harness `e38d171`: 3 runs, exit 0, `placement=warn`
+  (`partial_core`, as the experiment's header predicts for a shared node).
+  Results in `/glade/derecho/scratch/kedziora/hpcrun-4.7a-casper`.
+
+**Found on the clusters, and fixed.** `make check-images` without apptainer
+on `PATH` reported every image as `STALE? built before digests were stamped
+-- rm it and rebuild`: `apptainer inspect`'s failure was discarded, and an
+empty digest read as an unstamped image. Following the advice would have
+deleted good images. It now stops first and says to `module load apptainer`.
+The fault predates 4.7a.
 
 **Found while building it, and left for 4.7b.** `Placement_derecho.pbs`
 still looks for its profile with `BENCH_SITE`, meaning the cluster -- a

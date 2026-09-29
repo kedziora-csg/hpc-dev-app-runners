@@ -31,3 +31,6 @@ RunOSU
 # Results copied back from Derecho for reading here.
 /scratch-hpcrun-test/
 /derecho-hpcg/
+
+# Python bytecode from hpcrun/benchlib.
+__pycache__/
