@@ -8,7 +8,17 @@ names none.
 **Phase 4.5 half built**: the site/cluster rename landed 2026-09-05 -- NCAR is
 the site, Derecho and Casper are clusters of it -- and sub-clusters (node types)
 are the remaining half. **Phase 4.6** follows: Slurm, for TACC, which is both a
-second site and a second scheduler.**
+second site and a second scheduler.
+**Phase 4.7 proposed 2026-09-25**: lay the repository out by concern -- factory,
+machine-targeted image builder, delivery to SIF, runner, machine descriptions --
+before sub-clusters and TACC. Summary in §10; the evidence and the steps are
+in `BenchRunnerPlanAddendum.md`, whose decisions 5-7 were answered 2026-09-29:
+the runner's directory becomes `hpcrun/`.
+**The factory leaves this repository** (decided 2026-09-29, option D of
+`ImagePublishingPlan.md`): it becomes its own product in
+`NCAR/hpc-dev-container-factory`, the fork stops tracking upstream, and this
+repository keeps the image builder, delivery, runner and machine descriptions.
+Its open questions are to be settled before phase 5.**
 
 This document proposes the concrete interfaces that `SeparateConcerns.md` and
 `SeparationAnalysis.md` gesture at but do not specify. Those two argued *that* the
@@ -882,6 +892,13 @@ inspects `${REPORT_EXE}`, so it has never checked the application binary it name
 
 ## 8. File layout and the rename path
 
+> **Superseded as a target by phase 4.7** (`BenchRunnerPlanAddendum.md` §6).
+> The tree below is what phases 3 and 4 built. Phase 4.7 moves `bench/` to the
+> repository root as `hpcrun/`, with `sites/` beside it, the runner's libraries
+> from `ncar-hpc/libexec/` into `hpcrun/lib/`, and the SIF build into `sif/`,
+> and files the two cluster entry points under `sites/ncar/derecho/`. The
+> reasoning in the two subsections below still holds.
+
 ```
 containers/deploy/
   bench/
@@ -933,6 +950,17 @@ coupling.
 ---
 
 ## 9. `hpcg-smoketest-ghcr.yaml` → `app-image-builder-ghcr.yaml`
+
+> **Paths change under phase 4.7** (`BenchRunnerPlanAddendum.md` §8). The
+> generic Dockerfile becomes `apps/Dockerfile`, and it copies `apps/<app>/`
+> from its own build context instead of running
+> `/container/extras/build_${APP}.sh` out of the base image. Today's app layer
+> builds from the recipe that was current when the *base* image was built, so a
+> fix to an app's build script or extractor needs a base rebuild before it
+> reaches an app image (addendum finding F1). Phase 5 also takes over three
+> more items from the addendum: build flags read from the machine description,
+> app image repositories named for their target, and image identity read from
+> SIF labels rather than file names.
 
 Current shape: HPCG's name appears in the workflow name, the job name, the tag string, the
 Dockerfile path, the smoke-test body (`test -x /container/bin/xhpcg`, the `hpcg.dat`
@@ -1018,6 +1046,7 @@ Each phase is independently useful and independently revertible.
 | **4** | `sites/derecho.yaml` (the declarative half; `site.sh` landed in phase 1, see §4); fold the remaining `OSU_*.pbs` / `FE_derecho.pbs` module bootstraps onto it; add Casper | Second site validates the abstraction. Doing this before Casper is speculative. **Built — see below.** |
 | **4.5** | Rename the middle level: **site → cluster**, and introduce the three-level model site (NCAR) / cluster (Derecho, Casper) / sub-cluster (node type). Merges §11.6. **Rename built; sub-clusters not yet — see below.** | The name is wrong now and every value it governs is being written twice. Must precede 5, which builds an image for a "named machine" — naming it correctly is a prerequisite, not a follow-up. |
 | **4.6** | A second scheduler: Slurm, for TACC. Named the PBS assumptions and the Slurm shape; **implement when there is an account to test against** | The abstraction is half there already — per-scheduler templates, an `srun` arm in `mpi_launch_flags`, `scheduler.kind`. What is missing is three places that still assume PBS in code. Designing the rest from a manual is how the Casper node type came out wrong twice. |
+| **4.7** | Lay the repository out by concern: `bench/` to the root as `hpcrun/`, `sites/` beside it, the runner's libraries into `hpcrun/lib/`, the SIF build into `sif/`, `NCAR_HPC_ROOT` removed; then image sets and the host-MPI root read from the machine description. **Proposed; runs before the sub-cluster half of 4.5.** See below and `BenchRunnerPlanAddendum.md` | Sub-clusters should be written at the final paths, and TACC is the point at which a runner loading its libraries from `ncar-hpc/` through `NCAR_HPC_ROOT` stops being awkward and becomes false. |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9); carry `app_march_flags` through as a per-app build-arg (§3) | CI now validates the contract on every app build. The microarchitecture override belongs here because this is where an app image is built for a *named machine* rather than for everyone. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
@@ -1593,6 +1622,86 @@ right MPI, a clean placement verdict on all eighteen cells. Only the label was
 wrong, and it was wrong in a field that exists precisely so results can be
 grouped by organisation. That is a good argument for having added the field.
 
+### Phase 4.7, proposed: lay the repository out by concern
+
+The full proposal, with line references and the move list, is in
+`BenchRunnerPlanAddendum.md`. This is its summary.
+
+**Why `ncar-hpc/` sits beside `sites/`.** History, not design. Upstream
+created `containers/deploy/ncar-hpc/` as a folder of NCAR job scripts and
+image recipes. Phases 0-2 grew the harness inside it, phase 3 added `bench/`
+beside it, and phase 4 added `sites/` beside that. Each phase avoided renames
+on purpose, and no phase owned the layout as a whole.
+
+**Five concerns, not three.** The three tiers of §3 -- factory, site image
+builder, runner -- plus **delivery** (turning an image into a pinned `.sif` at
+the site, which is generic logic run in a site's environment) and **machine
+descriptions**, which the builder, delivery and the runner all read. The
+ownership rule of §3 gains one sentence: *a fact about a machine is stated once,
+in the machine's description, and every other concern reads it.* The runner has
+worked that way since phase 4; the build side does not yet.
+
+**What the current layout gets wrong**, most consequential first:
+
+1. **App recipes ride inside the base image.** `containers/devenv/Makefile`
+   ships all of `scripts/` into every image the factory Dockerfile builds --
+   the portable images and the Zen 3 prerequisites alike -- and
+   `containers/apps/hpcg/Dockerfile` builds HPCG from that copy rather than
+   from its own build context. A fix to HPCG's build script or extractor
+   reaches an app image only after the base images are rebuilt. This is a
+   working defect, not a naming problem.
+2. **Machine-targeting facts are copied four times on the build side** --
+   `derecho-images-ghcr.yaml`, `hpcg-smoketest-ghcr.yaml`, `libexec/Makefile`
+   and the cluster files -- and one copy is already wrong about which images
+   Casper's benchmarks use. App images from portable and Zen 3 bases share one
+   tag, the collision §3 fixed for base images.
+3. **The runner's libraries live under a site's name.** Nine of the fifteen
+   scripts in `ncar-hpc/libexec/` mention no site, and the runner reaches them
+   through `NCAR_HPC_ROOT` (52 references in code). A few site names are also
+   written into site-neutral code, notably `NCAR_ROOT_OPENMPI` in the
+   `host-openmpi` recipe.
+4. **The runner reaches into the delivery directory** to learn a cluster's
+   image set (`make echo-*`), uses the SIF `Makefile` as its test driver, and
+   builds `.sif` files inside the source tree by default.
+5. **The runner infers an image's MPI family from its file name**, and so
+   which host MPI to inject, while a label written for the purpose goes unread.
+
+**The target layout.** At the root: `apps/<app>/` for what the image builder
+adds, `sif/` for delivery, `hpcrun/` for the runner (with `lib/`, `tests/` and
+`templates/`), and `sites/` for machine descriptions, with each cluster's entry
+points and legacy scripts under `sites/ncar/`. The runner is named for running
+applications on HPC clusters, not for benchmarking, which is one kind of run
+(§11, question 10); the `BENCH_` variable prefix stays, because app hooks
+inside published images use it. `containers/` and `scripts/` are not
+rearranged: they leave, as the factory, for `NCAR/hpc-dev-container-factory`
+(`ImagePublishingPlan.md`). A contract lives beside the build script that
+installs its binary, so HPCG's moves to `apps/hpcg/` and OSU's goes with the
+factory, which builds OSU.
+
+**The steps**, each ending with all 184 off-cluster checks passing:
+
+| Step | What | Operator impact |
+|---|---|---|
+| **4.7a** | every move, the path edits the moves force, and `NCAR_HPC_ROOT` removed | once: move the `.sif` files to `sif/` (or set `BENCH_IMAGE_DIR`), and set `BENCH_ROOT` in any `~/.config` copy of a profile |
+| **4.7b** | site names out of site-neutral code: `NCAR_HOST` fallbacks, a stale message, the label key | none |
+| **4.7c** | cluster files state their image set and host-MPI root; `sitegen` writes `images.mk`; lands with the sub-cluster schema change | an experiment names an image set by a new key |
+
+Then the sub-cluster half of 4.5, at the final paths, and then phase 5, which
+absorbs `apps/`, the fix for item 1, build flags read from the machine
+description, target-named app repositories, and label-based image identity.
+Phase 4.6 still waits for an account.
+
+**Decisions**, numbered after the four in §12. Answered 2026-09-29: 5, move
+upstream's nine files (yes -- upstream is no longer a constraint); 6, OSU's
+contract lives with the factory; 7, the directories are `apps/`, `sif/`,
+`hpcrun/` and `sites/`. Open, with recommendations: 8, order (before
+sub-clusters); 9, `NCAR_HPC_ROOT` removed with no fallback; 10, planning
+documents to `docs/` (not now).
+
+**What it leaves alone:** what a compute node reads, apart from path values;
+the results format; every published image name and digest pin; and the
+factory's files, which move separately and as a whole.
+
 ---
 
 ## 11. Open questions
@@ -1624,6 +1733,12 @@ All four DECISIONs are answered — see §12. What remains open:
    `SeparationAnalysis.md` recommends. Does `bench/` belong under `containers/deploy/` at
    all? It is not a container and not a deployment. `benchmark/` at the repo root may be
    the more honest location, and a cleaner thing to move out later.
+
+   **Answer, phase 4.7:** no, it does not belong there. It moves to the
+   repository root as `hpcrun/` -- neither `bench/` nor `benchmark/`, because
+   benchmarking is one kind of run (question 10) -- with `sites/` beside it and
+   the runner's libraries inside it as `hpcrun/lib/`. See §10 and
+   `BenchRunnerPlanAddendum.md`.
 2. **Where do results live?** Per-job directories under `results/` are fine for one user.
    If these become a shared record, they need a naming convention that includes site, date,
    and harness git SHA — and a decision about whether they are committed, published as
@@ -1714,6 +1829,34 @@ All four DECISIONs are answered — see §12. What remains open:
    swallows it. Until then, Casper stays on partial-node plumbing checks, which
    is all that cluster has ever been used for.
 
+10. **Kinds of run.** Raised 2026-09-29, and the reason the runner's directory
+    becomes `hpcrun/` rather than `bench/` in phase 4.7. The same machinery
+    could serve three kinds of run on a cluster: a **performance benchmark**
+    (what it does today), **code validation** (did this build of the app give
+    the right answer?), and a **production** application workflow. Each kind
+    should be named what it is -- `bench` would not be reused to mean
+    validation -- for example as `kind: benchmark | validation | production` in
+    an experiment file.
+
+    Most of what exists is already general: the app contract, experiments,
+    cluster profiles, the launcher, provenance and the results record. What is
+    specific to benchmarking is ranking on a figure of merit (`primary_fom`,
+    `better:`, `collect --best`), repeats summarised by their median, the rule
+    that a run with a failed placement never wins, and requesting whole nodes
+    by default. Validation would add reference outputs and a pass/fail
+    comparison with a tolerance -- a small extension of `success_criteria` and
+    of the `valid=` line `extract` already prints. Production is the larger
+    step: one long configuration rather than a sweep, restarts, and staging of
+    inputs and outputs. Workflow managers for multi-step production runs
+    already exist, so the runner would more likely hand work to one than become
+    one; `profiles:` and `--profile` (§6) are where it would start.
+
+    Not now. Two things are decided in the meantime: the directory name, which
+    no longer says "benchmark", and the `BENCH_` variable prefix, which stays,
+    because 23 of its uses are in app hooks installed inside published images
+    and renaming it would break those images' contracts until they are
+    rebuilt.
+
 ---
 
 ## 12. Decision log
@@ -1726,6 +1869,12 @@ Answered 2026-08-19.
 | 2 | App contract in the image or on the host? | **In the image**, `BENCH_APP_DIR` as the development override. The app image is genuinely another build layer, so the contract travels with the content — see the layers discussion in §3. |
 | 3 | YAML, or JSON-only stdlib? | **YAML.** Human readability is a requirement. JSON remains the fallback if PyYAML is missing. A future local-LLM agent reinforces this choice and adds schema + `validate` at phase 3; it does not argue for a different architecture. |
 | 4 | Replace `matrix-smoketest-applications.yaml`? | **Yes, replace it**, with benkirk's consent. Phase 5 deletes it after enumerating its coverage. |
+
+Decisions 5-10 come from phase 4.7. Decisions 5-7 were **answered on
+2026-09-29** (upstream no longer a constraint; OSU's contract with the factory;
+`hpcrun/`); 8-10 are **open**. All six are in `BenchRunnerPlanAddendum.md` §10.
+Who builds the base images was decided the same day: option D of
+`ImagePublishingPlan.md`.
 
 Two findings surfaced while answering these, both folded into the phases above:
 
