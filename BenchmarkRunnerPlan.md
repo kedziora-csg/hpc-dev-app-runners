@@ -2009,6 +2009,76 @@ All four DECISIONs are answered — see §12. What remains open:
     and renaming it would break those images' contracts until they are
     rebuilt.
 
+11. **Where the seam between base images and app images should lie.**
+    Raised 2026-09-30. For now: **portable base images, and a tuned app
+    layer**, which is what phase 5 built. Eventually: **base images made for
+    clusters, and app images a subset of them.** This item is the study that
+    gets from one to the other.
+
+    *Why clusters.* Everything that decides whether an image suits a node is
+    already a property of its sub-cluster or its cluster:
+
+    | What an image must match | Where the description states it |
+    |---|---|
+    | the distro, close to the host's Linux | `images.os` (cluster) |
+    | the microarchitecture | `node.target_arch` (sub-cluster); `images.target` (cluster, today) |
+    | the compilers the host has modules for | `modules.compiler_map` (site) |
+    | the MPI families the host can put in place of the container's | `mpi:` (cluster) |
+
+    So each sub-cluster implies a **build key** -- distro, microarchitecture,
+    compiler, MPI family -- and the base images to build are the distinct keys
+    across every described sub-cluster. Many sub-clusters share a key; that is
+    what naming targets after the microarchitecture already buys. App images
+    are then, per key, the apps its clusters run.
+
+    *The mismatch this removes.* Casper runs Derecho's `znver3` builds today. On
+    `htc-genoa` (Zen 4) that forgoes AVX-512. On `htc-cascadelake` (Intel) it is
+    also a correctness risk. `-march=znver3` allows AMD-only instructions --
+    `CLZERO`, and on that Intel generation also `VAES`, `VPCLMULQDQ`, `SHA`,
+    `RDPID`, `WBNOINVD`. The start-of-job check compares ISA levels only (the
+    binary needs v3, the node offers v4), so it would not refuse such a binary.
+    One gcc14 image has run cleanly there (job 6083942). That shows the
+    compiler emitted none of them for that binary, and nothing more.
+
+    *Three places the seam could lie.*
+    1. **Portable base, tuned app layer** (today). Few base images. The base
+       libraries are never tuned.
+    2. **A base image per build key, app images a subset** (the direction).
+       Everything is tuned for its target. The base-image count multiplies by
+       the number of targets, and an nvhpc base is about 8 GB.
+    3. **A split base.** The toolchain and MPI layers stay portable, and only
+       the microarchitecture-sensitive libraries -- HDF5, NetCDF, PnetCDF,
+       FFTW, HeFFTe -- are rebuilt per key. The factory's stage DAG already
+       separates them (`<mpi> ▶ iolibs ▶ mpi-iolibs ▶ fftlibs`). This costs
+       naming and CI complexity rather than registry space.
+
+    *What decides it.*
+    - Which base libraries each app actually links. HPCG and OSU link only MPI
+      and the compiler runtime (`ImagePublishingPlan.md` §7), and the host's
+      MPI replaces the container's at run time, so for them a tuned base
+      changes nothing. WRF, MPAS or an FFT-heavy code would differ.
+    - The measurement `ImagePublishingPlan.md` §7 already names: one such app,
+      built with the same app flags on a portable base and on a tuned one.
+    - CI minutes, registry space and runner disk per build key.
+    - How the factory's `CONTRACT.md` states a tuned base: the tag gains the
+      target, as app images already do (`ImagePublishingPlan.md` §2).
+    - Whether the distro really varies by cluster. Derecho's host is SLE 15
+      SP6, which leap 15 matches. Casper's should be read from
+      `/etc/os-release` on a compute node, not assumed.
+
+    *Two steps that do not wait for the study.*
+    - A sub-cluster may carry its own `images.target`, overriding the
+      cluster's, so Casper's two node types can get native app images
+      (`znver4`, `cascadelake`). That is the per-sub-cluster build block the
+      addendum's F2 sketched and phase 5 set aside, because both node types
+      ran one set.
+    - The start-of-job architecture check also scans for vendor-specific
+      instructions, so a `znver3` binary on an Intel node is refused in one
+      line rather than failing mid-run.
+
+    *Who decides.* This project, in the new factory repository
+    (`ImagePublishingPlan.md` §4, §7): base images are ours to design there.
+
 ---
 
 ## 12. Decision log
