@@ -1034,7 +1034,7 @@ consequences:
 
 ### Phase 5, as built (2026-09-29)
 
-On the branch `phase-5-app-images`. It takes in the addendum's F1, F2 and F5,
+Built on the branch `phase-5-app-images` and merged 2026-09-30. It takes in the addendum's F1, F2 and F5,
 and follows the target-in-the-tag decision in `ImagePublishingPlan.md` §2.
 
 **`apps/`, not `containers/apps/`.** `apps/Dockerfile` takes `ARG APP` and
@@ -1098,19 +1098,48 @@ science codes, which is a factory concern (`ImagePublishingPlan.md` §4), so
 they leave with the factory rather than moving here. The `aarch64` and `cuda`
 axes are dropped deliberately: no cluster description names either.
 `hpcg-smoketest-ghcr.yaml` is superseded outright. Both are deleted, with
-`containers/apps/hpcg/Dockerfile`, once the new workflow has published and
-smoke-tested a set.
+`containers/apps/hpcg/Dockerfile`, now that the new workflow has published and
+smoke-tested the Derecho set.
 
-**Still to do, in order.**
-1. Dispatch `app-image-builder-ghcr.yaml` for `derecho` from this branch.
-2. On a cluster, `make derecho-hpcg` in `sif/`, which pulls the six
-   `...-hpcg-znver3` images.
-3. One HPCG job per cluster.
-4. Delete the two superseded workflows and the old Dockerfile.
-5. Merge.
+**The first dispatch failed, and its cause condemns the old smoke test.** The
+base images' `ENTRYPOINT` is `bash --rcfile /container/config_env.sh --login
+-c '${*}' --`, which joins its arguments and splits them again on
+whitespace. So the workflow's `bash -lc "smoke.sh hpcg 2 2"` ran `smoke.sh`
+with no arguments: `hpcg 2 2` became `$0 $1 $2` of the inner shell. The same
+splitting means `hpcg-smoketest-ghcr.yaml`'s one multi-line `bash -lc '...'`
+only ever ran `set`, which prints the environment and exits 0. Its green runs
+never ran HPCG. The step now hands the entrypoint plain words:
+`docker run <img> /src/apps/smoke.sh hpcg 2 2`.
 
-The experiments name sets, not files, so they need no edit. Until step 2 the
-sets name files that are not on disk, and `validate` says so.
+**Checked, 2026-09-30.**
+- *The workflow.* Dispatched from the GitHub website, first for gcc14 +
+  openmpi alone, then for Derecho's full set. It published all six
+  `leap-*-hpcg-znver3` images and passed their contract smoke tests. The
+  nvhpc images, which have the largest base (about 8 GB), fit the runner.
+- *On Casper.* `make derecho-hpcg` built the six `.sif` files, and `make
+  check-images` reports each current. The workflow's eight `hpcdev.*`
+  labels survive `apptainer build`. `-march=znver3` is real in the binary --
+  185 `%ymm` and 65 `vfmadd` instructions, identical to the old image's -- even
+  though its GNU property note reads `x86-64-baseline`, because gcc fills that
+  note in only with `-mneeded`.
+- *Jobs.* All were on harness `beb4022`, clean tree.
+  - Casper `casper-hpcg`, all three images, on `htc-genoa`: nine runs, all exit
+    0. Each image got the host Open MPI built with its own compiler, which the
+    launcher now reads from `hpcdev.compiler`: 5.0.8 for gcc14 and nvhpc,
+    5.0.9 for oneAPI. nvhpc's contract records `-tp=zen3`, the others
+    `-march=znver3`.
+  - Derecho, `leap-oneapi-mpich-hpcg-znver3`: three cells, nine runs, all exit
+    0 and `placement=ok`. `libmpi.so.12` came from Cray MPICH's
+    `lib-abi-mpich`, which the label `hpcdev.mpi: mpich` selected. The medians
+    -- 85.9 GFLOPS at pureMPI, 73.4 at ccd, 43.3 at numa -- agree with the
+    2026-09-29 run of the image it replaces (85.9, 73.4, 43.6) to within 0.7%,
+    as identical code should.
+  - Every row recorded `image.target: znver3` and its image digest.
+
+  Results are in `/glade/derecho/scratch/kedziora/hpcrun-phase5-casper-set` and
+  `/glade/derecho/scratch/kedziora/hpcrun-phase5-derecho`.
+
+The experiments name sets, not files, so they needed no edit.
 
 ---
 

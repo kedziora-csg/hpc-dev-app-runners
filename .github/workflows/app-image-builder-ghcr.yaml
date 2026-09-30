@@ -24,7 +24,8 @@ name: Build and Smoke-test App Images (GHCR)
 # The target is in the tag, and so in every .sif name, because one tag must
 # mean one build (ImagePublishingPlan.md section 2).
 #
-# Replaces hpcg-smoketest-ghcr.yaml, whose HPCG-only steps this generalises.
+# Replaced hpcg-smoketest-ghcr.yaml (deleted in phase 5), whose HPCG-only steps
+# this generalises.
 #-------------------------------------------------------------------------------
 
 on:
