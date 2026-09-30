@@ -3,7 +3,7 @@
 # apps/smoke.sh <app> [ranks] [threads] -- one tiny run of <app>, through its
 # contract, inside the image that carries it.
 #
-#     docker run --rm -v "$PWD:/src:ro" <app image> bash -lc '/src/apps/smoke.sh hpcg'
+#     docker run --rm -v "$PWD:/src:ro" <app image> /src/apps/smoke.sh hpcg
 #     apptainer exec --cleanenv --bind "$PWD:/src" <image.sif> bash -lc '/src/apps/smoke.sh osu'
 #
 # The same hooks a cluster job calls, driven by the same library: hpcrun's

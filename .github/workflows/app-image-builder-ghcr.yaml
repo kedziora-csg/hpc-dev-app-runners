@@ -187,6 +187,16 @@ jobs:
             hpcdev.target=${{ matrix.target }}
             hpcdev.march=${{ matrix.march }}
 
+      # The command goes to the image's ENTRYPOINT as plain words, with no
+      # `bash -lc` of our own.  The base images' entrypoint is
+      #     bash --rcfile /container/config_env.sh --login -c '${*}' --
+      # which joins its arguments and splits them again on whitespace, so a
+      # quoted script inside `bash -lc '...'` is taken apart: its first word
+      # becomes the script and the rest become $0, $1, ...  That is how the
+      # first dispatch ran smoke.sh with no arguments, and how the old
+      # hpcg-smoketest step -- one multi-line `bash -lc '...'` -- only ever
+      # ran `set`.  The entrypoint already gives a login shell, so the words
+      # are all that is needed; none of them may contain a space.
       - name: Smoke-test ${{ matrix.tag }} through its app contract
         env:
           APP_IMAGE: ${{ steps.image.outputs.app_image }}
@@ -198,7 +208,7 @@ jobs:
             --env OMPI_MCA_opal_cuda_support=false \
             --env MPIR_CVAR_ENABLE_GPU=0 \
             "${APP_IMAGE}" \
-            bash -lc "/src/apps/smoke.sh ${APP} 2 2" \
+            /src/apps/smoke.sh "${APP}" 2 2 \
             2>&1 | tee "smoke-logs/${TAG}.log"
 
       - name: Upload logs
