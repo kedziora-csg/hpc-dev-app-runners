@@ -4,9 +4,16 @@ Status: **option D decided 2026-09-29.** The factory becomes its own product in
 [`NCAR/hpc-dev-container-factory`](https://github.com/NCAR/hpc-dev-container-factory),
 trimmed and maintained by this fork's author, and this repository stops
 building base images once that factory publishes. The fork no longer tracks
-upstream (`benkirk/demo_github_actions`). Still open: the registry and the
-remaining practical questions in §6, and the naming of app images (§2), which
-phase 5 settles.
+upstream (`benkirk/demo_github_actions`). App images are named with the target
+in the tag (§2, decided in phase 5).
+
+**Who decides, as of 2026-09-30.** The factory's design and its base images
+are this fork's author's to decide, in the NCAR repository: which images, which
+registry, which tags, what to trim, and when to tune. No further design
+questions go to benkirk; §6 lists what is left and who settles each. The one
+thing still needed from him is not a question but a legal step: his approval
+of the licence change, because he holds the copyright in the code he wrote (§4,
+"License").
 
 The NCAR repository exists, created on 2026-07-28 and still empty. As of
 2026-09-29 it is **public**, it is **owned jointly** -- benkirk, who wrote the
@@ -80,6 +87,15 @@ addendum). Either way, name the target after the **microarchitecture**
 (`znver3`, `icelake`), not after the cluster: Casper's Genoa nodes already run
 Derecho's Zen 3 builds, and Stampede3's Ice Lake and Sapphire Rapids nodes may
 share one. Phase 5 decides.
+
+**Decided 2026-09-29: the target goes in the tag**, named for the
+microarchitecture. App images are
+`hpcdev-apps-x86_64:<os>-<compiler>-<mpi>-<app>-<target>-latest`, for example
+`leap-oneapi-mpich-hpcg-znver3-latest`, so the `.sif` files are
+`leap-oneapi-mpich-hpcg-znver3.sif`. The target and each compiler's spelling of
+it are stated in each cluster's `images:` block, which is what the app workflow
+builds from. The old `...-hpcg-latest` tags stay in place for the existing
+pins. See `BenchmarkRunnerPlan.md`, "Phase 5, as built".
 
 ---
 
@@ -251,7 +267,13 @@ through the base contract in §4, and it publishes only app images.
 
 ---
 
-## 6. Questions for benkirk and NCAR's GitHub administrators
+## 6. What is left to settle, and who settles it
+
+Q1 and Q2 below went to benkirk and are answered. Everything still open is
+either this fork's author's decision -- Q3, Q4, and the direction for tuned
+base images in §7 -- or a question for NCAR's GitHub administrators, about
+larger runners and concurrency under Q2. Only the licence approval in §4 still
+needs benkirk.
 
 **Q1. Whose repository is it? Answered 2026-09-29: shared.** benkirk agreed
 that this fork's author takes over the factory, with joint ownership to credit
@@ -284,19 +306,28 @@ as I understand GitHub's policy:
   organization and shared across all its repositories. How long will the
   factory's matrices wait behind other NCAR projects?
 
-**Q3. Which registry?** GHCR under the NCAR organization, or Docker Hub
+**Q3. Which registry?** *(This fork's author decides.)* GHCR under the NCAR organization, or Docker Hub
 `ncarcisl`. If Docker Hub, check its limits on anonymous pulls: every user of a
 shared login node pulls from the same network address. With the repository
 public, GHCR is the simpler choice: the factory's workflows already publish to
 GHCR, and a workflow's own token can push to its organization's registry
 without a separate account or stored password.
 
-**Q4. Can the tag format stay** `<os>-<compiler>-<mpi>-latest` and `-YY.MM`?
+**Q4. Can the tag format stay** *(This fork's author decides; nothing outside
+this repository and the factory depends on it.)* `<os>-<compiler>-<mpi>-latest` and `-YY.MM`?
 The Deffiles and the digest pinning depend on it.
 
 ---
 
 ## 7. Tuned base images, and the measurement that can wait
+
+**Direction, 2026-09-30.** Portable base images and a tuned app layer for now,
+as below. Eventually, base images made for clusters -- the distro of the
+cluster's Linux, its sub-clusters' microarchitectures, and the compilers and
+MPI families it hosts -- with app images a subset of them. Where the seam
+between base and app images should lie is a study in `BenchmarkRunnerPlan.md`
+(§11, item 11). Tuned base images are the factory's own decision, made in the
+NCAR repository.
 
 Option D plans no tuned base images, only portable ones. For the apps
 benchmarked today, a tuned base should make **no difference on the cluster**:

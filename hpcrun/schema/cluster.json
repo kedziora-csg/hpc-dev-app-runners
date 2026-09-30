@@ -270,6 +270,26 @@
             "pattern": "^[a-z][a-z0-9_]*$"
           },
           "description": "Apps built on top of the base set, one set of images each: <os>-<compiler>-<mpi>-<app>.sif, named <cluster>-<app>."
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_]*$",
+          "description": "The microarchitecture the app images are built for, named after the microarchitecture and not the cluster (znver3, icelake): Casper's Genoa nodes run Derecho's Zen 3 builds. It becomes part of every app image's tag and .sif name -- leap-oneapi-mpich-hpcg-znver3 -- so one tag means one build. Omit it, with march, for app images built at the base image's own flags. Two clusters naming one target must spell its march identically; hpcrun/sitegen --check refuses otherwise."
+        },
+        "march": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "default"
+          ],
+          "description": "How each compiler family spells target, passed to the app build as APP_MARCH_FLAGS. default covers every family not named; a family whose compiler spells it differently gets its own entry -- nvhpc takes -tp=zen3, and ignores -march= without a word. Required with target, and only with it.",
+          "patternProperties": {
+            "^(default|[a-z][a-z0-9]*)$": {
+              "type": "string",
+              "pattern": "^-[A-Za-z0-9=._,+-]+( -[A-Za-z0-9=._,+-]+)*$",
+              "description": "The flags, as the compiler takes them."
+            }
+          }
         }
       }
     },

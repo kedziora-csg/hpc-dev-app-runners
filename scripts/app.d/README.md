@@ -16,9 +16,15 @@ app.d/<app>/
 you wall time and nothing else. That zero-effort entry point is the point: a
 contract nobody can satisfy in ten minutes gets bypassed.
 
-## Where these live at run time
+## Where these live
 
-Installed into the image by `build_<app>.sh`, at `/container/app.d/<app>/`. The
+Two places in the repository, one at run time. A contract for a tool every
+base image carries -- OSU -- is here, in `scripts/app.d/`, and is installed by
+the base image's `build_<app>.sh`. A contract for an app this repository builds
+on top of a base image -- HPCG -- is in `apps/<app>/app.d/`, beside the
+`apps/<app>/build.sh` that installs it (see [apps/README.md](../../apps/README.md)).
+
+Either way it ends up at `/container/app.d/<app>/`. The
 `.sif` then fully describes what it can run, the extractor travels with the app
 *version* it was written against, and a recorded result can name an image digest
 and mean it.
@@ -62,16 +68,22 @@ argument-parsing exercise.
 
 ## Adding an app
 
-1. Write `app.d/<name>/app.yaml`. `binary:` alone is a legal contract.
+1. Write `apps/<name>/app.d/app.yaml`. `binary:` alone is a legal contract.
 2. Add hooks only where the app needs them.
-3. Install it from `build_<name>.sh` — one `cp -R`, see `build_hpcg.sh`.
+3. Write `apps/<name>/build.sh`, which builds the app and installs the contract
+   -- one `cp -R`, see `apps/hpcg/build.sh`.
 4. Prove it, with no cluster and no container:
    - `hpcrun/validate --app app.d/<name>/app.yaml` checks it
      against `hpcrun/schema/app.json`, which is where a typo in a field name or a
      `primary_fom` naming a metric nothing declares gets caught;
-   - `hpcrun/tests/test_app_contract.sh` runs every contract here against a stub
-     launcher, so `prepare` and `extract` are exercised as themselves.
-5. Sweep it: name it in a `hpcrun/experiments/*.yaml` and run
+   - `hpcrun/tests/test_app_contract.sh` runs every contract in the repository
+     against a stub launcher, so `prepare` and `extract` are exercised as
+     themselves.
+   - once built, `apps/smoke.sh <name>` inside the image runs one tiny cell
+     through the same hooks; the app workflow does exactly this.
+5. Add it to `apps:` in a cluster's `images:` block, run `hpcrun/sitegen
+   --write`, and dispatch `app-image-builder-ghcr.yaml` for that cluster.
+6. Sweep it: name it in a `hpcrun/experiments/*.yaml` and run
    `hpcrun/validate <experiment>`. Nothing about the app appears in the runner
    or in the experiment beyond its name.
 

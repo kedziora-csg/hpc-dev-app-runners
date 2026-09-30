@@ -12,10 +12,11 @@ casper_site := ncar
 casper_images := leap-oneapi-openmpi.sif \
     leap-gcc14-openmpi.sif \
     leap-nvhpc-openmpi.sif
-casper_hpcg_images := leap-oneapi-openmpi-hpcg.sif \
-    leap-gcc14-openmpi-hpcg.sif \
-    leap-nvhpc-openmpi-hpcg.sif
+casper_hpcg_images := leap-oneapi-openmpi-hpcg-znver3.sif \
+    leap-gcc14-openmpi-hpcg-znver3.sif \
+    leap-nvhpc-openmpi-hpcg-znver3.sif
 cluster_images += $(casper_images) $(casper_hpcg_images)
+app_images += $(casper_hpcg_images)
 
 casper: $(casper_images)
 echo-casper:

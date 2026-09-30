@@ -1032,6 +1032,115 @@ consequences:
   itself becomes a *future* upstream contribution rather than a fork-only change. Noted
   there.
 
+### Phase 5, as built (2026-09-29)
+
+Built on the branch `phase-5-app-images` and merged 2026-09-30. It takes in the addendum's F1, F2 and F5,
+and follows the target-in-the-tag decision in `ImagePublishingPlan.md` §2.
+
+**`apps/`, not `containers/apps/`.** `apps/Dockerfile` takes `ARG APP` and
+copies `apps/<app>/` from its own build context: `build.sh`, plus the contract
+in `app.d/` beside it. `scripts/build_hpcg.sh` and `scripts/app.d/hpcg/` moved
+there with `git mv`. From the base image the build relies only on the base
+contract. So a fix to HPCG's build or its extractor reaches the next app image
+without a base rebuild (F1). OSU's contract stays in `scripts/app.d/`, because
+it belongs to the base image. `build.sh` no longer runs `docker-clean`:
+`apps/Dockerfile` does that, and run by hand under apptainer it would have
+emptied the host's `/tmp`.
+
+**What is built comes from the machine description (F2).** Each cluster's
+`images:` block gains `target:` and `march:`, the flags per compiler family.
+Derecho and Casper both state `znver3`, spelled `-march=znver3` and, for
+nvhpc, `-tp=zen3`. The addendum sketched these per sub-cluster. They belong to
+the image set instead, because Casper's two node types run one set.
+`sitegen --check` refuses two clusters that spell one target differently,
+since one tag would then mean two builds. The target joins every app image's
+name, and `images.mk` lists the app images outright, so `sif/Makefile`
+chooses the app repository by membership rather than by suffix.
+`apps/matrix.py <cluster>` turns the block into the workflow's matrix, as
+`{"include": [...]}` for `fromJSON`. So the images the workflow publishes and
+the images `make <cluster>-<app>` pulls are one list, and a test compares them.
+The dispatch inputs narrow it and cannot widen it.
+
+**`app-image-builder-ghcr.yaml`.** A `plan` job runs `matrix.py` for the
+chosen cluster. Then one build job per app image builds `apps/Dockerfile` on
+`<base_repo>-x86_64:<os>-<compiler>-<mpi>-<version>`, publishes it as
+`hpcdev-apps-x86_64:<tag>-{<version>,latest}`, and smoke-tests the published
+image. The base repository is an input, defaulting to today's `hpcdev-derecho`,
+so switching to the NCAR factory is one default. The smoke test is
+`apps/smoke.sh`: the contract's own hooks, driven by hpcrun's
+`app_contract.sh` at `HPCRUN_SCALE=smoke`, and it passes only if `extract`
+prints the app's `primary_fom` and no `valid=false`. It ran on Casper against
+three existing HPCG images and one base image carrying OSU, and it failed as
+it should on an image with no HPCG contract. `build.sh` then built HPCG on the
+oneapi-mpich and nvhpc-openmpi base images under apptainer (`-march=znver3`,
+`-tp=zen3`), and the smoke test passed on the result.
+
+**Labels (F5, and §9's "stamp the app into image labels").** Each app image
+carries `hpcdev.app`, `.app.version`, `.app.yaml.sha256`, `.os`, `.compiler`,
+`.mpi`, `.target` and `.march`, and `apptainer build` keeps them in the `.sif`.
+`make_apptainer_launcher.sh` reads `hpcdev.compiler` and `hpcdev.mpi` before it
+falls back to the file name, and `runner.sh` takes `hpcdev.os` and
+`hpcdev.target` from the labels too, recording the target as `image.target`
+in every row. Older images have no such labels and are read exactly as
+before.
+
+**What `matrix-smoketest-applications.yaml` covered, and where each part
+goes.** It has never run in this fork. It crossed six compilers, two MPI
+families, `{nogpu, cuda}` and `{x86_64, aarch64}` on the portable
+`ncarcisl/hpcdev` images, and in each job it did three things:
+- printed the environment;
+- built and ran `report_placement`;
+- built DART, WRF, MPAS, ESMF and Kokkos with `continue-on-error`.
+
+`report_placement` is part of the base contract, and every Casper and Derecho
+job exercises it. The five app builds test that the base stack can build
+science codes, which is a factory concern (`ImagePublishingPlan.md` §4), so
+they leave with the factory rather than moving here. The `aarch64` and `cuda`
+axes are dropped deliberately: no cluster description names either.
+`hpcg-smoketest-ghcr.yaml` is superseded outright. Both are deleted, with
+`containers/apps/hpcg/Dockerfile`, now that the new workflow has published and
+smoke-tested the Derecho set.
+
+**The first dispatch failed, and its cause condemns the old smoke test.** The
+base images' `ENTRYPOINT` is `bash --rcfile /container/config_env.sh --login
+-c '${*}' --`, which joins its arguments and splits them again on
+whitespace. So the workflow's `bash -lc "smoke.sh hpcg 2 2"` ran `smoke.sh`
+with no arguments: `hpcg 2 2` became `$0 $1 $2` of the inner shell. The same
+splitting means `hpcg-smoketest-ghcr.yaml`'s one multi-line `bash -lc '...'`
+only ever ran `set`, which prints the environment and exits 0. Its green runs
+never ran HPCG. The step now hands the entrypoint plain words:
+`docker run <img> /src/apps/smoke.sh hpcg 2 2`.
+
+**Checked, 2026-09-30.**
+- *The workflow.* Dispatched from the GitHub website, first for gcc14 +
+  openmpi alone, then for Derecho's full set. It published all six
+  `leap-*-hpcg-znver3` images and passed their contract smoke tests. The
+  nvhpc images, which have the largest base (about 8 GB), fit the runner.
+- *On Casper.* `make derecho-hpcg` built the six `.sif` files, and `make
+  check-images` reports each current. The workflow's eight `hpcdev.*`
+  labels survive `apptainer build`. `-march=znver3` is real in the binary --
+  185 `%ymm` and 65 `vfmadd` instructions, identical to the old image's -- even
+  though its GNU property note reads `x86-64-baseline`, because gcc fills that
+  note in only with `-mneeded`.
+- *Jobs.* All were on harness `beb4022`, clean tree.
+  - Casper `casper-hpcg`, all three images, on `htc-genoa`: nine runs, all exit
+    0. Each image got the host Open MPI built with its own compiler, which the
+    launcher now reads from `hpcdev.compiler`: 5.0.8 for gcc14 and nvhpc,
+    5.0.9 for oneAPI. nvhpc's contract records `-tp=zen3`, the others
+    `-march=znver3`.
+  - Derecho, `leap-oneapi-mpich-hpcg-znver3`: three cells, nine runs, all exit
+    0 and `placement=ok`. `libmpi.so.12` came from Cray MPICH's
+    `lib-abi-mpich`, which the label `hpcdev.mpi: mpich` selected. The medians
+    -- 85.9 GFLOPS at pureMPI, 73.4 at ccd, 43.3 at numa -- agree with the
+    2026-09-29 run of the image it replaces (85.9, 73.4, 43.6) to within 0.7%,
+    as identical code should.
+  - Every row recorded `image.target: znver3` and its image digest.
+
+  Results are in `/glade/derecho/scratch/kedziora/hpcrun-phase5-casper-set` and
+  `/glade/derecho/scratch/kedziora/hpcrun-phase5-derecho`.
+
+The experiments name sets, not files, so they needed no edit.
+
 ---
 
 ## 10. Phasing
@@ -1928,6 +2037,76 @@ All four DECISIONs are answered — see §12. What remains open:
     because 23 of its uses are in app hooks installed inside published images
     and renaming it would break those images' contracts until they are
     rebuilt.
+
+11. **Where the seam between base images and app images should lie.**
+    Raised 2026-09-30. For now: **portable base images, and a tuned app
+    layer**, which is what phase 5 built. Eventually: **base images made for
+    clusters, and app images a subset of them.** This item is the study that
+    gets from one to the other.
+
+    *Why clusters.* Everything that decides whether an image suits a node is
+    already a property of its sub-cluster or its cluster:
+
+    | What an image must match | Where the description states it |
+    |---|---|
+    | the distro, close to the host's Linux | `images.os` (cluster) |
+    | the microarchitecture | `node.target_arch` (sub-cluster); `images.target` (cluster, today) |
+    | the compilers the host has modules for | `modules.compiler_map` (site) |
+    | the MPI families the host can put in place of the container's | `mpi:` (cluster) |
+
+    So each sub-cluster implies a **build key** -- distro, microarchitecture,
+    compiler, MPI family -- and the base images to build are the distinct keys
+    across every described sub-cluster. Many sub-clusters share a key; that is
+    what naming targets after the microarchitecture already buys. App images
+    are then, per key, the apps its clusters run.
+
+    *The mismatch this removes.* Casper runs Derecho's `znver3` builds today. On
+    `htc-genoa` (Zen 4) that forgoes AVX-512. On `htc-cascadelake` (Intel) it is
+    also a correctness risk. `-march=znver3` allows AMD-only instructions --
+    `CLZERO`, and on that Intel generation also `VAES`, `VPCLMULQDQ`, `SHA`,
+    `RDPID`, `WBNOINVD`. The start-of-job check compares ISA levels only (the
+    binary needs v3, the node offers v4), so it would not refuse such a binary.
+    One gcc14 image has run cleanly there (job 6083942). That shows the
+    compiler emitted none of them for that binary, and nothing more.
+
+    *Three places the seam could lie.*
+    1. **Portable base, tuned app layer** (today). Few base images. The base
+       libraries are never tuned.
+    2. **A base image per build key, app images a subset** (the direction).
+       Everything is tuned for its target. The base-image count multiplies by
+       the number of targets, and an nvhpc base is about 8 GB.
+    3. **A split base.** The toolchain and MPI layers stay portable, and only
+       the microarchitecture-sensitive libraries -- HDF5, NetCDF, PnetCDF,
+       FFTW, HeFFTe -- are rebuilt per key. The factory's stage DAG already
+       separates them (`<mpi> ▶ iolibs ▶ mpi-iolibs ▶ fftlibs`). This costs
+       naming and CI complexity rather than registry space.
+
+    *What decides it.*
+    - Which base libraries each app actually links. HPCG and OSU link only MPI
+      and the compiler runtime (`ImagePublishingPlan.md` §7), and the host's
+      MPI replaces the container's at run time, so for them a tuned base
+      changes nothing. WRF, MPAS or an FFT-heavy code would differ.
+    - The measurement `ImagePublishingPlan.md` §7 already names: one such app,
+      built with the same app flags on a portable base and on a tuned one.
+    - CI minutes, registry space and runner disk per build key.
+    - How the factory's `CONTRACT.md` states a tuned base: the tag gains the
+      target, as app images already do (`ImagePublishingPlan.md` §2).
+    - Whether the distro really varies by cluster. Derecho's host is SLE 15
+      SP6, which leap 15 matches. Casper's should be read from
+      `/etc/os-release` on a compute node, not assumed.
+
+    *Two steps that do not wait for the study.*
+    - A sub-cluster may carry its own `images.target`, overriding the
+      cluster's, so Casper's two node types can get native app images
+      (`znver4`, `cascadelake`). That is the per-sub-cluster build block the
+      addendum's F2 sketched and phase 5 set aside, because both node types
+      ran one set.
+    - The start-of-job architecture check also scans for vendor-specific
+      instructions, so a `znver3` binary on an Intel node is refused in one
+      line rather than failing mid-run.
+
+    *Who decides.* This project, in the new factory repository
+    (`ImagePublishingPlan.md` §4, §7): base images are ours to design there.
 
 ---
 

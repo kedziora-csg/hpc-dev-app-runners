@@ -73,7 +73,7 @@ echo
 
 #-- the two YAML readers agree, file by file -----------------------------------
 echo "yaml readers"
-for f in experiments/*.yaml ../sites/*.yaml ../sites/*/*.yaml ../scripts/app.d/*/app.yaml; do
+for f in experiments/*.yaml ../sites/*.yaml ../sites/*/*.yaml ../scripts/app.d/*/app.yaml ../apps/*/app.d/app.yaml; do
     python3 - "$f" <<'PY' && ok "$(basename "$(dirname "$f")")/$(basename "$f"): PyYAML == built-in reader" \
                           || bad "$(basename "$(dirname "$f")")/$(basename "$f"): the two readers disagree"
 import sys
@@ -99,9 +99,9 @@ for f in experiments/*.yaml; do
     else bad "$(basename "$f") does not validate (exit ${rc})" \
              "$(HPCRUN_SITE_CONF="$(conf_for "$f")" ./validate "$f" 2>&1 | tail -5)"; fi
 done
-./validate --app ../scripts/app.d/*/app.yaml >/dev/null 2>&1 \
+./validate --app ../scripts/app.d/*/app.yaml ../apps/*/app.d/app.yaml >/dev/null 2>&1 \
     && ok "every app.yaml satisfies hpcrun/schema/app.json" \
-    || bad "an app.yaml fails hpcrun/schema/app.json" "$(./validate --app ../scripts/app.d/*/app.yaml 2>&1)"
+    || bad "an app.yaml fails hpcrun/schema/app.json" "$(./validate --app ../scripts/app.d/*/app.yaml ../apps/*/app.d/app.yaml 2>&1)"
 
 #-- the reference is generated, so it cannot be stale or incomplete quietly -----
 echo
@@ -244,8 +244,27 @@ want "derecho's base set is the six, mpich first" \
     "leap-oneapi-mpich.sif leap-gcc14-mpich.sif leap-nvhpc-mpich.sif leap-oneapi-openmpi.sif leap-gcc14-openmpi.sif leap-nvhpc-openmpi.sif" \
     "$(cd ../sif && make --no-print-directory echo-derecho)"
 want "casper's hpcg set is the openmpi half" \
-    "leap-oneapi-openmpi-hpcg.sif leap-gcc14-openmpi-hpcg.sif leap-nvhpc-openmpi-hpcg.sif" \
+    "leap-oneapi-openmpi-hpcg-znver3.sif leap-gcc14-openmpi-hpcg-znver3.sif leap-nvhpc-openmpi-hpcg-znver3.sif" \
     "$(cd ../sif && make --no-print-directory echo-casper-hpcg)"
+# The workflow builds from the same description, so what it publishes and what
+# `make` pulls are one list: same tags, the target in each, and each compiler's
+# own spelling of it.
+want "the app workflow's matrix is the set the Makefile pulls" \
+    "$(cd ../sif && make --no-print-directory echo-derecho-hpcg | sed 's/\.sif//g')" \
+    "$(python3 ../apps/matrix.py derecho | python3 -c 'import json, sys
+print(" ".join(e["tag"] for e in json.load(sys.stdin)["include"]))')"
+want "nvhpc is built with -tp=, the rest with -march=" "-march=znver3 -tp=zen3" \
+    "$(python3 ../apps/matrix.py derecho --mpis mpich --compilers 'gcc14 nvhpc' | python3 -c 'import json, sys
+print(" ".join(e["march"] for e in json.load(sys.stdin)["include"]))')"
+python3 ../apps/matrix.py casper --mpis mpich >/dev/null 2>&1
+want "the matrix can narrow a cluster's set but never widen it" 2 "$?"
+want "two clusters spelling one target differently is refused" 1 "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+a, b = sitefile.load("derecho"), sitefile.load("casper")
+b.data["images"] = dict(b.data["images"], march={"default": "-march=znver2"})
+print(len(sitefile.target_conflicts([a, b])))')"
+
 want "the host reads the same set the Makefile builds" \
     "$(cd ../sif && make --no-print-directory echo-derecho-hpcg)" \
     "$(python3 -c 'import sys
@@ -299,6 +318,18 @@ ${cluster_images}"
 cluster_case "an image set naming a compiler with no host module is refused" reject \
     "${cluster_base}
 ${cluster_images}"
+cluster_case "an image set with a target and its march is accepted" ok \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
+${cluster_images%\}}, target: znver3, march: {default: -march=znver3}}"
+cluster_case "a target without its march is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
+${cluster_images%\}}, target: znver3}"
+cluster_case "a march without a target is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
+${cluster_images%\}}, march: {default: -march=znver3}}"
+cluster_case "a march for a compiler the set does not build is refused" reject \
+    "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
+${cluster_images%\}}, target: znver3, march: {default: -march=znver3, nvhpc: -tp=zen3}}"
 cluster_case "an image set naming an MPI family mpi: omits is refused" reject \
     "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
 ${cluster_images/openmpi/mpich}"
@@ -365,7 +396,7 @@ echo "exit codes"
 base='schema: 2
 cluster: derecho
 defaults: {nodes: 1}
-images: {list: [leap-oneapi-mpich-hpcg.sif]}
+images: {list: [leap-oneapi-mpich-hpcg-znver3.sif]}
 apps: [{name: hpcg}]
 placements: [{name: pureMPI, ranks_per_node: 128, threads: 1}]
 sweep: {matrix: [images, apps, placements], per_job: [placements]}'
@@ -386,7 +417,7 @@ case_exit "images in per_job is invalid (3)"      3 "$(printf '%s\n' "${base}" |
 case_exit "an uncrossed axis is invalid (3)"      3 "$(printf '%s\n' "${base}" | sed 's/matrix: \[images, apps, placements\]/matrix: [images, apps]/;s/threads: 1}\]/threads: 1}, {name: ccd, ranks_per_node: 16, threads: 8}]/')"
 case_exit "a bad geometry is geometry-rejected (4)" 4 "$(printf '%s\n' "${base}" | sed 's/threads: 1}/threads: 3}/')"
 case_exit "allow_undersubscribed permits it (0)"  0 "$(printf '%s\n' "${base}" | sed 's/threads: 1}/threads: 3}/;s/defaults: {nodes: 1}/defaults: {nodes: 1, allow_undersubscribed: true}/')"
-case_exit "a missing .sif is image-missing (5)"   5 "$(printf '%s\n' "${base}" | sed 's/leap-oneapi-mpich-hpcg.sif/nosuch.sif/')"
+case_exit "a missing .sif is image-missing (5)"   5 "$(printf '%s\n' "${base}" | sed 's/leap-oneapi-mpich-hpcg-znver3.sif/nosuch.sif/')"
 ./validate no-such-experiment >/dev/null 2>&1
 want "an unknown experiment name is config-invalid (3)" 3 "$?"
 case_exit "a version-1 experiment is refused with the fix (3)" 3 \
@@ -404,11 +435,10 @@ casper_conf="$(echo ../sites/*/casper/cluster.sh)"
 casper_case='schema: 2
 cluster: casper
 defaults: {nodes: 1, exclusive: false, allow_undersubscribed: true}
-images: {list: [leap-gcc14-openmpi-hpcg.sif]}
+images: {list: [leap-gcc14-openmpi-hpcg-znver3.sif]}
 apps: [{name: hpcg}]
 placements: [{name: pureMPI, ranks_per_node: 8, threads: 1}]
 sweep: {matrix: [images, apps, placements], per_job: [placements]}'
-: > "${HPCRUN_IMAGE_DIR}/leap-gcc14-openmpi-hpcg.sif"
 node_of () { # node_of <yaml> [validate args...] -- "subcluster cores ncpus"
     printf '%s\n' "$1" > "${TMP}/sc.yaml"; shift
     HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" --format json "$@" 2>/dev/null \
@@ -483,7 +513,7 @@ agree () { # agree <description> <expected code> <yaml>
 }
 
 agree "a good config: both accept (0)"       0 "${base}"
-agree "a missing .sif: both refuse (5)"      5 "$(printf '%s\n' "${base}" | sed 's/leap-oneapi-mpich-hpcg.sif/nosuch.sif/')"
+agree "a missing .sif: both refuse (5)"      5 "$(printf '%s\n' "${base}" | sed 's/leap-oneapi-mpich-hpcg-znver3.sif/nosuch.sif/')"
 agree "a bad geometry: both refuse (4)"      4 "$(printf '%s\n' "${base}" | sed 's/threads: 1}/threads: 3}/')"
 agree "an unknown key: both refuse (3)"      3 "${base}
 bogus: 1"
@@ -551,7 +581,7 @@ echo "generated jobs"
     && ok "submit --dry-run generates without an account" \
     || bad "submit --dry-run failed" "$(./submit derecho-hpcg --dry-run --results-dir "${TMP}/out" 2>&1 | tail -5)"
 
-d="${TMP}/out/leap-oneapi-mpich-hpcg"
+d="${TMP}/out/leap-oneapi-mpich-hpcg-znver3"
 for f in job.pbs job.env job.json; do
     [ -s "${d}/${f}" ] && ok "wrote ${f}" || bad "no ${f} in ${d}"
 done
@@ -696,7 +726,7 @@ grep -q '^\. "/' "${d}/job.pbs" \
 n="$(ls -d "${TMP}/osu"/* 2>/dev/null | wc -l | tr -d '[:space:]')"
 want "two osu benchmarks get 12 distinct directories" 12 "${n}"
 grep -q "OSU_BENCHMARK='osu_allreduce'" \
-    "${TMP}/osu/leap-oneapi-mpich-hpcg-allreduce/job.env" \
+    "${TMP}/osu/leap-oneapi-mpich-hpcg-znver3-allreduce/job.env" \
     && ok "an app's env reaches its job.env, exported for the container" \
     || bad "OSU_BENCHMARK missing from the allreduce job.env"
 
@@ -831,14 +861,14 @@ grep -q '^export HPCRUN_SITE_CONF=' "${d}/job.pbs" \
 echo
 echo "collect"
 mkdir -p "${TMP}/res/j1"
-cp ../scripts/app.d/hpcg/app.yaml "${TMP}/res/j1/app.yaml"
+cp ../apps/hpcg/app.d/app.yaml "${TMP}/res/j1/app.yaml"
 python3 - "${TMP}/res/j1/results.jsonl" <<'PY'
 import json, sys
 rows = []
 for place, ppn, thr, base in (("pureMPI", 128, 1, 85.0), ("ccd", 16, 8, 77.0)):
     for rep, delta in enumerate((0.0, 0.9, -0.4), start=1):
         rows.append({"schema": 1, "site": "derecho", "nodes": 2,
-                     "image": {"sif": "leap-oneapi-mpich-hpcg.sif"},
+                     "image": {"sif": "leap-oneapi-mpich-hpcg-znver3.sif"},
                      "app": {"name": "hpcg"},
                      "placement": {"name": place, "ranks_per_node": ppn,
                                    "threads": thr, "omp_variant": "percore",

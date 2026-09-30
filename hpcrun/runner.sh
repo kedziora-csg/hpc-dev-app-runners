@@ -184,7 +184,11 @@ export container_img="${container_img:-${HPCRUN_IMAGE_DIR}/leap-oneapi-mpich.sif
 comp_family="$(_launcher_sniff_compiler "${container_img}")"
 mpi_family="${container_mpi:-$(_launcher_sniff_family "${container_img}")}"
 img_tag="$(basename "${container_img}" .sif)"
-img_os="${img_tag%%-*}"
+img_os="$(_launcher_label "${container_img}" hpcdev.os)"
+[ -n "${img_os}" ] || img_os="${img_tag%%-*}"
+# The microarchitecture an app image was built for, from its label; empty for a
+# portable image or one built before the labels existed.
+img_target="$(_launcher_label "${container_img}" hpcdev.target)"
 echo "image     ${img_tag}.sif  (os=${img_os} compiler=${comp_family} mpi=${mpi_family})"
 load_host_modules "${comp_family}" "${mpi_family}" || exit 1
 
@@ -318,6 +322,7 @@ emit_provenance run.meta \
     image        "${container_img}" \
     image_digest "${img_digest:-unknown}" \
     image_os     "${img_os}" \
+    image_target "${img_target:-none}" \
     compiler     "${comp_family}" \
     mpi_family   "${mpi_family}" \
     topology     "$(topology_line)" \
@@ -375,6 +380,7 @@ record_common () {
     result_str  image.os       "${img_os}"
     result_set  image.compiler "${comp_family}"
     result_set  image.mpi      "${mpi_family}"
+    result_set  image.target   "${img_target}"
     result_set  app.name       "${app_name}"
     result_str  app.version    "${app_version}"
     result_str  app.scale      "${HPCRUN_SCALE}"
