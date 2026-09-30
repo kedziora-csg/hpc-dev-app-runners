@@ -182,5 +182,34 @@ want "the fallback comes from the profile" "64 2 4 fallback:site-profile:testvil
 want "with no profile the fallback invents nothing" "1 1 1 fallback:none" "$(topo "true")"
 
 echo
+echo "image identity"
+# An image says what it is in its labels, and the launcher asks them before the
+# file name: which host-MPI recipe is applied is decided from the answer, and a
+# renamed .sif must not change it.  A stub container runtime answers inspect.
+mkdir -p "${TMP}/rt"
+cat > "${TMP}/rt/apptainer" <<'RT'
+#!/bin/bash
+[ "$1 $2" = "inspect --labels" ] || exit 1
+case "$3" in
+    *labelled*) printf 'hpcdev.compiler: oneapi\nhpcdev.mpi: openmpi\nhpcdev.os: leap\n' ;;
+    *)          printf 'compiler: gcc\n' ;;
+esac
+RT
+chmod +x "${TMP}/rt/apptainer"
+: > "${TMP}/leap-gcc14-mpich-labelled.sif"
+: > "${TMP}/leap-gcc14-mpich-plain.sif"
+ident () { # ident <sif> [PATH prefix] -- "compiler mpi" as the launcher sees them
+    PATH="${2:+$2:}/usr/bin:/bin" bash -c ". '${TMP}/cluster.sh'
+        . '${HERE}/../lib/make_apptainer_launcher.sh'
+        echo \"\$(_launcher_sniff_compiler '$1') \$(_launcher_sniff_family '$1')\""
+}
+want "the labels win over the file name" "oneapi openmpi" \
+     "$(ident "${TMP}/leap-gcc14-mpich-labelled.sif" "${TMP}/rt")"
+want "an unlabelled image falls back to its name" "gcc14 mpich" \
+     "$(ident "${TMP}/leap-gcc14-mpich-plain.sif" "${TMP}/rt")"
+want "with no runtime to ask, the name answers" "gcc14 mpich" \
+     "$(ident "${TMP}/leap-gcc14-mpich-labelled.sif")"
+
+echo
 echo "  ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]

@@ -1032,6 +1032,86 @@ consequences:
   itself becomes a *future* upstream contribution rather than a fork-only change. Noted
   there.
 
+### Phase 5, as built (2026-09-29)
+
+On the branch `phase-5-app-images`. It takes in the addendum's F1, F2 and F5,
+and follows the target-in-the-tag decision in `ImagePublishingPlan.md` §2.
+
+**`apps/`, not `containers/apps/`.** `apps/Dockerfile` takes `ARG APP` and
+copies `apps/<app>/` from its own build context: `build.sh`, plus the contract
+in `app.d/` beside it. `scripts/build_hpcg.sh` and `scripts/app.d/hpcg/` moved
+there with `git mv`. From the base image the build relies only on the base
+contract. So a fix to HPCG's build or its extractor reaches the next app image
+without a base rebuild (F1). OSU's contract stays in `scripts/app.d/`, because
+it belongs to the base image. `build.sh` no longer runs `docker-clean`:
+`apps/Dockerfile` does that, and run by hand under apptainer it would have
+emptied the host's `/tmp`.
+
+**What is built comes from the machine description (F2).** Each cluster's
+`images:` block gains `target:` and `march:`, the flags per compiler family.
+Derecho and Casper both state `znver3`, spelled `-march=znver3` and, for
+nvhpc, `-tp=zen3`. The addendum sketched these per sub-cluster. They belong to
+the image set instead, because Casper's two node types run one set.
+`sitegen --check` refuses two clusters that spell one target differently,
+since one tag would then mean two builds. The target joins every app image's
+name, and `images.mk` lists the app images outright, so `sif/Makefile`
+chooses the app repository by membership rather than by suffix.
+`apps/matrix.py <cluster>` turns the block into the workflow's matrix, as
+`{"include": [...]}` for `fromJSON`. So the images the workflow publishes and
+the images `make <cluster>-<app>` pulls are one list, and a test compares them.
+The dispatch inputs narrow it and cannot widen it.
+
+**`app-image-builder-ghcr.yaml`.** A `plan` job runs `matrix.py` for the
+chosen cluster. Then one build job per app image builds `apps/Dockerfile` on
+`<base_repo>-x86_64:<os>-<compiler>-<mpi>-<version>`, publishes it as
+`hpcdev-apps-x86_64:<tag>-{<version>,latest}`, and smoke-tests the published
+image. The base repository is an input, defaulting to today's `hpcdev-derecho`,
+so switching to the NCAR factory is one default. The smoke test is
+`apps/smoke.sh`: the contract's own hooks, driven by hpcrun's
+`app_contract.sh` at `HPCRUN_SCALE=smoke`, and it passes only if `extract`
+prints the app's `primary_fom` and no `valid=false`. It ran on Casper against
+three existing HPCG images and one base image carrying OSU, and it failed as
+it should on an image with no HPCG contract. `build.sh` then built HPCG on the
+oneapi-mpich and nvhpc-openmpi base images under apptainer (`-march=znver3`,
+`-tp=zen3`), and the smoke test passed on the result.
+
+**Labels (F5, and §9's "stamp the app into image labels").** Each app image
+carries `hpcdev.app`, `.app.version`, `.app.yaml.sha256`, `.os`, `.compiler`,
+`.mpi`, `.target` and `.march`, and `apptainer build` keeps them in the `.sif`.
+`make_apptainer_launcher.sh` reads `hpcdev.compiler` and `hpcdev.mpi` before it
+falls back to the file name, and `runner.sh` takes `hpcdev.os` and
+`hpcdev.target` from the labels too, recording the target as `image.target`
+in every row. Older images have no such labels and are read exactly as
+before.
+
+**What `matrix-smoketest-applications.yaml` covered, and where each part
+goes.** It has never run in this fork. It crossed six compilers, two MPI
+families, `{nogpu, cuda}` and `{x86_64, aarch64}` on the portable
+`ncarcisl/hpcdev` images, and in each job it did three things:
+- printed the environment;
+- built and ran `report_placement`;
+- built DART, WRF, MPAS, ESMF and Kokkos with `continue-on-error`.
+
+`report_placement` is part of the base contract, and every Casper and Derecho
+job exercises it. The five app builds test that the base stack can build
+science codes, which is a factory concern (`ImagePublishingPlan.md` §4), so
+they leave with the factory rather than moving here. The `aarch64` and `cuda`
+axes are dropped deliberately: no cluster description names either.
+`hpcg-smoketest-ghcr.yaml` is superseded outright. Both are deleted, with
+`containers/apps/hpcg/Dockerfile`, once the new workflow has published and
+smoke-tested a set.
+
+**Still to do, in order.**
+1. Dispatch `app-image-builder-ghcr.yaml` for `derecho` from this branch.
+2. On a cluster, `make derecho-hpcg` in `sif/`, which pulls the six
+   `...-hpcg-znver3` images.
+3. One HPCG job per cluster.
+4. Delete the two superseded workflows and the old Dockerfile.
+5. Merge.
+
+The experiments name sets, not files, so they need no edit. Until step 2 the
+sets name files that are not on disk, and `validate` says so.
+
 ---
 
 ## 10. Phasing

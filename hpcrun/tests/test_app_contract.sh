@@ -1,7 +1,9 @@
 #!/bin/bash
 #-------------------------------------------------------------------------------
-# test_app_contract.sh -- run every contract in scripts/app.d/ against a stub
-# launcher, with no cluster, no container and no MPI.
+# test_app_contract.sh -- run every contract in the repository against a stub
+# launcher, with no cluster, no container and no MPI.  They live in two places:
+# scripts/app.d/ for what the base images carry (OSU), apps/<app>/app.d/ for
+# the apps this repository builds on top of them (HPCG).
 #
 #     ./test_app_contract.sh
 #
@@ -16,13 +18,20 @@
 # edit to app_contract.sh or to the PBS runner, the contract has failed.
 #-------------------------------------------------------------------------------
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APPD="${HERE}/../../scripts/app.d"
+ROOT="${HERE}/../.."
 . "${HERE}/../lib/probe_topology.sh"  || { echo "cannot source probe_topology.sh"; exit 1; }
 . "${HERE}/../lib/app_contract.sh"    || { echo "cannot source app_contract.sh"; exit 1; }
 
-[ -d "${APPD}" ] || { echo "  SKIP  no scripts/app.d at ${APPD}"; exit 0; }
-
 TMP="$(mktemp -d)"; trap 'rm -rf "${TMP}"' EXIT
+
+# One directory of every contract, as /container/app.d/ would hold them.
+APPD="${TMP}/app.d"; mkdir -p "${APPD}"
+for d in "${ROOT}"/scripts/app.d/*/ "${ROOT}"/apps/*/app.d/; do
+    [ -f "${d}/app.yaml" ] || continue
+    name="$(sed -n 's/^app:[[:space:]]*//p' "${d}/app.yaml" | head -1)"
+    ln -s "$(cd "${d}" && pwd)" "${APPD}/${name}"
+done
+[ -n "$(ls "${APPD}")" ] || { echo "  SKIP  no app contracts under ${ROOT}"; exit 0; }
 pass=0 fail=0
 
 # A launcher that runs things on the host instead of inside a container.

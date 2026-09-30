@@ -81,6 +81,15 @@ addendum). Either way, name the target after the **microarchitecture**
 Derecho's Zen 3 builds, and Stampede3's Ice Lake and Sapphire Rapids nodes may
 share one. Phase 5 decides.
 
+**Decided 2026-09-29: the target goes in the tag**, named for the
+microarchitecture. App images are
+`hpcdev-apps-x86_64:<os>-<compiler>-<mpi>-<app>-<target>-latest`, for example
+`leap-oneapi-mpich-hpcg-znver3-latest`, so the `.sif` files are
+`leap-oneapi-mpich-hpcg-znver3.sif`. The target and each compiler's spelling of
+it are stated in each cluster's `images:` block, which is what the app workflow
+builds from. The old `...-hpcg-latest` tags stay in place for the existing
+pins. See `BenchmarkRunnerPlan.md`, "Phase 5, as built".
+
 ---
 
 ## 3. Who builds the base images: option D

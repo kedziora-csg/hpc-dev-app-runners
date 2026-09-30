@@ -5,10 +5,12 @@ set -e
 #-------------------------------------------------------------------------bh-
 # Common Configuration Environment:
 
+# build_common.cfg is the base image's (its contract: INSTALL_ROOT, STAGE_DIR),
+# not this directory's.  This script arrives from apps/hpcg/ in the build
+# context of apps/Dockerfile, and relies on nothing else of the base.
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-source ${SCRIPTDIR}/build_common.cfg \
-    || source /container/extras/build_common.cfg \
-    || { echo "cannot locate a suitable build_common.cfg!!"; exit 1; }
+source /container/extras/build_common.cfg \
+    || { echo "cannot locate the base image's build_common.cfg!!"; exit 1; }
 #-------------------------------------------------------------------------eh-
 
 #-------------------------------------------------------------------------------
@@ -31,7 +33,7 @@ source ${SCRIPTDIR}/build_common.cfg \
 #
 # At run time HPCG reads ./hpcg.dat from the CURRENT DIRECTORY, so a harness
 # controls problem size and duration by writing its own hpcg.dat in the run
-# directory -- see hpcrun/runner.sh.  A reference copy is installed
+# directory -- apps/hpcg/app.d/prepare does.  A reference copy is installed
 # alongside the binary.
 #
 # NOTE ON OFFICIALNESS: an official HPCG submission requires a run of at least
@@ -205,7 +207,7 @@ cp ${HPCG_BUILD_DIR}/bin/xhpcg ${HPCG_INSTALL_DIR}/bin/
 
 cat <<EOF > ${HPCG_INSTALL_DIR}/bin/hpcg.dat
 HPCG benchmark input file
-Reference hpcg.dat installed by build_hpcg.sh -- copy into your run directory.
+Reference hpcg.dat installed by apps/hpcg/build.sh -- copy into your run directory.
 ${HPCG_NX} ${HPCG_NY} ${HPCG_NZ}
 ${HPCG_SECONDS}
 EOF
@@ -222,33 +224,33 @@ ln -sf ${HPCG_INSTALL_DIR}/bin/xhpcg ${INSTALL_ROOT}/bin/xhpcg
 #
 # See scripts/app.d/README.md.  HPCRUN_APP_DIR overrides this at run time for
 # development, without a rebuild.
+#
+# It comes from beside this script, in the same build context, so a fix to an
+# extractor reaches the next app image without a base rebuild.  It is not
+# optional: an image with xhpcg and no contract is one no runner can drive.
 #-------------------------------------------------------------------------------
-app_src="${SCRIPTDIR}/app.d/hpcg"
-[ -d "${app_src}" ] || app_src="/container/extras/app.d/hpcg"
-if [ -d "${app_src}" ]; then
-    mkdir -p ${INSTALL_ROOT}/app.d
-    cp -R "${app_src}" ${INSTALL_ROOT}/app.d/
-    chmod +x ${INSTALL_ROOT}/app.d/hpcg/prepare ${INSTALL_ROOT}/app.d/hpcg/extract
+app_src="${SCRIPTDIR}/app.d"
+[ -f "${app_src}/app.yaml" ] \
+    || { echo "no app contract at ${app_src} -- refusing to build an undrivable image"; exit 1; }
+app_dst="${INSTALL_ROOT}/app.d/hpcg"
+rm -rf "${app_dst}" && mkdir -p "${app_dst}"
+cp -R "${app_src}/." "${app_dst}/"
+chmod +x "${app_dst}/prepare" "${app_dst}/extract"
 
-    # Stamp what this build actually targeted into the contract.  An app image
-    # may be built for a narrower microarchitecture than the base image it came
-    # from (containers/apps/hpcg/Dockerfile, APP_MARCH_FLAGS), so the image's own
-    # compiler/mpi labels no longer describe the app.  The runner copies app.yaml
-    # into every results directory, so this makes each row say what it measured
-    # -- otherwise two rows differing by 30% could be AVX2 versus SSE2 and
-    # nothing would record it.
-    printf 'built_with_march: "%s"\n' "${MARCH_FLAGS:-compiler default}" \
-        >> ${INSTALL_ROOT}/app.d/hpcg/app.yaml
-    echo "installed app contract: ${INSTALL_ROOT}/app.d/hpcg (march: ${MARCH_FLAGS:-compiler default})"
-else
-    echo "WARNING: no app.d/hpcg contract found; the image will carry xhpcg but"
-    echo "         a runner will not know how to size or read it"
-fi
+# Stamp what this build actually targeted into the contract.  An app image may
+# be built for a narrower microarchitecture than the base image it came from
+# (apps/Dockerfile, APP_MARCH_FLAGS), so the base image's compiler/mpi labels
+# no longer describe the app.  The runner copies app.yaml into every results
+# directory, so this makes each row say what it measured -- otherwise two rows
+# differing by 30% could be AVX2 versus SSE2 and nothing would record it.
+printf 'built_with_march: "%s"\n' "${MARCH_FLAGS:-compiler default}" >> "${app_dst}/app.yaml"
+echo "installed app contract: ${app_dst} (march: ${MARCH_FLAGS:-compiler default})"
 
 echo && echo "installed:" && ls -l ${HPCG_INSTALL_DIR}/bin/
 report_cpu_features ${HPCG_INSTALL_DIR}/bin/xhpcg 2>/dev/null || ldd ${HPCG_INSTALL_DIR}/bin/xhpcg || true
 
-command -v docker-clean >/dev/null 2>&1 && docker-clean || true
+# No docker-clean here: apps/Dockerfile runs it after this script, and it empties
+# /tmp -- which, run by hand under apptainer, is the HOST's /tmp.
 
 #-------------------------------------------------------------------------------
 # Smoke run: tiny problem, few seconds.  Proves the binary launches, that MPI and

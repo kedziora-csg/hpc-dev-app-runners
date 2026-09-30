@@ -15,13 +15,14 @@ derecho_images := leap-oneapi-mpich.sif \
     leap-oneapi-openmpi.sif \
     leap-gcc14-openmpi.sif \
     leap-nvhpc-openmpi.sif
-derecho_hpcg_images := leap-oneapi-mpich-hpcg.sif \
-    leap-gcc14-mpich-hpcg.sif \
-    leap-nvhpc-mpich-hpcg.sif \
-    leap-oneapi-openmpi-hpcg.sif \
-    leap-gcc14-openmpi-hpcg.sif \
-    leap-nvhpc-openmpi-hpcg.sif
+derecho_hpcg_images := leap-oneapi-mpich-hpcg-znver3.sif \
+    leap-gcc14-mpich-hpcg-znver3.sif \
+    leap-nvhpc-mpich-hpcg-znver3.sif \
+    leap-oneapi-openmpi-hpcg-znver3.sif \
+    leap-gcc14-openmpi-hpcg-znver3.sif \
+    leap-nvhpc-openmpi-hpcg-znver3.sif
 cluster_images += $(derecho_images) $(derecho_hpcg_images)
+app_images += $(derecho_hpcg_images)
 
 derecho: $(derecho_images)
 echo-derecho:

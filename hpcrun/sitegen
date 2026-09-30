@@ -188,6 +188,14 @@ def main():
 
     if args.check or (not args.write and not args.site):
         bad = sum(check_one(name) for name in names)
+        # Across clusters: one target, one spelling, or one tag means two builds.
+        try:
+            for problem in sitefile.target_conflicts(
+                    [sitefile.load(n) for n in described()]):
+                print("  FAIL  %s" % problem, file=sys.stderr)
+                bad += 1
+        except BenchError:
+            pass                        # already reported by check_one
         print("%d cluster(s) checked, %d stale" % (len(names), bad))
         return 1 if bad else EXIT_OK
 

@@ -64,11 +64,17 @@ scheduler:
 # The openmpi half of Derecho's set, and nothing else: Casper's Genoa runs
 # Derecho's Zen 3 builds, and with no mpich family under mpi: below, an mpich
 # image is refused here rather than built for a cluster that cannot run it.
+#
+# The same Zen 3 builds, so the same target and the same spelling: sitegen
+# --check refuses two clusters that name one target and spell it differently,
+# because the tag would then mean whichever was built last.
 images:
   os: leap
   compilers: [oneapi, gcc14, nvhpc]
   mpi: [openmpi]
   apps: [hpcg]
+  target: znver3
+  march: {default: -march=znver3, nvhpc: -tp=zen3}
 
 modules:
   # Beyond the site bootstrap.  Casper is a GPU cluster and its jobs want the

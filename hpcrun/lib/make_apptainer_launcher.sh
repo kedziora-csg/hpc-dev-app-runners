@@ -171,8 +171,23 @@ _launcher_add_arg () {
 #-------------------------------------------------------------------------------
 # Sniffing what an image is
 #-------------------------------------------------------------------------------
+# What an image says about itself: one of the hpcdev.* labels the app workflow
+# stamps (apps/Dockerfile's image, carried into the .sif by apptainer build), or
+# nothing.  Read FIRST, because a file name is a claim anyone can edit by
+# renaming -- and which host-MPI recipe is applied is decided from the answer.
+# The name patterns below remain for images built before the labels existed.
+_launcher_label () {
+    local img="$1" key="$2"
+    [ -f "${img}" ] || return 0
+    command -v "${HPCRUN_CONTAINER_RUNTIME:-apptainer}" >/dev/null 2>&1 || return 0
+    "${HPCRUN_CONTAINER_RUNTIME:-apptainer}" inspect --labels "${img}" 2>/dev/null \
+        | sed -n "s/^${key//./\\.}:[[:space:]]*//p" | head -1
+}
+
 _launcher_sniff_family () {
     local img="$1" fam=""
+    fam="$(_launcher_label "${img}" hpcdev.mpi)"
+    [ -n "${fam}" ] && { echo "${fam}"; return 0; }
     case "${img}" in
         *mpich3*)  fam="mpich3"  ;;
         *mpich*)   fam="mpich"   ;;
@@ -182,11 +197,14 @@ _launcher_sniff_family () {
     echo "${fam}"
 }
 
-# Sniff the compiler family from the image name (<os>-<compiler>-<mpi>[...].sif).
+# The compiler family: the image's hpcdev.compiler label, else sniffed from its
+# name (<os>-<compiler>-<mpi>[...].sif).
 # Order matters: gcc14 must be tested before the bare gcc substring.  Falls back
 # to the host's own loaded compiler family when the name is uninformative.
 _launcher_sniff_compiler () {
     local img="$1" comp=""
+    comp="$(_launcher_label "${img}" hpcdev.compiler)"
+    [ -n "${comp}" ] && { echo "${comp}"; return 0; }
     case "${img}" in
         *oneapi*) comp="oneapi" ;;
         *nvhpc*)  comp="nvhpc"  ;;

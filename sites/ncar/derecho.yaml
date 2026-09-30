@@ -34,11 +34,17 @@ scheduler:
 # alternative.  sitegen writes it into derecho/images.mk, so `make derecho` and
 # `make derecho-hpcg` in sif/ build it and `images.set: derecho-hpcg` in
 # an experiment runs it.
+#
+# The app images are built for Derecho's Zen 3 (2 x EPYC 7763, AVX2 and FMA, no
+# AVX-512), spelled per compiler: nvc ignores -march= silently, so nvhpc takes
+# -tp=.  The target is in every app image's tag and .sif name.
 images:
   os: leap
   compilers: [oneapi, gcc14, nvhpc]
   mpi: [mpich, openmpi]
   apps: [hpcg]
+  target: znver3
+  march: {default: -march=znver3, nvhpc: -tp=zen3}
 
 modules:
   # Cray MPICH ships in the default ncarenv, so there is nothing to load for it.

@@ -47,16 +47,19 @@ check-images:
 	         "without it every .sif would read as unstamped" >&2 ; exit 1 ; }
 	@for i in $(IMAGES); do \
 	    t="$${i%.sif}" ; \
-	    case "$$t" in *-hpcg) ref="$(GHCR_APPS_REF)" ;; *) ref="$(GHCR_BASE_REF)" ;; esac ; \
+	    case " $(app_images) " in \
+	        *" $$i "*) ref="$(GHCR_APPS_REF)" ;; \
+	        *) case "$$t" in *-hpcg) ref="$(GHCR_APPS_REF)" ;; *) ref="$(GHCR_BASE_REF)" ;; esac ;; \
+	    esac ; \
 	    have="$$(apptainer inspect $$i 2>/dev/null \
 	             | sed -n 's/.*image.base.digest[": ]*\([a-z0-9:]*\).*/\1/p' | head -1)" ; \
 	    want="$$(./pin_image_digest.sh --resolve $$ref:$$t-latest 2>/dev/null)" ; \
-	    if   [ ! -f "$$i" ];              then state="no .sif -- run make $${t##*-}" ; \
+	    if   [ ! -f "$$i" ];              then state="no .sif -- run make $$i" ; \
 	    elif [ -z "$$want" ];             then state="cannot reach the registry" ; \
 	    elif [ "$$have" = "$$want" ];     then state="current" ; \
 	    elif [ -z "$$have" ];             then state="STALE? built before digests were stamped -- rm it and rebuild" ; \
 	    else                                   state="STALE -- has $${have#sha256:} want $${want#sha256:}" ; fi ; \
-	    printf "  %-34s %s\n" "$$i" "$$state" ; \
+	    printf "  %-38s %s\n" "$$i" "$$state" ; \
 	done
 
 clean:
@@ -87,7 +90,7 @@ pristine:
 .PHONY: FORCE
 FORCE:
 
-.PRECIOUS: %.def %-hpcg.def
+.PRECIOUS: %.def %-hpcg.def $(sort $(app_images:.sif=.def))
 
 # repin <deffile> -- keep, replace, or decline to replace the generated .def.
 define repin
@@ -102,6 +105,17 @@ define repin
 	fi
 endef
 
+# App images, by the list each cluster's images.mk states -- not by suffix,
+# since a name ends in its target (leap-oneapi-mpich-hpcg-znver3).  A static
+# pattern rule, so it wins over the two below for exactly these names.
+$(sort $(app_images:.sif=.def)): %.def: Deffile.apps pin_image_digest.sh FORCE
+	@cp $< $@.tmp
+	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*/g' $@.tmp
+	@./pin_image_digest.sh --pin $@.tmp $(GHCR_APPS_REF):$*-latest
+	@$(repin)
+
+# App images named before targets were part of the name, which the app
+# repository still holds under these tags.
 %-hpcg.def: Deffile.apps pin_image_digest.sh FORCE
 	@cp $< $@.tmp
 	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*-hpcg/g' $@.tmp

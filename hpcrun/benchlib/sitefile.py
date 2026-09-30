@@ -374,6 +374,16 @@ def cross_checks(data):
                 "'${NAME}' for the variable the MPI module sets." % family)
 
     images = data.get("images") or {}
+    if ("target" in images) != ("march" in images):
+        out.append(
+            "images: states %s without %s. A target names how the app images are "
+            "built, so it needs the flags that build them; flags with no target "
+            "would change the images without changing their names."
+            % (("target", "march") if "target" in images else ("march", "target")))
+    for family in sorted(images.get("march") or {}):
+        if family != "default" and family not in (images.get("compilers") or []):
+            out.append("images.march.%s spells the target for a compiler the set "
+                       "does not build" % family)
     compiler_map = (data.get("modules") or {}).get("compiler_map") or {}
     for compiler in images.get("compilers") or []:
         if compiler not in compiler_map:
@@ -793,9 +803,11 @@ def image_sets(sf):
     """{set name: [.sif, ...]}, in the order a sweep should run them.
 
     `<cluster>` is the base set, every compiler crossed with every MPI family;
-    `<cluster>-<app>` is the same images with that app layered on.  MPI is the
-    outer loop, so each family's images are adjacent -- which is how the
-    Makefile listed Derecho's six before this was generated.
+    `<cluster>-<app>` is the same images with that app layered on, and with the
+    target they were built for when the description states one --
+    leap-oneapi-mpich-hpcg-znver3.sif.  MPI is the outer loop, so each family's
+    images are adjacent -- which is how the Makefile listed Derecho's six before
+    this was generated.
     """
     images = sf.data.get("images")
     if not images:
@@ -803,9 +815,52 @@ def image_sets(sf):
     base = ["%s-%s-%s.sif" % (images["os"], compiler, family)
             for family in images["mpi"] for compiler in images["compilers"]]
     sets = {sf.name: base}
+    suffix = ("-" + images["target"]) if images.get("target") else ""
     for app in images.get("apps") or []:
-        sets["%s-%s" % (sf.name, app)] = [i[:-4] + "-" + app + ".sif" for i in base]
+        sets["%s-%s" % (sf.name, app)] = [i[:-4] + "-" + app + suffix + ".sif"
+                                          for i in base]
     return sets
+
+
+def app_builds(sf):
+    """What the app workflow builds for this cluster: one dict per app image.
+
+    The same crossing as image_sets, plus what the build needs and the set
+    names do not carry -- the base image's tag, and the flags for this
+    compiler.  Read by apps/matrix.py, which is the workflow's only view of the
+    cluster descriptions.
+    """
+    images = sf.data.get("images") or {}
+    march = images.get("march") or {}
+    out = []
+    for app in images.get("apps") or []:
+        for family in images["mpi"]:
+            for compiler in images["compilers"]:
+                base = "%s-%s-%s" % (images["os"], compiler, family)
+                tag = base + "-" + app + (("-" + images["target"])
+                                          if images.get("target") else "")
+                out.append({"os": images["os"], "compiler": compiler,
+                            "mpi": family, "app": app, "base_tag": base,
+                            "tag": tag, "target": images.get("target", ""),
+                            "march": march.get(compiler, march.get("default", ""))})
+    return out
+
+
+def target_conflicts(sfs):
+    """Targets two clusters spell differently -- one tag that would mean two
+    builds, which is the rule the target exists to keep."""
+    seen, out = {}, []
+    for sf in sfs:
+        images = sf.data.get("images") or {}
+        if not images.get("target"):
+            continue
+        spelled = images.get("march") or {}
+        target = images["target"]
+        if target in seen and seen[target][1] != spelled:
+            out.append("target %s is spelled %r by %s and %r by %s"
+                       % (target, seen[target][1], seen[target][0], spelled, sf.name))
+        seen.setdefault(target, (sf.name, spelled))
+    return out
 
 
 def render_images_mk(sf, source_rel=None):
@@ -842,6 +897,10 @@ def render_images_mk(sf, source_rel=None):
         out.append("%s := %s" % (var, " \\\n    ".join(files)))
     out.append("cluster_images += " + " ".join(
         "$(%s_images)" % n.replace("-", "_") for n in names))
+    # Which of them come from the app repository, so the Makefile need not
+    # guess it from a suffix.
+    out.append("app_images += " + " ".join(
+        "$(%s_images)" % n.replace("-", "_") for n in names if n != c))
     out.append("")
     for name in names:
         var = name.replace("-", "_") + "_images"

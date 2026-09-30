@@ -216,8 +216,18 @@ The images this cluster runs, stated as axes rather than as a list: every compil
 | --- | --- | --- | --- | --- |
 | `apps` | list of string |  | no duplicates | Apps built on top of the base set, one set of images each: <os>-<compiler>-<mpi>-<app>.sif, named <cluster>-<app>. |
 | `compilers` | list of string | yes | at least 1 entry, no duplicates | Container compiler tags. Each must be a key of modules.compiler_map: the host MPI that displaces the container's is loaded to match the compiler, so a compiler with no host module is an image no job here can run. |
+| [`march`](#clusterimagesmarch) | object |  | no other keys | How each compiler family spells target, passed to the app build as APP_MARCH_FLAGS. default covers every family not named; a family whose compiler spells it differently gets its own entry -- nvhpc takes -tp=zen3, and ignores -march= without a word. Required with target, and only with it. |
 | `mpi` | list of `openmpi` \| `mpich` \| `mpich3` | yes | at least 1 entry, no duplicates | Container MPI families. Each must be listed under mpi:, which is what says this cluster can host it -- why Casper's set has no mpich. |
 | `os` | string | yes | matches `/^[a-z][a-z0-9]*$/` | The container OS, the first word of every image name. The one closest to the host's own userspace -- leap for Derecho's SLE 15. |
+| `target` | string |  | matches `/^[a-z0-9][a-z0-9_]*$/` | The microarchitecture the app images are built for, named after the microarchitecture and not the cluster (znver3, icelake): Casper's Genoa nodes run Derecho's Zen 3 builds. It becomes part of every app image's tag and .sif name -- leap-oneapi-mpich-hpcg-znver3 -- so one tag means one build. Omit it, with march, for app images built at the base image's own flags. Two clusters naming one target must spell its march identically; hpcrun/sitegen --check refuses otherwise. |
+
+##### `cluster.images.march`
+
+How each compiler family spells target, passed to the app build as APP_MARCH_FLAGS. default covers every family not named; a family whose compiler spells it differently gets its own entry -- nvhpc takes -tp=zen3, and ignores -march= without a word. Required with target, and only with it.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `<name>` | string |  | key matches `/^(default|[a-z][a-z0-9]*)$/`, matches `/^-[A-Za-z0-9=._,+-]+( -[A-Za-z0-9=._,+-]+)*$/` | The flags, as the compiler takes them. |
 
 #### `cluster.modules`
 

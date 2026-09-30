@@ -1,0 +1,210 @@
+name: Build and Smoke-test App Images (GHCR)
+
+#-------------------------------------------------------------------------------
+# Build applications on top of published base images, publish the app images,
+# then run each one through its app contract.
+#
+# WHAT IS BUILT comes from the cluster's description, not from this file.  The
+# images: block of sites/<site>/<cluster>.yaml names the OS, compilers, MPI
+# families and apps a cluster runs, and the microarchitecture its app images are
+# built for with each compiler's spelling of it.  apps/matrix.py turns that into
+# this workflow's matrix, so the images published here and the images
+# `make <cluster>-<app>` in sif/ pulls are one list.  The inputs below can only
+# narrow it.
+#
+# HOW an app is built is apps/Dockerfile with apps/<app>/ from this checkout --
+# not a recipe baked into the base image, so a fix to an app's build or its
+# extractor reaches the next app image without a base rebuild.
+#
+# THE SMOKE TEST is apps/smoke.sh: the app contract's own hooks, driven by
+# hpcrun's app_contract.sh, at HPCRUN_SCALE=smoke.  The same path a cluster job
+# takes, in seconds, before anything is queued.
+#
+# NAMES: <apps_repo>-<arch>:<os>-<compiler>-<mpi>-<app>-<target>-{latest,<version>}.
+# The target is in the tag, and so in every .sif name, because one tag must
+# mean one build (ImagePublishingPlan.md section 2).
+#
+# Replaces hpcg-smoketest-ghcr.yaml, whose HPCG-only steps this generalises.
+#-------------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: "Cluster whose images: block says what to build"
+        type: choice
+        required: true
+        default: derecho
+        options:
+          - derecho
+          - casper
+      apps:
+        description: "Only these apps (space or comma separated); empty = every app the cluster runs"
+        type: string
+        required: false
+        default: ""
+      compilers:
+        description: "Only these compilers; empty = all the cluster runs"
+        type: string
+        required: false
+        default: ""
+      mpis:
+        description: "Only these MPI families; empty = all the cluster runs"
+        type: string
+        required: false
+        default: ""
+      base_repo:
+        description: "Base image repository, without the -<arch> suffix"
+        type: string
+        required: false
+        default: "ghcr.io/kedziora-csg/hpcdev-derecho"
+      apps_repo:
+        description: "App image repository, without the -<arch> suffix"
+        type: string
+        required: false
+        default: "ghcr.io/kedziora-csg/hpcdev-apps"
+      image_version:
+        description: "Dated tag suffix: the base image's to build on, and the app image's to publish"
+        type: string
+        required: true
+        default: "26.08"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  #-----------------------------------------------------------------------------
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: App images for this cluster
+        id: matrix
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+          APPS: ${{ inputs.apps }}
+          COMPILERS: ${{ inputs.compilers }}
+          MPIS: ${{ inputs.mpis }}
+        run: |
+          set -eo pipefail
+          args=("${CLUSTER}" --apps "${APPS}" --compilers "${COMPILERS}" --mpis "${MPIS}")
+          python3 apps/matrix.py "${args[@]}" --table | tee -a "${GITHUB_STEP_SUMMARY}"
+          echo "matrix=$(python3 apps/matrix.py "${args[@]}")" >> "${GITHUB_OUTPUT}"
+
+  #-----------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.tag }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash -elo pipefail {0}
+
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+
+    env:
+      ARCH: x86_64
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve names
+        id: image
+        # Inputs reach the script through the environment, never pasted into it.
+        env:
+          BASE_REPO: ${{ inputs.base_repo }}
+          APPS_REPO: ${{ inputs.apps_repo }}
+          VERSION: ${{ inputs.image_version }}
+          APP: ${{ matrix.app }}
+          BASE_TAG: ${{ matrix.base_tag }}
+          TAG: ${{ matrix.tag }}
+        run: |
+          lower () { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+          base_repo="$(lower "${BASE_REPO}")-${ARCH}"
+          apps_repo="$(lower "${APPS_REPO}")-${ARCH}"
+          app_yaml="apps/${APP}/app.d/app.yaml"
+          [ -f "${app_yaml}" ] || { echo "no ${app_yaml}"; exit 1; }
+          version="$(sed -n 's/^version:[[:space:]]*//p' "${app_yaml}" | tr -d '"' | head -1)"
+          {
+            echo "base_image=${base_repo}:${BASE_TAG}-${VERSION}"
+            echo "app_image=${apps_repo}:${TAG}-${VERSION}"
+            echo "app_image_latest=${apps_repo}:${TAG}-latest"
+            echo "app_version=${version}"
+            echo "app_yaml_sha256=$(sha256sum "${app_yaml}" | cut -d' ' -f1)"
+          } | tee -a "${GITHUB_OUTPUT}"
+          mkdir -p smoke-logs
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker BuildX
+        uses: docker/setup-buildx-action@v4
+
+      # The labels are what a .sif made from this image says about itself:
+      # apptainer build carries them over, and hpcrun's launcher reads
+      # hpcdev.compiler and hpcdev.mpi before it falls back to the file name.
+      - name: Build and publish ${{ matrix.tag }}
+        uses: docker/build-push-action@v7
+        with:
+          push: true
+          load: false
+          tags: |
+            ${{ steps.image.outputs.app_image }}
+            ${{ steps.image.outputs.app_image_latest }}
+          provenance: mode=max
+          sbom: true
+          context: .
+          file: apps/Dockerfile
+          target: final
+          build-args: |
+            BASE_IMAGE=${{ steps.image.outputs.base_image }}
+            APP=${{ matrix.app }}
+            APP_MARCH_FLAGS=${{ matrix.march }}
+            MAKE_J_PROCS=4
+          labels: |
+            org.opencontainers.image.base.name=${{ steps.image.outputs.base_image }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            hpcdev.app=${{ matrix.app }}
+            hpcdev.app.version=${{ steps.image.outputs.app_version }}
+            hpcdev.app.yaml.sha256=${{ steps.image.outputs.app_yaml_sha256 }}
+            hpcdev.os=${{ matrix.os }}
+            hpcdev.compiler=${{ matrix.compiler }}
+            hpcdev.mpi=${{ matrix.mpi }}
+            hpcdev.target=${{ matrix.target }}
+            hpcdev.march=${{ matrix.march }}
+
+      - name: Smoke-test ${{ matrix.tag }} through its app contract
+        env:
+          APP_IMAGE: ${{ steps.image.outputs.app_image }}
+          APP: ${{ matrix.app }}
+          TAG: ${{ matrix.tag }}
+        run: |
+          docker run --rm \
+            --volume "${PWD}:/src:ro" \
+            --env OMPI_MCA_opal_cuda_support=false \
+            --env MPIR_CVAR_ENABLE_GPU=0 \
+            "${APP_IMAGE}" \
+            bash -lc "/src/apps/smoke.sh ${APP} 2 2" \
+            2>&1 | tee "smoke-logs/${TAG}.log"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: smoke-${{ matrix.tag }}
+          path: smoke-logs/*.log
+          if-no-files-found: warn
