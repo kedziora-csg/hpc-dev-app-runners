@@ -1,0 +1,32 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# heffte/extract <rundir> -- print `key=value` for this cell.
+#
+# speed3d prints its summary to stdout, which the runner captures as app.out:
+#
+#     Time per run: 0.0123 (s)
+#     Performance:  45.6 GFlops/s
+#     Tolerance:    1e-11
+#     Max error:    3.2e-14
+#
+# No summary is a missing metric, not a failed run.
+#-------------------------------------------------------------------------------
+rundir="${1:-${HPCRUN_RUNDIR:-.}}"
+cd "${rundir}" 2>/dev/null || exit 0
+[ -f app.out ] || exit 0
+
+t="$(sed -n 's/^Time per run:[[:space:]]*\([0-9.eE+-]*\).*/\1/p' app.out | tail -1)"
+g="$(sed -n 's/^Performance:[[:space:]]*\([0-9.eE+-]*\).*/\1/p'  app.out | tail -1)"
+tol="$(sed -n 's/^Tolerance:[[:space:]]*\([0-9.eE+-]*\).*/\1/p'  app.out | tail -1)"
+err="$(sed -n 's/^Max error:[[:space:]]*\([0-9.eE+-]*\).*/\1/p'  app.out | tail -1)"
+
+[ -n "${t}" ]   && echo "fft_time_s=${t}"
+[ -n "${g}" ]   && echo "gflops=${g}"
+[ -n "${err}" ] && echo "max_error=${err}"
+b="$(sed -n 's/^Backend:[[:space:]]*//p' app.out | tail -1)"
+[ -n "${b}" ]   && echo "backend=$(printf '%s' "${b}" | tr -d ' ')"
+
+if [ -n "${err}" ] && [ -n "${tol}" ]; then
+    awk -v e="${err}" -v t="${tol}" 'BEGIN { print ((e + 0 <= t + 0) ? "valid=true" : "valid=false") }'
+fi
+exit 0

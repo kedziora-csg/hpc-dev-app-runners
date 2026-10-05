@@ -1,0 +1,32 @@
+# HeFFTe speed3d -- distributed 3-D FFTs through the base image's HeFFTe and FFTW.
+#
+# Here for the seam study (BenchmarkRunnerPlan.md, §11 item 11): unlike HPCG
+# and OSU, its time is spent in libraries the BASE image provides, so building
+# it on a portable base and on a tuned one measures what tuning the base buys.
+app: heffte
+version: "@HEFFTE_VERSION@"
+binary: /container/bin/speed3d_r2c
+primary_fom: fft_time_s
+
+requires:
+  mpi: true
+  openmp: false
+  min_ranks: 1
+
+figures_of_merit:
+  fft_time_s: {units: s, better: lower, note: "speed3d's time per transform, max over ranks"}
+  gflops:     {units: GFLOP/s, better: higher, note: "speed3d's own estimate, 5 N log2 N flops"}
+  max_error:  {units: "", better: lower}
+  wall_s:     {units: s, better: lower, provided_by: runner}
+
+success_criteria:
+  app_self_validates: true
+
+notes: |
+  launch prints `speed3d_r2c <backend> double N N N -n10`.  HEFFTE_BACKEND
+  picks the 1-D FFT library: fftw (the base's libfftw3, the default) or stock
+  (HeFFTe's own, compiled into the base's libheffte).  HEFFTE_N sets the cube
+  edge; the default is 32 at HPCRUN_SCALE=smoke and 512 otherwise.
+
+  extract reports valid=false when speed3d's max error exceeds its own
+  tolerance, so a miscompiled library never wins a comparison.

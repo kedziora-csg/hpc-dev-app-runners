@@ -1,0 +1,12 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# heffte/launch -- print the argv for this cell, one line.
+#
+# speed3d takes its problem on the command line.  The cube edge is one knob,
+# HEFFTE_N; smoke runs get a tiny cube.  -n10 averages ten transforms.
+#-------------------------------------------------------------------------------
+case "${HPCRUN_SCALE:-node}" in
+    smoke) n="${HEFFTE_N:-32}" ;;
+    *)     n="${HEFFTE_N:-512}" ;;
+esac
+echo "/container/bin/${HEFFTE_BENCH:-speed3d_r2c} ${HEFFTE_BACKEND:-fftw} double ${n} ${n} ${n} -n10"

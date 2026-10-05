@@ -1,0 +1,59 @@
+# The seam study's measurement (BenchmarkRunnerPlan.md, section 11 item 11).
+#
+# Does tuning the BASE image matter?  The same app, built with the same flags
+# (-march=znver3), on two bases that differ only in how their libraries were
+# compiled:
+#
+#     leap-<c>-mpich-heffte-znver3.sif         on hpcdev-derecho   (libraries built -march=znver3)
+#     leap-<c>-mpich-heffte-znver3-pbase.sif   on hpcdev           (libraries built portable)
+#
+# HeFFTe's speed3d spends its time in the base's libheffte and libfftw3, so any
+# difference between a pair is the base's tuning and nothing else.  HPCG and OSU
+# could not show one: they link only MPI and the compiler runtime, and the host's
+# MPI replaces the container's at run time.
+#
+# Two backends, because they exercise different base code: fftw is the base's
+# libfftw3 -- configured WITHOUT --enable-avx2, so its codelets are scalar and
+# only the compiler's own vectorisation can differ -- and stock is HeFFTe's own
+# FFT, compiled into the base's libheffte.
+#
+# One node per job: the question is per-core code, not the fabric.
+#
+#     ../validate derecho-seam
+#     ../submit   derecho-seam --account <PROJECT>
+#
+# The -pbase images come from a dispatch with base_repo=ghcr.io/kedziora-csg/hpcdev
+# and tag_suffix=pbase; see the plan for the commands.
+schema: 2
+cluster: derecho
+
+defaults:
+  nodes: 1
+  walltime: "00:20:00"
+  repeats: 3
+  scale: node
+
+images:
+  list:
+    - leap-gcc14-mpich-heffte-znver3.sif
+    - leap-gcc14-mpich-heffte-znver3-pbase.sif
+    - leap-oneapi-mpich-heffte-znver3.sif
+    - leap-oneapi-mpich-heffte-znver3-pbase.sif
+
+apps:
+  - name: heffte
+    label: fftw
+    env: {HEFFTE_BACKEND: fftw, HEFFTE_N: 512}
+  - name: heffte
+    label: stock
+    env: {HEFFTE_BACKEND: stock, HEFFTE_N: 512}
+
+placements:
+  - {name: pureMPI, ranks_per_node: 128, threads: 1}
+
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
+
+sweep:
+  matrix:  [images, apps, placements, omp_variants]
+  per_job: [placements, omp_variants]

@@ -42,7 +42,9 @@ images:
   os: leap
   compilers: [oneapi, gcc14, nvhpc]
   mpi: [mpich, openmpi]
-  apps: [hpcg]
+  # heffte is the seam study's probe: its time is spent in the base image's
+  # libraries (BenchmarkRunnerPlan.md, section 11 item 11).
+  apps: [hpcg, heffte]
   target: znver3
   march: {default: -march=znver3, nvhpc: -tp=zen3}
 

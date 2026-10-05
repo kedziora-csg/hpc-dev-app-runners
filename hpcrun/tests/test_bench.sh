@@ -251,10 +251,10 @@ want "casper's hpcg set is the openmpi half" \
 # own spelling of it.
 want "the app workflow's matrix is the set the Makefile pulls" \
     "$(cd ../sif && make --no-print-directory echo-derecho-hpcg | sed 's/\.sif//g')" \
-    "$(python3 ../apps/matrix.py derecho | python3 -c 'import json, sys
+    "$(python3 ../apps/matrix.py derecho --apps hpcg | python3 -c 'import json, sys
 print(" ".join(e["tag"] for e in json.load(sys.stdin)["include"]))')"
 want "nvhpc is built with -tp=, the rest with -march=" "-march=znver3 -tp=zen3" \
-    "$(python3 ../apps/matrix.py derecho --mpis mpich --compilers 'gcc14 nvhpc' | python3 -c 'import json, sys
+    "$(python3 ../apps/matrix.py derecho --apps hpcg --mpis mpich --compilers 'gcc14 nvhpc' | python3 -c 'import json, sys
 print(" ".join(e["march"] for e in json.load(sys.stdin)["include"]))')"
 python3 ../apps/matrix.py casper --mpis mpich >/dev/null 2>&1
 want "the matrix can narrow a cluster's set but never widen it" 2 "$?"

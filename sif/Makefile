@@ -28,6 +28,12 @@ all: $(all_images)
 # give an image.  Edit the YAML, not the .mk.
 include $(sort $(wildcard ../sites/*/*/images.mk))
 
+# App images no cluster's set names, pulled from the app repository all the
+# same -- a one-off such as the seam study's portable-base builds:
+#     make leap-gcc14-mpich-heffte-znver3-pbase.sif \
+#          EXTRA_APP_IMAGES=leap-gcc14-mpich-heffte-znver3-pbase.sif
+app_images += $(EXTRA_APP_IMAGES)
+
 echo:
 	@echo "$(all_images)"
 

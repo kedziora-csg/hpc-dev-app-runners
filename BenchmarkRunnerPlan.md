@@ -2108,6 +2108,60 @@ All four DECISIONs are answered — see §12. What remains open:
     *Who decides.* This project, in the new factory repository
     (`ImagePublishingPlan.md` §4, §7): base images are ours to design there.
 
+    *Progress, 2026-10-05* (branch `seam-study`).
+
+    - **Casper's distro is leap.** A one-CPU job on each htc node type
+      (crhtc69, Genoa; crhtc53, Cascade Lake) read `openSUSE Leap 15.6`,
+      kernel 6.4.0-150600, glibc 2.38, exactly the userspace the leap base
+      images carry. Derecho's is SLE 15 SP6, built from the same sources. So
+      for NCAR the distro does not vary by cluster, and a build key there is
+      only microarchitecture x compiler x MPI.
+    - **Build keys and their cost.** The clusters as described need 6 base
+      images today: leap x {oneapi, gcc14, nvhpc} x {mpich, openmpi}, shared
+      by Derecho and Casper. One per native target instead -- `znver3` for
+      Derecho, `znver4` for `htc-genoa`, `cascadelake` for `htc-cascadelake`,
+      with Casper's openmpi only -- is 6 + 3 + 3 = 12. Sizes from GHCR
+      (compressed): oneapi 2.6 GB, gcc14 1.0 GB, nvhpc 8.1 GB. So the
+      registry and every download go from about 23 GB to about 47 GB.
+    - **Today a tuned base shares nothing with a portable one.** Layer by
+      layer, `hpcdev-x86_64` and `hpcdev-derecho-x86_64` share only the 44 MB
+      OS layer from Docker Hub. The 423 MB of OS packages and nvhpc's 3.7 GB
+      compiler layer are stored twice, though their content cannot depend on
+      the target, because each build is a separate, non-reproducible run. So
+      option 2's cost is the full image per key. Option 3 would change that
+      only if a tuned image is built FROM the published portable image's
+      lower stages. The final stage's `chown` (`ImagePublishingPlan.md` §4,
+      trim 1) duplicates every file into the top layer -- 3.8 GB of an nvhpc
+      image -- so that trim comes first whichever seam wins.
+    - **The base's FFTW is configured without SIMD.** `fftlibs` runs FFTW's
+      `configure` with no `--enable-sse2`/`--enable-avx`/`--enable-avx2`/
+      `--enable-avx512`, so its codelets are scalar on both bases. FFTW
+      chooses SIMD codelets at run time from CPUID, so enabling them is safe
+      in a PORTABLE base. That is likely worth more than any `-march`, and
+      it shows the study's real question is not portable versus tuned. Some
+      libraries dispatch at run time and only need configuring well. Others
+      -- HeFFTe's `stock` backend, the netCDF/HDF5 filters -- vectorise only
+      for the target they were compiled for.
+    - **The probe app.** `apps/heffte/` builds HeFFTe's `speed3d` benchmarks
+      against the base's own libheffte and libfftw3. It does not build its own
+      HeFFTe, so its time is spent in base libraries. The contract has a
+      `fftw` and a `stock` backend, and `extract` reports `valid=false` when
+      speed3d's max error exceeds its own tolerance. `build.sh` and
+      `smoke.sh` pass under apptainer on the gcc14 tuned and portable bases,
+      oneapi-mpich and nvhpc-openmpi. Derecho's `images.apps` gains
+      `heffte`, so `derecho-heffte` is a set.
+    - **Telling the two builds apart.** The portable-base builds must not take
+      the regular tag. The app workflow gains a `tag_suffix` input
+      (`apps/matrix.py --tag-suffix`), so they publish as
+      `...-heffte-znver3-pbase`. `sif/Makefile` pulls an image outside every
+      set with `EXTRA_APP_IMAGES=`.
+    - **The measurement.** `hpcrun/experiments/derecho-seam.yaml` runs gcc14
+      and oneapi mpich images, tuned and portable base, under both backends,
+      at 512^3 on one node, 128 ranks. That is 8 one-node jobs.
+
+    Next: the two dispatches, the four `.sif` files on Derecho, the sweep,
+    and a recommendation.
+
 ---
 
 ## 12. Decision log

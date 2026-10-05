@@ -176,6 +176,38 @@ app_extract "${run}" "${TMP}/osu-empty.kv"
 [ ! -s "${TMP}/osu-empty.kv" ] && ok "osu: an empty table is a missing metric, not a failure" \
                                || bad "osu: empty output produced metrics"
 
+#-- heffte: launch sizes the cube, extract judges the error against tolerance ---
+echo
+app_resolve heffte "${LAUNCH}" "${TMP}/heffte" >/dev/null 2>&1
+run="${TMP}/heffte/run"; mkdir -p "${run}"
+app_export_geometry "${run}" pureMPI 1 128 128 1
+want "heffte: launch defaults to fftw at 512^3" \
+     "/container/bin/speed3d_r2c fftw double 512 512 512 -n10" "$(HPCRUN_SCALE=node app_argv)"
+want "heffte: a smoke cell gets a tiny cube, and the backend is a knob" \
+     "/container/bin/speed3d_r2c stock double 32 32 32 -n10" \
+     "$(HPCRUN_SCALE=smoke HEFFTE_BACKEND=stock app_argv)"
+
+cat > "${run}/app.out" <<'HEFFTEOUT'
+-----------------------------------------------------------------------------
+heFFTe performance test
+-----------------------------------------------------------------------------
+Backend:   fftw
+Size:      512x512x512
+MPI ranks:  128
+Time per run: 0.0839 (s)
+Performance:  120.5 GFlops/s
+Memory usage: 31MB/rank
+Tolerance:    1e-11
+Max error:    2.3e-15
+HEFFTEOUT
+app_extract "${run}" "${TMP}/heffte.kv"
+has "heffte: extract reads the time per transform" "${TMP}/heffte.kv" "fft_time_s=0.0839"
+has "heffte: extract reads speed3d's GFlops"      "${TMP}/heffte.kv" "gflops=120.5"
+has "heffte: an error within tolerance is valid"  "${TMP}/heffte.kv" "valid=true"
+sed -i 's/^Max error:.*/Max error:    3.0e-9/' "${run}/app.out"
+app_extract "${run}" "${TMP}/heffte-bad.kv"
+has "heffte: an error past tolerance is invalid"  "${TMP}/heffte-bad.kv" "valid=false"
+
 #-- a bare executable is a legal, hook-free app --------------------------------
 echo
 unset HPCRUN_APP_DIR
