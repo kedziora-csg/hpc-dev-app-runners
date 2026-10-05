@@ -211,5 +211,40 @@ want "with no runtime to ask, the name answers" "gcc14 mpich" \
      "$(ident "${TMP}/leap-gcc14-mpich-labelled.sif")"
 
 echo
+echo "instruction set"
+# A host without AVX-512, a binary report_cpu_features says uses it, and an
+# objdump that says where.  AVX-512 only in routines that dispatch at run time
+# (Intel's SVML) is not a requirement; anywhere else it is, and so is not being
+# able to tell.
+mkdir -p "${TMP}/arch"
+cat > "${TMP}/arch/rcf" <<'RCF'
+#!/bin/bash
+echo "  ISA flags: avx2 bmi1 bmi2 fma sse4_1 sse4_2"
+echo "  AVX-512 (zmm) used by binary: YES  (requires an AVX-512 host)"
+RCF
+cat > "${TMP}/arch/objdump" <<'OBJ'
+#!/bin/bash
+case "${FAKE_ZMM:-}" in
+    svml) printf '0000000000458130 <__svml_cos2_z0>:\n  45814c:\tvfmadd231pd %%zmm2,%%zmm1,%%zmm3\n' ;;
+    own)  printf '0000000000401000 <main>:\n  401010:\tvaddpd %%zmm0,%%zmm1,%%zmm2\n0000000000458130 <__svml_cos2_z0>:\n  45814c:\tvfmadd231pd %%zmm2,%%zmm1,%%zmm3\n' ;;
+    *)    exit 1 ;;
+esac
+OBJ
+cat > "${TMP}/arch/launch" <<LAUNCH
+#!/bin/bash
+PATH="${TMP}/arch:\${PATH}" exec "\$@"
+LAUNCH
+chmod +x "${TMP}/arch/rcf" "${TMP}/arch/objdump" "${TMP}/arch/launch"
+: > "${TMP}/arch/bin"
+arch () { # arch <FAKE_ZMM> -- "rc verdict"
+    FAKE_ZMM="$1" HPCRUN_CPU_FEATURES="${TMP}/arch/rcf" bash -c ". '${HERE}/../lib/check_arch.sh'
+        arch_check '${TMP}/arch/launch' '${TMP}/arch/bin' '${TMP}/arch/cf.txt' >/dev/null
+        echo \"\$? \${ARCH_VERDICT}\""
+}
+want "AVX-512 only in Intel's dispatched SVML is not a requirement" "0 ok" "$(arch svml)"
+want "AVX-512 in the binary's own code still refuses the job" "1 over-built" "$(arch own)"
+want "AVX-512 it cannot place still refuses the job" "1 over-built" "$(arch none)"
+
+echo
 echo "  ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]

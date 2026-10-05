@@ -2162,8 +2162,55 @@ All four DECISIONs are answered — see §12. What remains open:
       and oneapi mpich images, tuned and portable base, under both backends,
       at 512^3 on one node, 128 ranks. That is 8 one-node jobs.
 
-    Next: the two dispatches, the four `.sif` files on Derecho, the sweep,
-    and a recommendation.
+    *Result, 2026-10-05: tuning the base made no difference.* `derecho-seam`
+    ran on Derecho, one node, 128 ranks, 512^3 double-precision r2c, three
+    repeats per cell. All on harness `ecf0cd5`; results in
+    `/glade/derecho/scratch/kedziora/hpcrun-seam`.
+
+    | gcc14, mpich | backend | time per FFT, median | tuned vs portable |
+    |---|---|---|---|
+    | tuned base | fftw  | 0.2076 s | |
+    | portable base | fftw  | 0.2070 s | -0.3% |
+    | tuned base | stock | 0.2187 s | |
+    | portable base | stock | 0.2185 s | -0.1% |
+
+    The tuned oneAPI image ran at 0.2082 s (fftw) and 0.2189 s (stock), the
+    same as gcc14. Its portable twin was refused by the job's architecture
+    check (below), so the oneAPI pair is unmeasured. Every run validated
+    against speed3d's own tolerance.
+
+    The code under test really does differ: the tuned base's `libheffte.so`
+    has 5,718 AVX2 (`%ymm`) instructions and its `libfftw3.so` 641, the
+    portable base's none. They change nothing, because the transform is not
+    arithmetic-bound. 87 GFLOP/s over 128 cores is about 0.7 GFLOP/s a core,
+    a small fraction of what a Zen 3 core computes. A distributed FFT spends
+    its time packing, exchanging and streaming data.
+
+    *What it means for the seam.*
+    - **For this kind of code, a portable base costs nothing,** and
+      per-cluster base images would double the registry (about 23 to 47 GB)
+      for no measured gain. That supports the decision taken: portable base,
+      tuned app layer.
+    - **It does not close the question.** One app, one size, one node. A code
+      with much more arithmetic per byte -- dense kernels, small FFTs that fit
+      in cache -- could differ, and should be measured the same way before
+      cluster-specific base images are built for it.
+    - **The cheaper win is configuration, not tuning.** FFTW's SIMD codelets
+      (`--enable-avx2`, `--enable-avx512`) are chosen at run time and so are
+      safe in a portable base. Enabling them in the factory's `fftlibs` stage
+      is the next measurement: the same `derecho-seam` pair, after a rebuild.
+
+    *Found on the way: the architecture check refused a binary that runs.* The
+    oneAPI portable-base `speed3d` holds one AVX-512 instruction, in
+    `__svml_cos2_z0`: Intel's short-vector math library carries an AVX-512
+    copy of each routine and picks one from CPUID at start-up, so that copy
+    never runs on Derecho. `report_cpu_features` answers only "is any `%zmm`
+    named", so `check_arch.sh` refused the job. It now asks which functions
+    hold AVX-512 when the host lacks it, and lets a binary through when they
+    are all Intel's run-time-dispatched routines (`__svml_*`, `__intel_*`,
+    `_intel_fast_*`, `__libm_*`). AVX-512 anywhere else, or anywhere it
+    cannot place, still refuses. Checked against both real oneAPI images
+    under a no-AVX-512 host report, and by three new off-cluster checks.
 
 ---
 
