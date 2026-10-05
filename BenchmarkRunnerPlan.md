@@ -2212,6 +2212,41 @@ All four DECISIONs are answered — see §12. What remains open:
     cannot place, still refuses. Checked against both real oneAPI images
     under a no-AVX-512 host report, and by three new off-cluster checks.
 
+    *The seam, stated as a design rule (2026-10-05).* The aim is a system that
+    runs any HPC code a user chooses, so codes that gain from AVX-512 must be
+    served without a base image per node type. The rule follows from what a
+    library does at run time:
+
+    | A library that... | Examples | Belongs in |
+    |---|---|---|
+    | picks its kernels from CPUID at run time | MKL/oneMKL, OpenBLAS `DYNAMIC_ARCH`, BLIS, FFTW with its SIMD codelets enabled, glibc's string functions | the **portable base** -- one build, fast on every node, AVX-512 only where it exists |
+    | is fixed when compiled | HeFFTe's `stock` FFTs, most Fortran science libraries, the app's own code | the **app layer**, built for the target, whenever it is hot for that app |
+
+    So the base stays portable but is built to dispatch wherever a library
+    can, and an app image builds -- for its target -- both itself and any
+    hot library that cannot dispatch. Tests 1 and 2 measure the first row on
+    nodes with AVX-512.
+
+    - *Test 1, FFTW's dispatched SIMD codelets.* `apps/heffte` now builds two
+      more FFTWs beside the driver: up to AVX2, and up to AVX-512, both
+      chosen at run time. Three binaries share the base's libheffte, picked
+      by `HEFFTE_FFTW=base|avx2|avx512`. `casper-simd.yaml` runs them on
+      either htc node type, and `derecho-simd.yaml` on Zen 3, where the
+      avx512 build must fall back to AVX2 and match the avx2 one.
+    - *Test 2, BLAS3 and BLAS2.* `apps/blas` is a DGEMM and DGEMV probe on
+      OpenBLAS 0.3.30 built `DYNAMIC_ARCH`. It checks its answers, and
+      reports the kernel set that actually ran. `OPENBLAS_CORETYPE` forces
+      AVX2 (Haswell, Zen) or AVX-512 (SkylakeX) kernels on the same node.
+      `casper-blas.yaml` and `derecho-blas.yaml` run it. The expectation to
+      test is that DGEMM gains from AVX-512, more on Intel than on Zen 4,
+      which runs AVX-512 as two 256-bit halves, and that DGEMV, which is
+      bound by memory bandwidth, gains little.
+    - Both libraries are built with the system gcc and no `-march`, whatever
+      the image's compiler: the dispatching library is the portable
+      artefact. OpenBLAS also needs the system gfortran named, because it
+      probes FC even with `NOFORTRAN=1`, and the image's nvfortran or ifx
+      rejects the flags it tries.
+
 ---
 
 ## 12. Decision log

@@ -1,0 +1,31 @@
+# Seam study, test 2 on Derecho: DGEMM and DGEMV from the same dispatching
+# OpenBLAS, on a whole Zen 3 node (no AVX-512).  auto, Haswell and Zen are the
+# kernel sets that can run here; an AVX-512 set would SIGILL.
+#
+#     ../submit derecho-blas --account <PROJECT>
+schema: 2
+cluster: derecho
+
+defaults:
+  nodes: 1
+  walltime: "00:20:00"
+  repeats: 3
+  scale: node
+
+images:
+  list: [leap-gcc14-mpich-blas-znver3.sif]
+
+apps:
+  - {name: blas, label: auto}
+  - {name: blas, label: haswell, env: {OPENBLAS_CORETYPE: Haswell}}
+  - {name: blas, label: zen,     env: {OPENBLAS_CORETYPE: Zen}}
+
+placements:
+  - {name: pureMPI, ranks_per_node: 128, threads: 1}
+
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
+
+sweep:
+  matrix:  [images, apps, placements, omp_variants]
+  per_job: [placements, omp_variants]

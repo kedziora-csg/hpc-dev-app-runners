@@ -72,7 +72,9 @@ images:
   os: leap
   compilers: [oneapi, gcc14, nvhpc]
   mpi: [openmpi]
-  apps: [hpcg]
+  # heffte and blas: the seam study's probes, run here because these nodes
+  # have AVX-512 and Derecho's do not.
+  apps: [hpcg, heffte, blas]
   target: znver3
   march: {default: -march=znver3, nvhpc: -tp=zen3}
 

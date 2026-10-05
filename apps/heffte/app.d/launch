@@ -9,4 +9,11 @@ case "${HPCRUN_SCALE:-node}" in
     smoke) n="${HEFFTE_N:-32}" ;;
     *)     n="${HEFFTE_N:-512}" ;;
 esac
-echo "/container/bin/${HEFFTE_BENCH:-speed3d_r2c} ${HEFFTE_BACKEND:-fftw} double ${n} ${n} ${n} -n10"
+# HEFFTE_FFTW picks the FFTW behind the fftw backend: base (the base image's,
+# scalar), avx2 or avx512 (built in this image, SIMD chosen at run time).
+case "${HEFFTE_FFTW:-base}" in
+    base)        bin="${HEFFTE_BENCH:-speed3d_r2c}" ;;
+    avx2|avx512) bin="${HEFFTE_BENCH:-speed3d_r2c}_${HEFFTE_FFTW}" ;;
+    *) echo "heffte/launch: HEFFTE_FFTW=${HEFFTE_FFTW} is not base, avx2 or avx512" >&2; exit 1 ;;
+esac
+echo "/container/bin/${bin} ${HEFFTE_BACKEND:-fftw} double ${n} ${n} ${n} -n10"

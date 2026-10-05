@@ -25,6 +25,7 @@ err="$(sed -n 's/^Max error:[[:space:]]*\([0-9.eE+-]*\).*/\1/p'  app.out | tail 
 [ -n "${err}" ] && echo "max_error=${err}"
 b="$(sed -n 's/^Backend:[[:space:]]*//p' app.out | tail -1)"
 [ -n "${b}" ]   && echo "backend=$(printf '%s' "${b}" | tr -d ' ')"
+echo "fftw_build=${HEFFTE_FFTW:-base}"
 
 if [ -n "${err}" ] && [ -n "${tol}" ]; then
     awk -v e="${err}" -v t="${tol}" 'BEGIN { print ((e + 0 <= t + 0) ? "valid=true" : "valid=false") }'

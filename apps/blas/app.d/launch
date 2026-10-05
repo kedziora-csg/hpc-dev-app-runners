@@ -1,0 +1,9 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# blas/launch -- print the argv for this cell, one line.
+#-------------------------------------------------------------------------------
+case "${HPCRUN_SCALE:-node}" in
+    smoke) n="${BLAS_N:-256}";  m="${BLAS_M:-512}"  ;;
+    *)     n="${BLAS_N:-2048}"; m="${BLAS_M:-8192}" ;;
+esac
+echo "/container/bin/blas_probe ${n} ${m} ${BLAS_REPS:-5}"

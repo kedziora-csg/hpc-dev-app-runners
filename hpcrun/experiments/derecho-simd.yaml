@@ -1,0 +1,33 @@
+# Seam study, tests 1 and 2 on Derecho (BenchmarkRunnerPlan.md, section 11
+# item 11): the AVX2 half of the comparison, on a whole Zen 3 node, which has
+# no AVX-512.  The avx512 FFTW is included on purpose: it must dispatch down
+# to its AVX2 codelets here and run as fast as the avx2 one, which is what
+# makes one portable build safe on every node.
+#
+#     ../submit derecho-simd --account <PROJECT>
+schema: 2
+cluster: derecho
+
+defaults:
+  nodes: 1
+  walltime: "00:20:00"
+  repeats: 3
+  scale: node
+
+images:
+  list: [leap-gcc14-mpich-heffte-znver3.sif]
+
+apps:
+  - {name: heffte, label: fftw-base,   env: {HEFFTE_BACKEND: fftw, HEFFTE_FFTW: base,   HEFFTE_N: 512}}
+  - {name: heffte, label: fftw-avx2,   env: {HEFFTE_BACKEND: fftw, HEFFTE_FFTW: avx2,   HEFFTE_N: 512}}
+  - {name: heffte, label: fftw-avx512, env: {HEFFTE_BACKEND: fftw, HEFFTE_FFTW: avx512, HEFFTE_N: 512}}
+
+placements:
+  - {name: pureMPI, ranks_per_node: 128, threads: 1}
+
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
+
+sweep:
+  matrix:  [images, apps, placements, omp_variants]
+  per_job: [placements, omp_variants]

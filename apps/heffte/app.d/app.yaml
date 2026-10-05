@@ -24,8 +24,10 @@ success_criteria:
 
 notes: |
   launch prints `speed3d_r2c <backend> double N N N -n10`.  HEFFTE_BACKEND
-  picks the 1-D FFT library: fftw (the base's libfftw3, the default) or stock
-  (HeFFTe's own, compiled into the base's libheffte).  HEFFTE_N sets the cube
+  picks the 1-D FFT library: fftw (the default) or stock (HeFFTe's own,
+  compiled into the base's libheffte).  HEFFTE_FFTW picks WHICH FFTW: base
+  (the base image's, built with no SIMD codelets), avx2 or avx512 (built in
+  this image with FFTW's run-time-dispatched SIMD codelets, up to that level).  HEFFTE_N sets the cube
   edge; the default is 32 at HPCRUN_SCALE=smoke and 512 otherwise.
 
   extract reports valid=false when speed3d's max error exceeds its own

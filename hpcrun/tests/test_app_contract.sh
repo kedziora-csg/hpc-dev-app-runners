@@ -208,6 +208,36 @@ sed -i 's/^Max error:.*/Max error:    3.0e-9/' "${run}/app.out"
 app_extract "${run}" "${TMP}/heffte-bad.kv"
 has "heffte: an error past tolerance is invalid"  "${TMP}/heffte-bad.kv" "valid=false"
 
+want "heffte: HEFFTE_FFTW picks the FFTW build behind the driver" \
+     "/container/bin/speed3d_r2c_avx512 fftw double 512 512 512 -n10" \
+     "$(HPCRUN_SCALE=node HEFFTE_FFTW=avx512 app_argv)"
+has "heffte: extract records which FFTW ran" "${TMP}/heffte.kv" "fftw_build=base"
+
+#-- blas: DGEMM and DGEMV, and which kernel set actually ran ---------------------
+echo
+app_resolve blas "${LAUNCH}" "${TMP}/blas" >/dev/null 2>&1
+run="${TMP}/blas/run"; mkdir -p "${run}"
+app_export_geometry "${run}" pureMPI 1 128 128 1
+want "blas: launch sizes DGEMM and DGEMV" "/container/bin/blas_probe 2048 8192 5" \
+     "$(HPCRUN_SCALE=node app_argv)"
+cat > "${run}/app.out" <<'BLASOUT'
+blas_probe: ranks 128, dgemm order 2048, dgemv order 8192, best of 5
+Core: SkylakeX
+Config: OpenBLAS 0.3.30 NO_LAPACK DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=1
+DGEMM GFLOPS per rank (median): 51.200
+DGEMM GFLOPS per rank (min): 49.000
+DGEMM GFLOPS total: 6553.600
+DGEMV GB/s per rank (median): 2.100
+DGEMV GB/s total: 268.800
+Valid: true
+BLASOUT
+OPENBLAS_CORETYPE=SkylakeX app_extract "${run}" "${TMP}/blas.kv"
+has "blas: extract reads the DGEMM rate"          "${TMP}/blas.kv" "dgemm_gflops_rank=51.200"
+has "blas: extract reads the DGEMV bandwidth"     "${TMP}/blas.kv" "dgemv_gbs_rank=2.100"
+has "blas: extract records the core that ran"     "${TMP}/blas.kv" "core=SkylakeX"
+has "blas: extract records the core asked for"    "${TMP}/blas.kv" "coretype_forced=SkylakeX"
+has "blas: the probe's own check is the verdict"  "${TMP}/blas.kv" "valid=true"
+
 #-- a bare executable is a legal, hook-free app --------------------------------
 echo
 unset HPCRUN_APP_DIR
