@@ -2135,7 +2135,10 @@ All four DECISIONs are answered — see §12. What remains open:
       image -- so that trim comes first whichever seam wins.
     - **The base's FFTW is configured without SIMD.** `fftlibs` runs FFTW's
       `configure` with no `--enable-sse2`/`--enable-avx`/`--enable-avx2`/
-      `--enable-avx512`, so its codelets are scalar on both bases. FFTW
+      `--enable-avx512`, so its codelets are scalar on both bases. In the
+      gcc14-openmpi images, `libfftw3.so` contains no AVX codelets in either
+      base. It has 128 `%ymm` instructions in the tuned base, all from gcc's
+      own vectorisation, and none in the portable one. FFTW
       chooses SIMD codelets at run time from CPUID, so enabling them is safe
       in a PORTABLE base. That is likely worth more than any `-march`, and
       it shows the study's real question is not portable versus tuned. Some
