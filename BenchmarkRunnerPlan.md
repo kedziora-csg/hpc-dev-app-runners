@@ -2316,6 +2316,54 @@ All four DECISIONs are answered — see §12. What remains open:
     - The four seam experiments now run their kernel sets as variants: one
       job each, three cells on one node.
 
+    *Results on one node, Casper, 2026-10-12.* Each experiment is one job
+    with three cells on one node, five repeats per cell, 16 ranks x 1, on
+    harness `570da48`. Results are in
+    `/glade/derecho/scratch/kedziora/hpcrun-avx512/{genoa-2,cascadelake-2}`.
+
+    | Node | DGEMM, GFLOP/s a core: AVX2 / AVX-512 / auto | AVX-512 gain | DGEMV, GB/s a core: AVX2 / AVX-512 |
+    |---|---|---|---|
+    | `htc-genoa`, Zen 4 (crhtc69) | 50.5 / 55.4 / 55.3 | **+10%** | 8.70 / 8.79 |
+    | `htc-cascadelake` (crhtc53) | 37.9 / 65.9 / 65.8 | **+74%** | 7.04 / 7.10 |
+
+    | Node | FFT 256^3, s per transform: base FFTW / AVX2 / AVX-512 build |
+    |---|---|
+    | `htc-genoa` | 0.0487 / 0.0500 / 0.0491 |
+    | `htc-cascadelake` | 0.0761 / 0.0757 / 0.0761 |
+
+    - **Arithmetic-bound code gains from AVX-512, a lot on Intel.** DGEMM
+      runs 1.74x faster on Cascade Lake, and 1.10x on Zen 4, which executes
+      AVX-512 as two 256-bit halves.
+    - **A portable library delivers it.** OpenBLAS left to choose (`auto`)
+      picked SkylakeX on Cascade Lake and Cooperlake on Genoa, matching the
+      best forced kernel set to within 0.2%. On Derecho the same library
+      picks Zen.
+    - **Bandwidth-bound code does not gain.** DGEMV improved 1% on both
+      node types. The first run's 34% DGEMV difference on Genoa came from
+      three different nodes, and on one node it is gone. That is the
+      `variants:` axis earning its place.
+    - **The distributed FFT does not gain either.** No SIMD build, of any
+      width, is faster than the scalar base on either node type; the spread
+      between the three is within the spread of their repeats.
+    - One run of 45 -- Genoa, AVX-512 FFTW, repeat 4 -- exited 139
+      (segmentation fault) after printing its complete, valid result, so
+      during shutdown. It did not recur in the other four repeats or on
+      Cascade Lake. `collect` excludes it. Watch for it.
+
+    *What this means for the design.* A system that runs any code can reach
+    AVX-512 where it pays without a base image per node type, if the base
+    carries libraries that choose their kernels at run time: a
+    `DYNAMIC_ARCH` OpenBLAS (or MKL), and FFTW built with its SIMD codelets.
+    Today's base images carry no BLAS at all, and an FFTW with no SIMD.
+    Both are factory changes, to make in the new factory. What dispatch
+    cannot reach is an app's OWN arithmetic-bound loops. For those the
+    per-sub-cluster `images.target` step (above) is the remaining piece: an
+    app built `-march=cascadelake` for Casper's Intel nodes, from the same
+    portable base.
+
+    `collect` now prints a text metric -- the kernel set that ran, the
+    backend -- when every repeat agrees, rather than `-`.
+
 ---
 
 ## 12. Decision log

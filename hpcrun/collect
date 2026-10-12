@@ -255,8 +255,8 @@ def print_grouped_table(rows, metrics):
     ]
     for metric in metrics + ["wall_s"]:
         cols.append((metric.upper() + "~",
-                     (lambda m: lambda k, p: _fmt_num(cell_stat(
-                         [r for r in p if excluded_because(r) is None], m)[1]))(metric)))
+                     (lambda m: lambda k, p: _cell_value(
+                         [r for r in p if excluded_because(r) is None], m))(metric)))
     cols += [
         ("BIND", lambda k, p: get(p[0], "placement.verdict")),
         ("NOTE", lambda k, p: _group_note(p)),
@@ -273,6 +273,19 @@ def print_grouped_table(rows, metrics):
     print()
     print("~ = median across the cell's repeats; N is how many of them are")
     print("comparable.  --per-run lists every run instead.")
+
+
+def _cell_value(pool, metric):
+    """The median of a numeric metric; for a text one -- which kernel ran,
+    which backend -- the value when every run agrees, else `mixed`.  A text
+    metric used to print as `-`, hiding exactly the label that says what ran."""
+    median = cell_stat(pool, metric)[1]
+    if median is not None:
+        return _fmt_num(median)
+    texts = {str(get(r, "metrics." + metric, "")) for r in pool} - {""}
+    if not texts:
+        return ""
+    return texts.pop() if len(texts) == 1 else "mixed"
 
 
 def _fmt_num(value):
