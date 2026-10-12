@@ -35,6 +35,9 @@
 #   HPCRUN_CELL_<i>_OMP                 the OMP variant's name
 #   HPCRUN_CELL_<i>_OMP_PROC_BIND       and its settings
 #   HPCRUN_CELL_<i>_OMP_PLACES
+#   HPCRUN_CELL_<i>_VARIANT             the variant's name (experiment `variants:`)
+#   HPCRUN_CELL_<i>_ENV_COUNT           how many NAME=value settings it has
+#   HPCRUN_CELL_<i>_ENV_<j>             each one, exported for this cell only
 #
 # A cell states only what it ASKS for.  What it should GET -- L3, NUMA and
 # socket footprint, threads per core -- follows from the topology probed at the
@@ -249,6 +252,7 @@ img_digest="$(sif_digest "${container_img}")"
 # 8x16; on any other node it is the same three ideas, correctly sized.
 #-------------------------------------------------------------------------------
 cell_name=() cell_ppn=() cell_threads=() cell_omp=() cell_bind=() cell_places=()
+cell_variant=()
 
 if [ "${HPCRUN_CELL_COUNT:-0}" -gt 0 ] 2>/dev/null; then
     i=0
@@ -259,6 +263,7 @@ if [ "${HPCRUN_CELL_COUNT:-0}" -gt 0 ] 2>/dev/null; then
         eval "cell_omp+=(\"\${HPCRUN_CELL_${i}_OMP:-}\")"
         eval "cell_bind+=(\"\${HPCRUN_CELL_${i}_OMP_PROC_BIND:-}\")"
         eval "cell_places+=(\"\${HPCRUN_CELL_${i}_OMP_PLACES:-}\")"
+        eval "cell_variant+=(\"\${HPCRUN_CELL_${i}_VARIANT:-}\")"
         i=$(( i + 1 ))
     done
 else
@@ -271,6 +276,7 @@ else
         cell_omp+=("${OMP_VARIANT:-default}")
         cell_bind+=("${OMP_PROC_BIND:-close}")
         cell_places+=("${OMP_PLACES:-cores}")
+        cell_variant+=("")
     done
 fi
 [ "${#cell_name[@]}" -gt 0 ] || { echo "no cells to run"; exit 1; }
@@ -389,6 +395,37 @@ record_common () {
     result_set  placement.ranks_per_node "$2"
     result_set  placement.threads        "$3"
     result_str  placement.omp_variant    "$4"
+    # The variant and exactly what it set, so a row says what it ran under
+    # without anyone reading the experiment file.  Not for the implicit one an
+    # experiment without `variants:` gets: its rows stay as they always were.
+    if [ -n "${variant_name}" ] && \
+       { [ "${variant_name}" != default ] || [ "${#variant_env[@]}" -gt 0 ]; }; then
+        result_str  variant.name "${variant_name}"
+        local kv
+        for kv in "${variant_env[@]}"; do
+            result_str "variant.env.${kv%%=*}" "${kv#*=}"
+        done
+    fi
+}
+
+# variant_apply <cell index> -- unset the previous cell's variant settings,
+# export this cell's.  Set or UNSET, never inherited, for the same reason as
+# the OMP settings below: a value carried over from the previous cell would
+# label the row with a setting it did not run under.
+variant_name="" variant_env=()
+variant_apply () {
+    local i="$1" n j kv
+    for kv in "${variant_env[@]}"; do unset "${kv%%=*}"; done
+    variant_env=()
+    variant_name="${cell_variant[$i]}"
+    eval "n=\"\${HPCRUN_CELL_${i}_ENV_COUNT:-0}\""
+    j=0
+    while [ "${j}" -lt "${n}" ] 2>/dev/null; do
+        eval "kv=\"\${HPCRUN_CELL_${i}_ENV_${j}}\""
+        variant_env+=("${kv}")
+        export "${kv%%=*}=${kv#*=}"
+        j=$(( j + 1 ))
+    done
 }
 
 idx=0
@@ -399,6 +436,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
     omp_name="${cell_omp[$idx]}"
     omp_bind="${cell_bind[$idx]}"
     omp_places="${cell_places[$idx]}"
+    variant_apply "${idx}"
     idx=$(( idx + 1 ))
     nranks=$(( NNODES * ppn ))
 
@@ -410,7 +448,8 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
     if [ -n "${omp_places}" ]; then export OMP_PLACES="${omp_places}";  else unset OMP_PLACES;  fi
 
     echo
-    echo "=== ${name}: ${ppn} ranks/node x ${nthreads} threads (${nranks} ranks)${omp_name:+, omp=${omp_name}} ==="
+    echo "=== ${name}: ${ppn} ranks/node x ${nthreads} threads (${nranks} ranks)${omp_name:+, omp=${omp_name}}${variant_name:+, variant=${variant_name}} ==="
+    [ "${#variant_env[@]}" -gt 0 ] && echo "    env: ${variant_env[*]}"
 
     #---------------------------------------------------------------------------
     # Geometry, against the topology this node actually has.  hpcrun/submit
@@ -453,6 +492,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
         mpi_family     "${mpi_family}" \
         config         "${name}" \
         omp_variant    "${omp_name:-none}" \
+        variant        "${variant_name:-none}${variant_env[*]:+ (${variant_env[*]})}" \
         ranks          "${nranks}" \
         ranks_per_node "${ppn}" \
         threads        "${nthreads}" \

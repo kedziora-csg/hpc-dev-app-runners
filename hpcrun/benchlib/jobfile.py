@@ -151,7 +151,16 @@ def job_env(exp, job, results_dir, profile=None):
             "HPCRUN_CELL_%d_OMP=%s" % (i, _sh(cell.omp["name"])),
             "HPCRUN_CELL_%d_OMP_PROC_BIND=%s" % (i, _sh(cell.omp.get("OMP_PROC_BIND", ""))),
             "HPCRUN_CELL_%d_OMP_PLACES=%s" % (i, _sh(cell.omp.get("OMP_PLACES", ""))),
+            "HPCRUN_CELL_%d_VARIANT=%s" % (i, _sh(cell.variant["name"])),
         ]
+        # The variant's env, one NAME=value per line so a value may hold
+        # spaces.  The runner exports these for this cell only.
+        env = sorted((cell.variant.get("env") or {}).items())
+        lines.append("HPCRUN_CELL_%d_ENV_COUNT=%s" % (i, _sh(len(env))))
+        for j, (key, value) in enumerate(env):
+            text = ("true" if value is True else "false" if value is False
+                    else str(value))
+            lines.append("HPCRUN_CELL_%d_ENV_%d=%s" % (i, j, _sh("%s=%s" % (key, text))))
     return "\n".join(lines) + "\n"
 
 
@@ -179,7 +188,9 @@ def job_record(exp, job, results_dir, profile=None):
                    "ranks_per_node": c.placement["ranks_per_node"],
                    "threads": c.placement["threads"],
                    "omp": dict({"name": c.omp["name"]},
-                               **{k: v for k, v in c.omp.items() if k != "name"})}
+                               **{k: v for k, v in c.omp.items() if k != "name"}),
+                   "variant": {"name": c.variant["name"],
+                               "env": dict(c.variant.get("env") or {})}}
                   for c in job.cells],
     }
 

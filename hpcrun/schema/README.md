@@ -28,6 +28,7 @@ What to sweep: which images, which apps, which rank/thread decompositions, and h
 | `schema` | `2` | yes |  | Format version of this file. 2 since the sub-cluster change, which renamed images.from_make to images.set and added subcluster:; a version-1 file is refused with what to change. Bumped only for a change that an older hpcrun/submit would misread. |
 | `subcluster` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | Which node type of the cluster to run on, for a cluster whose description has subclusters:. Omitted, the description's default_subcluster applies. --subcluster overrides it. Naming one on a cluster of a single node type is refused, as is a name the cluster does not have. |
 | [`sweep`](#experimentsweep) | object | yes | no other keys |  |
+| [`variants`](#experimentvariants) | list of object |  | at least 1 entry | Environment settings crossed like any other axis, and -- unlike apps -- allowed in per_job, so one job can run every variant on the SAME node. That is the point: on a shared node, which kernel set or library build is faster is only answerable when both ran on one machine. Each variant's env is exported for its cells only, for the app, its hooks and its extract, and recorded in every result row. Defaults to one variant with no settings. |
 
 #### `experiment.apps`
 
@@ -110,13 +111,31 @@ Named single cells -- the answer a sweep produced. hpcrun/submit --profile <name
 | `omp` | string |  |  |  |
 | `placement` | string |  |  |  |
 | `repeats` | integer |  | at least 1 |  |
+| `variant` | string |  |  | The variant this profile runs, by name. |
 
 #### `experiment.sweep`
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
-| `matrix` | list of `images` \| `apps` \| `placements` \| `omp_variants` | yes | at least 1 entry, no duplicates | The axes crossed. Every axis with two or more entries must appear here; hpcrun/validate refuses to drop values silently. |
-| `per_job` | list of `images` \| `apps` \| `placements` \| `omp_variants` |  | no duplicates | Which of those axes ONE job iterates. The rest become separate jobs. This is the knob that trades queue wait against job length. |
+| `matrix` | list of `images` \| `apps` \| `placements` \| `omp_variants` \| `variants` | yes | at least 1 entry, no duplicates | The axes crossed. Every axis with two or more entries must appear here; hpcrun/validate refuses to drop values silently. |
+| `per_job` | list of `images` \| `apps` \| `placements` \| `omp_variants` \| `variants` |  | no duplicates | Which of those axes ONE job iterates. The rest become separate jobs. This is the knob that trades queue wait against job length. |
+
+#### `experiment.variants`
+
+Environment settings crossed like any other axis, and -- unlike apps -- allowed in per_job, so one job can run every variant on the SAME node. That is the point: on a shared node, which kernel set or library build is faster is only answerable when both ran on one machine. Each variant's env is exported for its cells only, for the app, its hooks and its extract, and recorded in every result row. Defaults to one variant with no settings.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| [`env`](#experimentvariantsenv) | object |  | no other keys | NAME: value, set for this variant's cells. Not HPCRUN_* (the harness's) and not OMP_NUM_THREADS, OMP_PROC_BIND or OMP_PLACES (the placement's and omp_variants'). |
+| `name` | string | yes | matches `/^[A-Za-z0-9][A-Za-z0-9_.-]*$/` | Joins the cell's name -- placement_<cell>-<variant>.out, run_<cell>-<variant>/ -- when a job runs more than one variant. |
+
+##### `experiment.variants.env`
+
+NAME: value, set for this variant's cells. Not HPCRUN_* (the harness's) and not OMP_NUM_THREADS, OMP_PROC_BIND or OMP_PLACES (the placement's and omp_variants').
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `<name>` | string, integer or boolean |  | key matches `/^[A-Za-z_][A-Za-z0-9_]*$/` | The value, exported as it is written. |
 
 ## Application contract
 

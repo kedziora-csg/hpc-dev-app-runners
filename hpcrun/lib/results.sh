@@ -28,6 +28,7 @@
 #     app.          name version scale app_dir_override
 #     placement.    name ranks_per_node threads mpiexec_flags verdict
 #     placement.omp.<VAR>
+#     variant.      name, env.<NAME>  -- the experiment's `variants:` entry
 #     metrics.<name>          -- via result_metric / result_metrics_from_file
 #     placement.rules[]       -- via result_rule
 #
@@ -59,6 +60,7 @@ _R_TOP="" _R_IMAGE="" _R_APP="" _R_PLACE="" _R_OMP="" _R_METRICS="" _R_RULES=""
 
 result_reset () {
     _R_TOP="" _R_IMAGE="" _R_APP="" _R_PLACE="" _R_OMP="" _R_METRICS="" _R_RULES=""
+    _R_VARIANT="" _R_VARENV=""
 }
 
 _json_escape () {
@@ -91,6 +93,8 @@ _result_add () {
         image.*)         sect=IMAGE;   key="${field#image.}" ;;
         app.*)           sect=APP;     key="${field#app.}" ;;
         placement.omp.*) sect=OMP;     key="${field#placement.omp.}" ;;
+        variant.env.*)   sect=VARENV;  key="${field#variant.env.}" ;;
+        variant.*)       sect=VARIANT; key="${field#variant.}" ;;
         placement.*)     sect=PLACE;   key="${field#placement.}" ;;
         metrics.*)       sect=METRICS; key="${field#metrics.}" ;;
         *)               sect=TOP;     key="${field}" ;;
@@ -102,6 +106,8 @@ _result_add () {
         APP)     _R_APP="${_R_APP:+${_R_APP},}\"${key}\":${rendered}" ;;
         PLACE)   _R_PLACE="${_R_PLACE:+${_R_PLACE},}\"${key}\":${rendered}" ;;
         OMP)     _R_OMP="${_R_OMP:+${_R_OMP},}\"${key}\":${rendered}" ;;
+        VARIANT) _R_VARIANT="${_R_VARIANT:+${_R_VARIANT},}\"${key}\":${rendered}" ;;
+        VARENV)  _R_VARENV="${_R_VARENV:+${_R_VARENV},}\"${key}\":${rendered}" ;;
         METRICS) _R_METRICS="${_R_METRICS:+${_R_METRICS},}\"${key}\":${rendered}" ;;
     esac
 }
@@ -159,6 +165,12 @@ result_emit () {
         [ -n "${_R_OMP}" ] && place="${place:+${place},}\"omp\":{${_R_OMP}}"
         place="${place:+${place},}\"rules\":[${_R_RULES}]"
         rec="${rec},\"placement\":{${place}}"
+    fi
+
+    if [ -n "${_R_VARIANT}${_R_VARENV}" ]; then
+        place="${_R_VARIANT}"
+        [ -n "${_R_VARENV}" ] && place="${place:+${place},}\"env\":{${_R_VARENV}}"
+        rec="${rec},\"variant\":{${place}}"
     fi
 
     [ -n "${_R_METRICS}" ] && rec="${rec},\"metrics\":{${_R_METRICS}}"

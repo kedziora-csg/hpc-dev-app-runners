@@ -13,6 +13,9 @@
 #     ../submit casper-blas --account <PROJECT> --subcluster htc-cascadelake
 #
 # Shared nodes; see casper-simd.yaml for the noise caveat and why 16 x 1.
+# The kernel sets are `variants:`, not separate apps, so all of them run in
+# ONE job, on one node, one after another: on a shared node that is the only
+# way the comparison is not swamped by which node each one landed on.
 schema: 2
 cluster: casper
 subcluster: htc-genoa
@@ -31,9 +34,11 @@ images:
 # BLAS_M 4096 (128 MB per rank, still far past cache) rather than the 8192
 # default, so 16 ranks fit a shared job's default memory share.
 apps:
-  - {name: blas, label: auto,                                     env: {BLAS_M: 4096}}
-  - {name: blas, label: haswell,  env: {OPENBLAS_CORETYPE: Haswell,  BLAS_M: 4096}}
-  - {name: blas, label: skylakex, env: {OPENBLAS_CORETYPE: SkylakeX, BLAS_M: 4096}}
+  - {name: blas, env: {BLAS_M: 4096}}
+variants:
+  - {name: auto}
+  - {name: haswell,  env: {OPENBLAS_CORETYPE: Haswell}}
+  - {name: skylakex, env: {OPENBLAS_CORETYPE: SkylakeX}}
 
 placements:
   - {name: pureMPI, ranks_per_node: 16, threads: 1}
@@ -42,5 +47,5 @@ omp_variants:
   - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
 
 sweep:
-  matrix:  [images, apps, placements, omp_variants]
-  per_job: [placements, omp_variants]
+  matrix:  [images, apps, placements, omp_variants, variants]
+  per_job: [placements, omp_variants, variants]   # every variant on ONE node

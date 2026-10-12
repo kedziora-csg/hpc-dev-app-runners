@@ -2296,8 +2296,25 @@ All four DECISIONs are answered — see §12. What remains open:
     - A way to compare kernel sets on the SAME node. An experiment's
       `apps:` axis cannot vary inside a job, so each kernel set lands on its
       own shared node, and node-to-node noise is as large as some of the
-      effects. A cell-level `env:` axis -- `omp_variants` generalised --
-      would put all three in one job.
+      effects. **Built, 2026-10-12: the `variants:` axis** (below).
+
+    *The `variants:` axis.* An experiment may list `variants: [{name, env:
+    {NAME: value}}]`, crossed like any axis and -- unlike `apps:` -- allowed
+    in `per_job`, so one job runs every variant on one node.
+    - `submit` writes each cell's variant name and settings into `job.env`,
+      one `NAME=value` per line, so a value may hold spaces.
+    - `runner.sh` exports a cell's settings for that cell alone and unsets
+      the previous cell's, as it already does for the OMP settings.
+    - Every row records `variant.name` and `variant.env`, and `collect`
+      groups and labels cells by variant. Rows from experiments without
+      variants are unchanged.
+    - Settings the harness or the placement own (`HPCRUN_*`,
+      `OMP_NUM_THREADS`, `OMP_PROC_BIND`, `OMP_PLACES`) are refused.
+    - It also fixed a latent bug: with `placements` or `omp_variants`
+      crossed but kept out of `per_job`, every job ran the axis's first
+      entry. A cell now takes a job-level axis from its job.
+    - The four seam experiments now run their kernel sets as variants: one
+      job each, three cells on one node.
 
 ---
 
