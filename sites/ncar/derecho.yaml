@@ -141,3 +141,17 @@ mpi:
       so there is no cross-implementation shim: the container's Open MPI must
       version match the host's, and it bootstraps over PMIx and must agree with
       what PALS serves.
+
+# Host libraries an experiment may put in place of the image's, by name: a
+# variant says `host_library: mkl` and the runner preloads it inside the
+# container for that variant's cells.  The site's own oneMKL, from its
+# mkl/2025.2.0 module; libmkl_rt finds its per-ISA kernel libraries beside
+# itself.  /glade is already bound.  Measured on Casper, 2026-10-12: on Intel it
+# matches a DYNAMIC_ARCH OpenBLAS at DGEMM, on AMD it loads its generic `def`
+# kernels and forgoes AVX-512 (BenchmarkRunnerPlan.md, section 11 item 11).
+host_libraries:
+  mkl:
+    description: "oneMKL 2025.2 (Derecho's mkl/2025.2.0 module), single-threaded"
+    preload: [/glade/u/apps/derecho/25.10/spack/opt/spack/intel-oneapi-mkl/2025.2.0/intel-oneapi-compilers/2025.2.1/fj2q/mkl/2025.2/lib/libmkl_rt.so.2]
+    env:
+      MKL_THREADING_LAYER: SEQUENTIAL

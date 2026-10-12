@@ -220,6 +220,25 @@ bench_site_mpi_env () {
     esac
 }
 
+#-- host libraries an experiment may preload -----------------------------
+# By name, from a variant's host_library:.  The runner preloads the files
+# inside the container (LD_PRELOAD) for that variant's cells and sets the
+# env, the way the MPI recipe puts the host's MPI in.  Literal text: a
+# ${NAME} is expanded by the runner.
+HPCRUN_HOST_LIBRARIES='mkl'
+bench_site_host_library_preload () {
+    case "$1" in
+        mkl     ) echo '/glade/u/apps/derecho/25.10/spack/opt/spack/intel-oneapi-mkl/2025.2.0/intel-oneapi-compilers/2025.2.1/fj2q/mkl/2025.2/lib/libmkl_rt.so.2' ;;
+        *       ) echo '' ;;
+    esac
+}
+bench_site_host_library_env () {
+    case "$1" in
+        mkl     ) echo 'MKL_THREADING_LAYER=SEQUENTIAL' ;;
+        *       ) echo '' ;;
+    esac
+}
+
 #-- the module environment every job starts from --------------------------
 # Order is the content, so this is a list rather than one command.
 # Silenced because Lmod narrates every step; a failure still comes back
@@ -237,6 +256,7 @@ export HPCRUN_SITE HPCRUN_CLUSTER HPCRUN_SCHEDULER HPCRUN_SUBMIT HPCRUN_QUEUE
 export HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_TOPOLOGY_MODE
 export HPCRUN_CONTAINER_RUNTIME HPCRUN_BINDS HPCRUN_BINDS_IF_PRESENT
 export HPCRUN_BIND_MAP HPCRUN_LIB_DIRS
+export HPCRUN_HOST_LIBRARIES
 export HPCRUN_WALLTIME_MAX HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_TARGET_ARCH HPCRUN_NODE_SELECT
 # <<< END GENERATED
 

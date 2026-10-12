@@ -9,17 +9,18 @@
 #     skylakex    AVX-512
 # extract records the core that actually ran, so an ignored override shows.
 #
-# And MKL against OpenBLAS, without MKL in the image: the mkl-* variants
-# preload Casper's own oneMKL (the mkl/2025.2.0 module's libmkl_rt) into the
-# container.  APPTAINERENV_LD_PRELOAD sets LD_PRELOAD inside the container
-# only; /glade, where the module lives, is already bound.  MKL's CBLAS then
-# answers the probe's calls instead of OpenBLAS's, and the probe asks the
+# And MKL against OpenBLAS, without MKL in the image: the mkl-* variants name
+# the host library `mkl`, which sites/ncar/casper.yaml declares -- the site's
+# own oneMKL, preloaded inside the container for those cells.  MKL's CBLAS
+# then answers the probe's calls instead of OpenBLAS's, and the probe asks the
 # dynamic linker which library did, so each row says which ran -- and, for
 # MKL, which of its per-ISA kernel libraries it loaded (avx512, avx2, ... or
 # def, its generic one, which is what it chooses on AMD).
 #     mkl-auto      MKL's own choice
 #     mkl-avx2      MKL_ENABLE_INSTRUCTIONS=AVX2: held to AVX2
-# The path is Casper's: a Derecho version names Derecho's module instead.
+# The experiment names the library; where it lives is the cluster's business.
+# derecho-blas.yaml names the same `mkl`, and Derecho's description says where
+# Derecho's is.
 #
 #     ../submit casper-blas --account <PROJECT>                       # htc-genoa (Zen 4)
 #     ../submit casper-blas --account <PROJECT> --subcluster htc-cascadelake
@@ -51,15 +52,8 @@ variants:
   - {name: auto}
   - {name: haswell,  env: {OPENBLAS_CORETYPE: Haswell}}
   - {name: skylakex, env: {OPENBLAS_CORETYPE: SkylakeX}}
-  - name: mkl-auto
-    env:
-      APPTAINERENV_LD_PRELOAD: /glade/u/apps/casper/25.10/spack/opt/spack/intel-oneapi-mkl/2025.2.0/intel-oneapi-compilers/2025.2.1/e2rm/mkl/2025.2/lib/libmkl_rt.so.2
-      MKL_THREADING_LAYER: SEQUENTIAL
-  - name: mkl-avx2
-    env:
-      APPTAINERENV_LD_PRELOAD: /glade/u/apps/casper/25.10/spack/opt/spack/intel-oneapi-mkl/2025.2.0/intel-oneapi-compilers/2025.2.1/e2rm/mkl/2025.2/lib/libmkl_rt.so.2
-      MKL_THREADING_LAYER: SEQUENTIAL
-      MKL_ENABLE_INSTRUCTIONS: AVX2
+  - {name: mkl-auto, host_library: mkl}
+  - {name: mkl-avx2, host_library: mkl, env: {MKL_ENABLE_INSTRUCTIONS: AVX2}}
 
 placements:
   - {name: pureMPI, ranks_per_node: 16, threads: 1}

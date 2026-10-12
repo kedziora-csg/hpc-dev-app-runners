@@ -223,6 +223,17 @@ def _check_semantics(exp):
     # harness or the placement owns would be overwritten under it -- or would
     # overwrite it -- so they are refused rather than resolved by precedence.
     for variant in exp.data.get("variants") or []:
+        lib = variant.get("host_library")
+        if lib and lib not in exp.cluster.host_libraries:
+            problems.append(
+                "variants.%s.host_library: %s is not a host library of cluster %s "
+                "(it declares: %s)" % (variant["name"], lib, exp.cluster.name,
+                                       ", ".join(exp.cluster.host_libraries) or "none"))
+        if lib and set(variant.get("env") or {}) & {"LD_PRELOAD", "APPTAINERENV_LD_PRELOAD",
+                                                  "SINGULARITYENV_LD_PRELOAD"}:
+            problems.append(
+                "variants.%s: host_library and a preload in env both say what to "
+                "preload; use one" % variant["name"])
         for key in sorted(variant.get("env") or {}):
             if key.startswith("HPCRUN_") or key.startswith("BENCH_") or \
                     key in ("OMP_NUM_THREADS", "OMP_PROC_BIND", "OMP_PLACES"):

@@ -2432,6 +2432,29 @@ All four DECISIONs are answered — see §12. What remains open:
     MPI. Two in about 70 Genoa runs is a pattern worth chasing separately:
     a core file, or the host MPI's finalize under UCX.
 
+    *Host libraries, declared (2026-10-12, branch `host-libraries`).* The
+    lasting form of the MKL preload. A cluster file may declare
+    `host_libraries:`, by name, each with the files to preload and the
+    env to set. Derecho and Casper both declare `mkl`: their own
+    `mkl/2025.2.0` installs, with `MKL_THREADING_LAYER: SEQUENTIAL`. A
+    variant names one with `host_library: mkl`, so an experiment names the
+    library and never a path, and `casper-blas` and `derecho-blas` use the
+    same name. Moving the path into the cluster file is what makes that
+    possible.
+    - `sitegen` emits `HPCRUN_HOST_LIBRARIES` and two lookups,
+      `bench_site_host_library_preload` and `_env`, into `cluster.sh`.
+    - `validate` refuses a library the cluster does not declare, or a
+      variant that also sets a preload in its own env.
+    - The runner resolves every cell's library before the first cell runs,
+      and refuses the job if a file is missing. A missing `LD_PRELOAD` is
+      only a warning to the dynamic linker, so the cell would quietly run
+      the image's own library.
+    - For a cell, the runner exports the preload under the runtime's
+      inside-the-container name (`APPTAINERENV_LD_PRELOAD`), so `mpiexec`
+      and the runtime itself never load it. Then it sets the library's env,
+      then the variant's, so an experiment can override the cluster.
+    - Rows record `variant.host_library` and the resolved preload path.
+
 ---
 
 ## 12. Decision log
