@@ -63,7 +63,7 @@ lib="$(dirname "$(ls -d ${PREFIX}/lib*/libopenblas.so | head -1)")"
 
 mkdir -p "${PROBE_DIR}/bin"
 ${MPICC} -O2 ${MARCH_FLAGS} -I"${PREFIX}/include" -o "${PROBE_DIR}/bin/blas_probe" \
-    "${SCRIPTDIR}/blas_probe.c" -L"${lib}" -Wl,-rpath,"${lib}" -lopenblas -lm
+    "${SCRIPTDIR}/blas_probe.c" -L"${lib}" -Wl,-rpath,"${lib}" -lopenblas -ldl -lm
 mkdir -p "${INSTALL_ROOT}/bin"
 ln -sf "${PROBE_DIR}/bin/blas_probe" "${INSTALL_ROOT}/bin/blas_probe"
 echo "built ${PROBE_DIR}/bin/blas_probe"

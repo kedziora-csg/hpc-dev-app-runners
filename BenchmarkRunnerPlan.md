@@ -2371,6 +2371,30 @@ All four DECISIONs are answered — see §12. What remains open:
     FFTW. The AVX-512 build fell back to AVX2 here and ran exactly as fast,
     which is the safety the design needs.
 
+    *MKL against OpenBLAS, from the host (2026-10-12).* A second way to get a
+    tuned library into a portable image: use the site's own, as the runner
+    already does for MPI. `casper-blas` gains two variants. Each preloads
+    Casper's oneMKL (the `mkl/2025.2.0` module's `libmkl_rt.so.2`, under the
+    already bound `/glade`) through `APPTAINERENV_LD_PRELOAD`, which sets
+    `LD_PRELOAD` inside the container only:
+    - `mkl-auto`: MKL's own choice;
+    - `mkl-avx2`: held to AVX2 by `MKL_ENABLE_INSTRUCTIONS=AVX2`.
+
+    MKL's CBLAS then answers the probe's calls. The probe no longer assumes
+    which library ran. It asks the dynamic linker which file defines
+    `cblas_dgemm`, and reports `blas_lib`. For MKL it also reports its
+    version, its CNR branch, and the per-ISA kernel library it loaded, read
+    from `/proc/self/maps`: `avx512`, `avx2`, ... or `def`, the generic one.
+    On an AMD Zen 5 login node, MKL 2025.2 loaded `def` even when told
+    `MKL_ENABLE_INSTRUCTIONS=AVX512`, and reported its branch as `AUTO`. One
+    rank there ran DGEMM at 59 GFLOP/s under MKL against 109 under
+    OpenBLAS: a hint, to be measured properly on Genoa and Cascade Lake. If
+    it holds, a portable base for AMD and Intel machines should carry a
+    dispatching OpenBLAS rather than rely on MKL. The `variants:` env is
+    enough to measure that now; a declared "host math library" in the
+    cluster description, beside the host-MPI recipe, would be the lasting
+    form.
+
 ---
 
 ## 12. Decision log

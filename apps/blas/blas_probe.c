@@ -12,7 +12,24 @@
  * C = A*B is 2N, and every element of y = A*x with x all 1 is M.  A wrong
  * kernel -- the risk when a library picks its code at run time -- shows as
  * valid: false rather than as a fast number.
+ *
+ * WHICH LIBRARY RAN
+ *
+ * The probe is linked against OpenBLAS, but any library that defines the
+ * CBLAS symbols and is loaded first answers the calls instead -- MKL from the
+ * host, preloaded through APPTAINERENV_LD_PRELOAD, is how the seam study
+ * compares the two in one image.  So the probe does not assume: it asks the
+ * dynamic linker which file defines cblas_dgemm, and reports that library.
+ * For MKL it adds MKL's version, its CNR "auto branch", and -- the concrete
+ * answer -- which of its per-ISA kernel libraries it actually loaded
+ * (libmkl_avx512, libmkl_avx2, ... or libmkl_def, its generic library),
+ * read from /proc/self/maps after the timed calls.  On a non-Intel CPU MKL
+ * reports its branch as AUTO, which says nothing; the loaded library does.
+ * For OpenBLAS, the kernel set.  Only the library that ran is
+ * described, so a row cannot carry OpenBLAS's kernel name for MKL's numbers.
  */
+#define _GNU_SOURCE
+#include <dlfcn.h>
 #include <mpi.h>
 #include <cblas.h>
 #include <math.h>
@@ -24,6 +41,75 @@ char *openblas_get_corename(void);
 char *openblas_get_config(void);
 
 static double now(void) { return MPI_Wtime(); }
+
+/* MKL's names for its code paths: mkl_types.h, MKL_CBWR_*. */
+static const char *mkl_branch_name(int b)
+{
+    switch (b) {
+    case 2:  return "AUTO";      /* what MKL reports on a non-Intel CPU */
+    case 3:  return "COMPATIBLE";
+    case 4:  return "SSE2";
+    case 6:  return "SSSE3";
+    case 7:  return "SSE4_1";
+    case 8:  return "SSE4_2";
+    case 9:  return "AVX";
+    case 10: return "AVX2";
+    case 11: return "AVX512_MIC";
+    case 12: return "AVX512";
+    case 13: return "AVX512_MIC_E1";
+    case 14: return "AVX512_E1";
+    case 15: return "AVX10";
+    default: return "unknown";
+    }
+}
+
+/* Which loaded file defines cblas_dgemm, and what to say about it. */
+static void describe_blas(void)
+{
+    Dl_info info;
+    void *sym = dlsym(RTLD_DEFAULT, "cblas_dgemm");
+    const char *file = (sym && dladdr(sym, &info) && info.dli_fname) ? info.dli_fname : "unknown";
+    printf("BLAS library: %s\n", file);
+
+    void (*mkl_version)(char *, int) =
+        (void (*)(char *, int))dlsym(RTLD_DEFAULT, "MKL_Get_Version_String");
+    int (*mkl_branch)(void) = (int (*)(void))dlsym(RTLD_DEFAULT, "MKL_CBWR_Get_Auto_Branch");
+    if (strstr(file, "mkl") && mkl_version) {
+        char buf[256] = "";
+        mkl_version(buf, (int)sizeof buf);
+        printf("BLAS: mkl\n");
+        printf("MKL version: %s\n", buf);
+        printf("MKL branch: %s\n", mkl_branch ? mkl_branch_name(mkl_branch()) : "unknown");
+        /* libmkl_<isa>.so: the kernels MKL dispatched to.  Not libmkl_vml_*
+         * (the vector math library) and not the plumbing: rt, core, the
+         * interface and threading layers. */
+        FILE *maps = fopen("/proc/self/maps", "r");
+        char line[1024], kernels[256] = "";
+        while (maps && fgets(line, sizeof line, maps)) {
+            char *name = strrchr(line, '/');
+            if (!name || !strstr(line, "r-xp") || strncmp(name, "/libmkl_", 8)) continue;
+            name += 8;
+            if (!strncmp(name, "vml_", 4) || !strncmp(name, "rt.", 3) || !strncmp(name, "core.", 5)
+                || !strncmp(name, "intel_", 6) || !strncmp(name, "gf_", 3)
+                || !strncmp(name, "sequential.", 11) || !strncmp(name, "gnu_thread.", 11)
+                || !strncmp(name, "intel_thread.", 13)) continue;
+            char *dot = strchr(name, '.');
+            if (dot) *dot = '\0';
+            if (!strstr(kernels, name)) {
+                if (*kernels) strncat(kernels, ",", sizeof kernels - strlen(kernels) - 1);
+                strncat(kernels, name, sizeof kernels - strlen(kernels) - 1);
+            }
+        }
+        if (maps) fclose(maps);
+        printf("MKL kernels: %s\n", *kernels ? kernels : "unknown");
+    } else if (strstr(file, "openblas")) {
+        printf("BLAS: openblas\n");
+        printf("Core: %s\n", openblas_get_corename());
+        printf("Config: %s\n", openblas_get_config());
+    } else {
+        printf("BLAS: unknown\n");
+    }
+}
 
 static int cmp(const void *a, const void *b)
 {
@@ -93,8 +179,7 @@ int main(int argc, char **argv)
         double sum_mm = 0, sum_mv = 0;
         for (int i = 0; i < size; i++) { sum_mm += all_mm[i]; sum_mv += all_mv[i]; }
         printf("blas_probe: ranks %d, dgemm order %d, dgemv order %d, best of %d\n", size, n, m, reps);
-        printf("Core: %s\n", openblas_get_corename());
-        printf("Config: %s\n", openblas_get_config());
+        describe_blas();
         printf("DGEMM GFLOPS per rank (median): %.3f\n", all_mm[size / 2]);
         printf("DGEMM GFLOPS per rank (min): %.3f\n", all_mm[0]);
         printf("DGEMM GFLOPS total: %.3f\n", sum_mm);

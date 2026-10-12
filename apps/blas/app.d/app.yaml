@@ -31,5 +31,13 @@ notes: |
   OPENBLAS_CORETYPE forces a kernel set -- Haswell or Zen for AVX2,
   SkylakeX or Cooperlake for AVX-512.  Unset, OpenBLAS picks from CPUID.
   extract reports the core that actually ran as `core`, so a forced type the
-  library ignored is visible.  Forcing an AVX-512 type on a host without
+  library ignored is visible.
+
+  Another CBLAS can answer the calls instead -- MKL preloaded from the host
+  with APPTAINERENV_LD_PRELOAD=<...>/libmkl_rt.so.2.  The probe asks the
+  dynamic linker which library defines cblas_dgemm and reports it as
+  `blas_lib`; for MKL, `mkl_version`, `mkl_branch` and `mkl_kernels`, the
+  per-ISA kernel library MKL loaded (avx512, avx2, ..., or def, its generic
+  one).  MKL_ENABLE_INSTRUCTIONS caps MKL's choice; MKL_THREADING_LAYER=
+  SEQUENTIAL keeps a rank single-threaded.  Forcing an AVX-512 type on a host without
   AVX-512 dies with SIGILL; that is the user's choice to make, not a fault.

@@ -222,6 +222,8 @@ want "blas: launch sizes DGEMM and DGEMV" "/container/bin/blas_probe 2048 8192 5
      "$(HPCRUN_SCALE=node app_argv)"
 cat > "${run}/app.out" <<'BLASOUT'
 blas_probe: ranks 128, dgemm order 2048, dgemv order 8192, best of 5
+BLAS library: /container/openblas/0.3.30-dynamic/lib/libopenblas.so.0
+BLAS: openblas
 Core: SkylakeX
 Config: OpenBLAS 0.3.30 NO_LAPACK DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=1
 DGEMM GFLOPS per rank (median): 51.200
@@ -237,6 +239,30 @@ has "blas: extract reads the DGEMV bandwidth"     "${TMP}/blas.kv" "dgemv_gbs_ra
 has "blas: extract records the core that ran"     "${TMP}/blas.kv" "core=SkylakeX"
 has "blas: extract records the core asked for"    "${TMP}/blas.kv" "coretype_forced=SkylakeX"
 has "blas: the probe's own check is the verdict"  "${TMP}/blas.kv" "valid=true"
+has "blas: extract names the library that ran"    "${TMP}/blas.kv" "blas_lib=openblas"
+
+# The same probe with MKL preloaded: it reports MKL, and not OpenBLAS's core.
+cat > "${run}/app.out" <<'BLASOUT'
+blas_probe: ranks 16, dgemm order 2048, dgemv order 4096, best of 5
+BLAS library: /glade/u/apps/casper/25.10/spack/opt/spack/intel-oneapi-mkl/2025.2.0/x/mkl/2025.2/lib/libmkl_rt.so.2
+BLAS: mkl
+MKL version: Intel(R) oneAPI Math Kernel Library Version 2025.2-Product Build 20250620 for Intel(R) 64 architecture applications
+MKL branch: AUTO
+MKL kernels: def
+DGEMM GFLOPS per rank (median): 40.100
+DGEMM GFLOPS per rank (min): 39.000
+DGEMM GFLOPS total: 641.600
+DGEMV GB/s per rank (median): 8.700
+DGEMV GB/s total: 139.200
+Valid: true
+BLASOUT
+MKL_ENABLE_INSTRUCTIONS=AVX2 app_extract "${run}" "${TMP}/mkl.kv"
+has "blas: with MKL preloaded, extract names MKL"        "${TMP}/mkl.kv" "blas_lib=mkl"
+has "blas: extract reads MKL's version"                  "${TMP}/mkl.kv" "mkl_version=2025.2"
+has "blas: extract reads the kernel library MKL loaded"  "${TMP}/mkl.kv" "mkl_kernels=def"
+has "blas: extract records the MKL instruction cap"      "${TMP}/mkl.kv" "mkl_instructions=AVX2"
+grep -q '^core=' "${TMP}/mkl.kv" && bad "blas: an MKL row carries an OpenBLAS core" \
+                                 || ok "blas: an MKL row carries no OpenBLAS core"
 
 #-- a bare executable is a legal, hook-free app --------------------------------
 echo
