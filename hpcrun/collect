@@ -179,7 +179,7 @@ def fmt(value):
 def cell_key(row):
     """What makes two rows the same CELL: everything except which repeat."""
     return (row["_job"], get(row, "app.name"), get(row, "placement.name"),
-            get(row, "placement.omp_variant"))
+            get(row, "placement.omp_variant"), get(row, "variant.name"))
 
 
 def group_cells(rows):
@@ -243,14 +243,20 @@ def print_grouped_table(rows, metrics):
         ("APP", lambda k, p: get(p[0], "app.name")),
         ("PLACEMENT", lambda k, p: get(p[0], "placement.name")),
         ("OMP", lambda k, p: get(p[0], "placement.omp_variant")),
+    ]
+    # Only when some row ran under a variant: results from before the axis
+    # existed, and experiments that do not use it, keep their old table.
+    if any(get(r, "variant.name") for r in rows):
+        cols.append(("VARIANT", lambda k, p: get(p[0], "variant.name")))
+    cols += [
         ("R/NODE", lambda k, p: get(p[0], "placement.ranks_per_node")),
         ("THREADS", lambda k, p: get(p[0], "placement.threads")),
         ("N", lambda k, p: len([r for r in p if excluded_because(r) is None])),
     ]
     for metric in metrics + ["wall_s"]:
         cols.append((metric.upper() + "~",
-                     (lambda m: lambda k, p: _fmt_num(cell_stat(
-                         [r for r in p if excluded_because(r) is None], m)[1]))(metric)))
+                     (lambda m: lambda k, p: _cell_value(
+                         [r for r in p if excluded_because(r) is None], m))(metric)))
     cols += [
         ("BIND", lambda k, p: get(p[0], "placement.verdict")),
         ("NOTE", lambda k, p: _group_note(p)),
@@ -267,6 +273,19 @@ def print_grouped_table(rows, metrics):
     print()
     print("~ = median across the cell's repeats; N is how many of them are")
     print("comparable.  --per-run lists every run instead.")
+
+
+def _cell_value(pool, metric):
+    """The median of a numeric metric; for a text one -- which kernel ran,
+    which backend -- the value when every run agrees, else `mixed`.  A text
+    metric used to print as `-`, hiding exactly the label that says what ran."""
+    median = cell_stat(pool, metric)[1]
+    if median is not None:
+        return _fmt_num(median)
+    texts = {str(get(r, "metrics." + metric, "")) for r in pool} - {""}
+    if not texts:
+        return ""
+    return texts.pop() if len(texts) == 1 else "mixed"
 
 
 def _fmt_num(value):
@@ -343,7 +362,7 @@ def print_csv(rows, metrics):
               "placement.name", "placement.ranks_per_node", "placement.threads",
               "placement.verdict", "placement.rules",
               "placement.omp.OMP_PROC_BIND", "placement.omp.OMP_PLACES",
-              "placement.omp_variant",
+              "placement.omp_variant", "variant.name",
               "repeat", "repeats", "warm", "wall_s", "exit", "valid"]
     fields += ["metrics." + m for m in metrics]
     fields += ["comparable", "excluded_because"]
@@ -469,6 +488,9 @@ def emit_profile(rows, include_failed=False):
         omp = get(win, "placement.omp_variant")
         if omp:
             print("    omp: %s" % omp)
+        variant = get(win, "variant.name")
+        if variant and variant != "default":
+            print("    variant: %s" % variant)
         print("    app: %s" % app)
         print("    images: [%s]" % get(win, "image.sif", win["_job"]))
     return 0

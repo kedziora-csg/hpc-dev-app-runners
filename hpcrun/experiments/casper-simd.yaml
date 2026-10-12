@@ -1,0 +1,61 @@
+# Seam study, test 1 (BenchmarkRunnerPlan.md, section 11 item 11): what FFTW's
+# run-time-dispatched SIMD codelets are worth, and what AVX-512 adds over AVX2,
+# on a node that has AVX-512.
+#
+# One image, three FFTWs behind the same HeFFTe driver:
+#     base     the base image's libfftw3, built with no SIMD codelets
+#     avx2     FFTW built here with --enable-sse2/avx/avx2
+#     avx512   ... and --enable-avx512
+# FFTW picks its codelets from CPUID at run time, so all three are portable.
+#
+# Run it on both node types of the htc pool:
+#     ../submit casper-simd --account <PROJECT>                       # htc-genoa (Zen 4)
+#     ../submit casper-simd --account <PROJECT> --subcluster htc-cascadelake
+#
+# 256^3 rather than Derecho's 512^3: about 1 GB in all, which a shared job's
+# default memory share holds; the question here is AVX2 against AVX-512 on one
+# node, not a comparison with Derecho.
+#
+# Shared nodes, so a plumbing-grade measurement: co-tenants are noise this
+# cannot see.  Treat differences under about 5% as noise; repeat to check.
+#
+# 16 ranks x 1.  PBS hands a shared job distinct physical cores, not SMT
+# siblings (the first run's placement report shows 32 cores 15..46 for a
+# 32-CPU request), so no two ranks share a core's vector units.  A first
+# version asked 16 x 2 to make sure of that, and on the two-socket Cascade
+# Lake nodes Open MPI refused to map it: a rank's two CPUs fell in different
+# packages.
+# The kernel sets are `variants:`, not separate apps, so all of them run in
+# ONE job, on one node, one after another: on a shared node that is the only
+# way the comparison is not swamped by which node each one landed on.
+schema: 2
+cluster: casper
+subcluster: htc-genoa
+
+defaults:
+  nodes: 1
+  walltime: "00:20:00"
+  repeats: 5
+  scale: node
+  exclusive: false
+  allow_undersubscribed: true
+
+images:
+  list: [leap-gcc14-openmpi-heffte-znver3.sif]
+
+apps:
+  - {name: heffte, env: {HEFFTE_BACKEND: fftw, HEFFTE_N: 256}}
+variants:
+  - {name: fftw-base,   env: {HEFFTE_FFTW: base}}
+  - {name: fftw-avx2,   env: {HEFFTE_FFTW: avx2}}
+  - {name: fftw-avx512, env: {HEFFTE_FFTW: avx512}}
+
+placements:
+  - {name: pureMPI, ranks_per_node: 16, threads: 1}
+
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
+
+sweep:
+  matrix:  [images, apps, placements, omp_variants, variants]
+  per_job: [placements, omp_variants, variants]   # every variant on ONE node

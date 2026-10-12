@@ -81,6 +81,26 @@ _arch_declared_level () {
     esac
 }
 
+# The functions of <binary> that touch an AVX-512 register, one per line.
+_arch_zmm_functions () {
+    local launcher="$1" binary="$2"
+    ${launcher} bash -c 'objdump -d --no-show-raw-insn "$(readlink -f "$1")" 2>/dev/null' _ "${binary}" \
+        | awk '/^[0-9a-f]+ <.*>:$/ { f = $2 } /%zmm[0-9]/ { print f }' \
+        | tr -d '<>:' | sort -u
+}
+
+# Libraries that carry an AVX-512 copy of a routine beside narrower ones and
+# choose between them from CPUID when the program starts: Intel's short-vector
+# math library (__svml_*, whose _z0 variants are the AVX-512 ones), its libm and
+# its memcpy/memset family.  AVX-512 found ONLY in these is never executed on a
+# host without it, so it is not a requirement of the binary.
+_arch_dispatched () {
+    case "$1" in
+        __svml_*|__intel_*|_intel_fast_*|__libm_*) return 0 ;;
+    esac
+    return 1
+}
+
 #-------------------------------------------------------------------------------
 # arch_check <launcher> <binary> [outfile]
 #
@@ -118,6 +138,34 @@ arch_check () {
     needs_wide=""
     grep -q 'AVX-512 (zmm) used by binary: YES' "${out}" && needs_wide="AVX-512"
     grep -q 'SVE (z-regs) used by binary: YES'  "${out}" && needs_wide="SVE"
+
+    # report_cpu_features answers "does any instruction name a zmm register",
+    # which a oneAPI binary answers yes for whenever it links a routine that
+    # dispatches at run time: the seam study's oneapi build refused itself on
+    # Derecho over one instruction in __svml_cos2_z0.  So when the host lacks
+    # AVX-512, ask WHERE: AVX-512 confined to dispatched routines is not a
+    # requirement, and everything else still is.
+    local wide_fns="" own_fns="" fn
+    if [ "${needs_wide}" = "AVX-512" ]; then
+        case "${flags}" in
+            *avx512*) ;;
+            *)
+                wide_fns="$(_arch_zmm_functions "${launcher}" "${binary}")"
+                for fn in ${wide_fns}; do
+                    _arch_dispatched "${fn}" || own_fns="${own_fns} ${fn}"
+                done
+                {
+                    echo "== AVX-512 by function (check_arch.sh) =="
+                    printf '  %s\n' ${wide_fns:-none}
+                } >> "${out}"
+                if [ -n "${wide_fns}" ] && [ -z "${own_fns}" ]; then
+                    echo "note      AVX-512 only in run-time-dispatched routines" \
+                         "($(echo ${wide_fns} | tr ' ' ',')), never run on this host"
+                    needs_wide=""
+                fi
+                ;;
+        esac
+    fi
 
     host_level="$(_arch_level_x86 "${flags}")"
     echo "cpu       host $(_arch_level_name "${host_level}") [${flags% }]${needs_wide:+; binary uses ${needs_wide}}"

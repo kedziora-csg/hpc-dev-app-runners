@@ -1,0 +1,26 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# blas/extract <rundir> -- print `key=value` for this cell, from app.out.
+# No summary is a missing metric, not a failed run.
+#-------------------------------------------------------------------------------
+rundir="${1:-${HPCRUN_RUNDIR:-.}}"
+cd "${rundir}" 2>/dev/null || exit 0
+[ -f app.out ] || exit 0
+
+val () { sed -n "s/^$1:[[:space:]]*//p" app.out | tail -1; }
+v="$(val 'DGEMM GFLOPS per rank (median)')"; [ -n "${v}" ] && echo "dgemm_gflops_rank=${v}"
+v="$(val 'DGEMM GFLOPS total')";             [ -n "${v}" ] && echo "dgemm_gflops_total=${v}"
+v="$(val 'DGEMV GB\/s per rank (median)')";  [ -n "${v}" ] && echo "dgemv_gbs_rank=${v}"
+v="$(val 'DGEMV GB\/s total')";              [ -n "${v}" ] && echo "dgemv_gbs_total=${v}"
+# Which library answered the calls, and what IT says about its code path:
+# OpenBLAS's kernel set, or MKL's version and branch.  Only the one that ran.
+v="$(val 'BLAS')";                           [ -n "${v}" ] && echo "blas_lib=${v}"
+v="$(val 'Core')";                           [ -n "${v}" ] && echo "core=$(printf '%s' "${v}" | tr -d ' ')"
+v="$(val 'MKL branch')";                     [ -n "${v}" ] && echo "mkl_branch=${v}"
+v="$(val 'MKL kernels')";                    [ -n "${v}" ] && echo "mkl_kernels=${v}"
+v="$(val 'MKL version' | grep -oE 'Version [0-9][0-9.]*' | awk '{print $2}')"
+[ -n "${v}" ] && echo "mkl_version=${v}"
+echo "coretype_forced=${OPENBLAS_CORETYPE:-none}"
+echo "mkl_instructions=${MKL_ENABLE_INSTRUCTIONS:-none}"
+v="$(val 'Valid')";                          [ -n "${v}" ] && echo "valid=${v}"
+exit 0

@@ -2108,6 +2108,330 @@ All four DECISIONs are answered — see §12. What remains open:
     *Who decides.* This project, in the new factory repository
     (`ImagePublishingPlan.md` §4, §7): base images are ours to design there.
 
+    *Progress, 2026-10-05* (branch `seam-study`).
+
+    - **Casper's distro is leap.** A one-CPU job on each htc node type
+      (crhtc69, Genoa; crhtc53, Cascade Lake) read `openSUSE Leap 15.6`,
+      kernel 6.4.0-150600, glibc 2.38, exactly the userspace the leap base
+      images carry. Derecho's is SLE 15 SP6, built from the same sources. So
+      for NCAR the distro does not vary by cluster, and a build key there is
+      only microarchitecture x compiler x MPI.
+    - **Build keys and their cost.** The clusters as described need 6 base
+      images today: leap x {oneapi, gcc14, nvhpc} x {mpich, openmpi}, shared
+      by Derecho and Casper. One per native target instead -- `znver3` for
+      Derecho, `znver4` for `htc-genoa`, `cascadelake` for `htc-cascadelake`,
+      with Casper's openmpi only -- is 6 + 3 + 3 = 12. Sizes from GHCR
+      (compressed): oneapi 2.6 GB, gcc14 1.0 GB, nvhpc 8.1 GB. So the
+      registry and every download go from about 23 GB to about 47 GB.
+    - **Today a tuned base shares nothing with a portable one.** Layer by
+      layer, `hpcdev-x86_64` and `hpcdev-derecho-x86_64` share only the 44 MB
+      OS layer from Docker Hub. The 423 MB of OS packages and nvhpc's 3.7 GB
+      compiler layer are stored twice, though their content cannot depend on
+      the target, because each build is a separate, non-reproducible run. So
+      option 2's cost is the full image per key. Option 3 would change that
+      only if a tuned image is built FROM the published portable image's
+      lower stages. The final stage's `chown` (`ImagePublishingPlan.md` §4,
+      trim 1) duplicates every file into the top layer -- 3.8 GB of an nvhpc
+      image -- so that trim comes first whichever seam wins.
+    - **The base's FFTW is configured without SIMD.** `fftlibs` runs FFTW's
+      `configure` with no `--enable-sse2`/`--enable-avx`/`--enable-avx2`/
+      `--enable-avx512`, so its codelets are scalar on both bases. In the
+      gcc14-openmpi images, `libfftw3.so` contains no AVX codelets in either
+      base. It has 128 `%ymm` instructions in the tuned base, all from gcc's
+      own vectorisation, and none in the portable one. FFTW
+      chooses SIMD codelets at run time from CPUID, so enabling them is safe
+      in a PORTABLE base. That is likely worth more than any `-march`, and
+      it shows the study's real question is not portable versus tuned. Some
+      libraries dispatch at run time and only need configuring well. Others
+      -- HeFFTe's `stock` backend, the netCDF/HDF5 filters -- vectorise only
+      for the target they were compiled for.
+    - **The probe app.** `apps/heffte/` builds HeFFTe's `speed3d` benchmarks
+      against the base's own libheffte and libfftw3. It does not build its own
+      HeFFTe, so its time is spent in base libraries. The contract has a
+      `fftw` and a `stock` backend, and `extract` reports `valid=false` when
+      speed3d's max error exceeds its own tolerance. `build.sh` and
+      `smoke.sh` pass under apptainer on the gcc14 tuned and portable bases,
+      oneapi-mpich and nvhpc-openmpi. Derecho's `images.apps` gains
+      `heffte`, so `derecho-heffte` is a set.
+    - **Telling the two builds apart.** The portable-base builds must not take
+      the regular tag. The app workflow gains a `tag_suffix` input
+      (`apps/matrix.py --tag-suffix`), so they publish as
+      `...-heffte-znver3-pbase`. `sif/Makefile` pulls an image outside every
+      set with `EXTRA_APP_IMAGES=`.
+    - **The measurement.** `hpcrun/experiments/derecho-seam.yaml` runs gcc14
+      and oneapi mpich images, tuned and portable base, under both backends,
+      at 512^3 on one node, 128 ranks. That is 8 one-node jobs.
+
+    *Result, 2026-10-05: tuning the base made no difference.* `derecho-seam`
+    ran on Derecho, one node, 128 ranks, 512^3 double-precision r2c, three
+    repeats per cell. All on harness `ecf0cd5`; results in
+    `/glade/derecho/scratch/kedziora/hpcrun-seam`.
+
+    | gcc14, mpich | backend | time per FFT, median | tuned vs portable |
+    |---|---|---|---|
+    | tuned base | fftw  | 0.2076 s | |
+    | portable base | fftw  | 0.2070 s | -0.3% |
+    | tuned base | stock | 0.2187 s | |
+    | portable base | stock | 0.2185 s | -0.1% |
+
+    The tuned oneAPI image ran at 0.2082 s (fftw) and 0.2189 s (stock), the
+    same as gcc14. Its portable twin was refused by the job's architecture
+    check (below), so the oneAPI pair is unmeasured. Every run validated
+    against speed3d's own tolerance.
+
+    The code under test really does differ: the tuned base's `libheffte.so`
+    has 5,718 AVX2 (`%ymm`) instructions and its `libfftw3.so` 641, the
+    portable base's none. They change nothing, because the transform is not
+    arithmetic-bound. 87 GFLOP/s over 128 cores is about 0.7 GFLOP/s a core,
+    a small fraction of what a Zen 3 core computes. A distributed FFT spends
+    its time packing, exchanging and streaming data.
+
+    *What it means for the seam.*
+    - **For this kind of code, a portable base costs nothing,** and
+      per-cluster base images would double the registry (about 23 to 47 GB)
+      for no measured gain. That supports the decision taken: portable base,
+      tuned app layer.
+    - **It does not close the question.** One app, one size, one node. A code
+      with much more arithmetic per byte -- dense kernels, small FFTs that fit
+      in cache -- could differ, and should be measured the same way before
+      cluster-specific base images are built for it.
+    - **The cheaper win is configuration, not tuning.** FFTW's SIMD codelets
+      (`--enable-avx2`, `--enable-avx512`) are chosen at run time and so are
+      safe in a portable base. Enabling them in the factory's `fftlibs` stage
+      is the next measurement: the same `derecho-seam` pair, after a rebuild.
+
+    *Found on the way: the architecture check refused a binary that runs.* The
+    oneAPI portable-base `speed3d` holds one AVX-512 instruction, in
+    `__svml_cos2_z0`: Intel's short-vector math library carries an AVX-512
+    copy of each routine and picks one from CPUID at start-up, so that copy
+    never runs on Derecho. `report_cpu_features` answers only "is any `%zmm`
+    named", so `check_arch.sh` refused the job. It now asks which functions
+    hold AVX-512 when the host lacks it, and lets a binary through when they
+    are all Intel's run-time-dispatched routines (`__svml_*`, `__intel_*`,
+    `_intel_fast_*`, `__libm_*`). AVX-512 anywhere else, or anywhere it
+    cannot place, still refuses. Checked against both real oneAPI images
+    under a no-AVX-512 host report, and by three new off-cluster checks.
+
+    *The seam, stated as a design rule (2026-10-05).* The aim is a system that
+    runs any HPC code a user chooses, so codes that gain from AVX-512 must be
+    served without a base image per node type. The rule follows from what a
+    library does at run time:
+
+    | A library that... | Examples | Belongs in |
+    |---|---|---|
+    | picks its kernels from CPUID at run time | MKL/oneMKL, OpenBLAS `DYNAMIC_ARCH`, BLIS, FFTW with its SIMD codelets enabled, glibc's string functions | the **portable base** -- one build, fast on every node, AVX-512 only where it exists |
+    | is fixed when compiled | HeFFTe's `stock` FFTs, most Fortran science libraries, the app's own code | the **app layer**, built for the target, whenever it is hot for that app |
+
+    So the base stays portable but is built to dispatch wherever a library
+    can, and an app image builds -- for its target -- both itself and any
+    hot library that cannot dispatch. Tests 1 and 2 measure the first row on
+    nodes with AVX-512.
+
+    - *Test 1, FFTW's dispatched SIMD codelets.* `apps/heffte` now builds two
+      more FFTWs beside the driver: up to AVX2, and up to AVX-512, both
+      chosen at run time. Three binaries share the base's libheffte, picked
+      by `HEFFTE_FFTW=base|avx2|avx512`. `casper-simd.yaml` runs them on
+      either htc node type, and `derecho-simd.yaml` on Zen 3, where the
+      avx512 build must fall back to AVX2 and match the avx2 one.
+    - *Test 2, BLAS3 and BLAS2.* `apps/blas` is a DGEMM and DGEMV probe on
+      OpenBLAS 0.3.30 built `DYNAMIC_ARCH`. It checks its answers, and
+      reports the kernel set that actually ran. `OPENBLAS_CORETYPE` forces
+      AVX2 (Haswell, Zen) or AVX-512 (SkylakeX) kernels on the same node.
+      `casper-blas.yaml` and `derecho-blas.yaml` run it. The expectation to
+      test is that DGEMM gains from AVX-512, more on Intel than on Zen 4,
+      which runs AVX-512 as two 256-bit halves, and that DGEMV, which is
+      bound by memory bandwidth, gains little.
+    - Both libraries are built with the system gcc and no `-march`, whatever
+      the image's compiler: the dispatching library is the portable
+      artefact. OpenBLAS also needs the system gfortran named, because it
+      probes FC even with `NOFORTRAN=1`, and the image's nvfortran or ifx
+      rejects the flags it tries.
+
+    *First results, tests 1 and 2 (run 2026-10-05 to 10-12; results in
+    `hpcrun-avx512/` in the checkout).* Medians of three repeats; harness on
+    `seam-study`. Casper rows are on shared nodes, each job on a different
+    node, so differences under about 5% are noise.
+
+    | Test | Node | Kernels | Result (median) |
+    |---|---|---|---|
+    | FFT, 512^3, 128 ranks | Derecho, Zen 3 | base FFTW (scalar) / AVX2 / AVX-512 build | 0.2082 / 0.2088 / 0.2085 s |
+    | FFT, 256^3, 16 ranks | Casper Genoa, Zen 4 | base / AVX2 / AVX-512 | 0.0355 / 0.0344 / 0.0345 s |
+    | DGEMM, per rank, all ranks busy | Derecho, Zen 3 | auto (Zen) / Haswell / Zen | 27.4 / 27.6 / 27.4 GFLOP/s |
+    | DGEMM | Casper Genoa | auto (Cooperlake) / Haswell (AVX2) / SkylakeX (AVX-512) | 55.8 / 50.9 / 55.8 GFLOP/s |
+    | DGEMM | Casper Cascade Lake | SkylakeX (AVX-512) | 84.6 GFLOP/s; AVX2 run lost, see below |
+    | DGEMV, per rank | Derecho | all three | 2.37 GB/s |
+    | DGEMV | Casper Genoa | auto / Haswell / SkylakeX | 11.3 / 11.5 / 15.4 GB/s |
+
+    What it shows so far:
+    - **Run-time dispatch works, and is safe.** On an AVX-512 host, the
+      avx512 FFTW's planner chose AVX-512 codelets (`fftw_print_plan` under
+      `FFTW_ESTIMATE`). On Derecho the same library fell back to AVX2 and
+      ran exactly as fast as the AVX2 build. OpenBLAS picked Zen kernels on
+      Derecho and Cooperlake (AVX-512) on Genoa unaided, matching the best
+      forced choice each time. Every run validated.
+    - **For the distributed FFT, SIMD of any width is worth at most a few
+      percent** -- 3% on Genoa, inside the noise; nothing on Derecho. It is
+      bound by data movement, as `derecho-seam` found.
+    - **For DGEMM, AVX-512 is worth about 10% on Zen 4**, which executes
+      AVX-512 as two 256-bit halves. On Cascade Lake, AVX-512 DGEMM ran at
+      84.6 GFLOP/s a core, the highest per-core figure measured. The AVX2
+      run that would say how much of that is AVX-512 was lost.
+    - **DGEMV on Genoa ran 34% faster with AVX-512 kernels.** That is not
+      what a bandwidth-bound kernel should do. The three jobs ran on three
+      different shared nodes. Treat it as unexplained until a repeat on one
+      node confirms it.
+
+    *Lost runs, and the fix.* Five of six Cascade Lake jobs failed before
+    running. Open MPI refused to map 16 ranks x 2 CPUs ("bound to CPUs in
+    more than one package"): on the two-socket node, PBS's 32 CPUs left
+    some rank's pair straddling the sockets. The 16 x 2 placement was meant
+    to stop two ranks sharing a core. The Genoa placement reports show it
+    was unnecessary: PBS hands a shared job distinct physical cores, never
+    SMT siblings. Both Casper experiments now use 16 x 1, with five repeats.
+
+    *Still needed.*
+    - Rerun both Casper experiments on Cascade Lake, for the AVX2 against
+      AVX-512 DGEMM figure and the FFT row. Rerun on Genoa too, at 16 x 1,
+      so the two node types compare like for like.
+    - A way to compare kernel sets on the SAME node. An experiment's
+      `apps:` axis cannot vary inside a job, so each kernel set lands on its
+      own shared node, and node-to-node noise is as large as some of the
+      effects. **Built, 2026-10-12: the `variants:` axis** (below).
+
+    *The `variants:` axis.* An experiment may list `variants: [{name, env:
+    {NAME: value}}]`, crossed like any axis and -- unlike `apps:` -- allowed
+    in `per_job`, so one job runs every variant on one node.
+    - `submit` writes each cell's variant name and settings into `job.env`,
+      one `NAME=value` per line, so a value may hold spaces.
+    - `runner.sh` exports a cell's settings for that cell alone and unsets
+      the previous cell's, as it already does for the OMP settings.
+    - Every row records `variant.name` and `variant.env`, and `collect`
+      groups and labels cells by variant. Rows from experiments without
+      variants are unchanged.
+    - Settings the harness or the placement own (`HPCRUN_*`,
+      `OMP_NUM_THREADS`, `OMP_PROC_BIND`, `OMP_PLACES`) are refused.
+    - It also fixed a latent bug: with `placements` or `omp_variants`
+      crossed but kept out of `per_job`, every job ran the axis's first
+      entry. A cell now takes a job-level axis from its job.
+    - The four seam experiments now run their kernel sets as variants: one
+      job each, three cells on one node.
+
+    *Results on one node, Casper, 2026-10-12.* Each experiment is one job
+    with three cells on one node, five repeats per cell, 16 ranks x 1, on
+    harness `570da48`. Results are in
+    `/glade/derecho/scratch/kedziora/hpcrun-avx512/{genoa-2,cascadelake-2}`.
+
+    | Node | DGEMM, GFLOP/s a core: AVX2 / AVX-512 / auto | AVX-512 gain | DGEMV, GB/s a core: AVX2 / AVX-512 |
+    |---|---|---|---|
+    | `htc-genoa`, Zen 4 (crhtc69) | 50.5 / 55.4 / 55.3 | **+10%** | 8.70 / 8.79 |
+    | `htc-cascadelake` (crhtc53) | 37.9 / 65.9 / 65.8 | **+74%** | 7.04 / 7.10 |
+
+    | Node | FFT 256^3, s per transform: base FFTW / AVX2 / AVX-512 build |
+    |---|---|
+    | `htc-genoa` | 0.0487 / 0.0500 / 0.0491 |
+    | `htc-cascadelake` | 0.0761 / 0.0757 / 0.0761 |
+
+    - **Arithmetic-bound code gains from AVX-512, a lot on Intel.** DGEMM
+      runs 1.74x faster on Cascade Lake, and 1.10x on Zen 4, which executes
+      AVX-512 as two 256-bit halves.
+    - **A portable library delivers it.** OpenBLAS left to choose (`auto`)
+      picked SkylakeX on Cascade Lake and Cooperlake on Genoa, matching the
+      best forced kernel set to within 0.2%. On Derecho the same library
+      picks Zen.
+    - **Bandwidth-bound code does not gain.** DGEMV improved 1% on both
+      node types. The first run's 34% DGEMV difference on Genoa came from
+      three different nodes, and on one node it is gone. That is the
+      `variants:` axis earning its place.
+    - **The distributed FFT does not gain either.** No SIMD build, of any
+      width, is faster than the scalar base on either node type; the spread
+      between the three is within the spread of their repeats.
+    - One run of 45 -- Genoa, AVX-512 FFTW, repeat 4 -- exited 139
+      (segmentation fault) after printing its complete, valid result, so
+      during shutdown. It did not recur in the other four repeats or on
+      Cascade Lake. `collect` excludes it. Watch for it.
+
+    *What this means for the design.* A system that runs any code can reach
+    AVX-512 where it pays without a base image per node type, if the base
+    carries libraries that choose their kernels at run time: a
+    `DYNAMIC_ARCH` OpenBLAS (or MKL), and FFTW built with its SIMD codelets.
+    Today's base images carry no BLAS at all, and an FFTW with no SIMD.
+    Both are factory changes, to make in the new factory. What dispatch
+    cannot reach is an app's OWN arithmetic-bound loops. For those the
+    per-sub-cluster `images.target` step (above) is the remaining piece: an
+    app built `-march=cascadelake` for Casper's Intel nodes, from the same
+    portable base.
+
+    `collect` now prints a text metric -- the kernel set that ran, the
+    backend -- when every repeat agrees, rather than `-`.
+
+    *Derecho, one node (dec0902, dec2442), same harness.* DGEMM runs at 27.4
+    GFLOP/s a core under every kernel set: auto (Zen), Haswell and Zen all
+    match. DGEMV runs at 2.37 GB/s a core with all 128 cores streaming. The
+    FFT takes 0.2079 / 0.2086 / 0.2087 s with the base / AVX2 / AVX-512
+    FFTW. The AVX-512 build fell back to AVX2 here and ran exactly as fast,
+    which is the safety the design needs.
+
+    *MKL against OpenBLAS, from the host (2026-10-12).* A second way to get a
+    tuned library into a portable image: use the site's own, as the runner
+    already does for MPI. `casper-blas` gains two variants. Each preloads
+    Casper's oneMKL (the `mkl/2025.2.0` module's `libmkl_rt.so.2`, under the
+    already bound `/glade`) through `APPTAINERENV_LD_PRELOAD`, which sets
+    `LD_PRELOAD` inside the container only:
+    - `mkl-auto`: MKL's own choice;
+    - `mkl-avx2`: held to AVX2 by `MKL_ENABLE_INSTRUCTIONS=AVX2`.
+
+    MKL's CBLAS then answers the probe's calls. The probe no longer assumes
+    which library ran. It asks the dynamic linker which file defines
+    `cblas_dgemm`, and reports `blas_lib`. For MKL it also reports its
+    version, its CNR branch, and the per-ISA kernel library it loaded, read
+    from `/proc/self/maps`: `avx512`, `avx2`, ... or `def`, the generic one.
+    On an AMD Zen 5 login node, MKL 2025.2 loaded `def` even when told
+    `MKL_ENABLE_INSTRUCTIONS=AVX512`, and reported its branch as `AUTO`. One
+    rank there ran DGEMM at 59 GFLOP/s under MKL against 109 under
+    OpenBLAS: a hint, to be measured properly on Genoa and Cascade Lake. If
+    it holds, a portable base for AMD and Intel machines should carry a
+    dispatching OpenBLAS rather than rely on MKL. The `variants:` env is
+    enough to measure that now; a declared "host math library" in the
+    cluster description, beside the host-MPI recipe, would be the lasting
+    form.
+
+    *MKL against OpenBLAS: results, 2026-10-12.* `casper-blas`, five
+    variants on one node, five repeats, harness `fde3bd7`, `blas` image
+    `sha256:8d6aa07d...`. Results are in `hpcrun-avx512/{genoa-mkl,cascadelake-mkl}`.
+    Medians, per core, all 16 ranks busy:
+
+    | Node | Library and code path | DGEMM GFLOP/s | DGEMV GB/s |
+    |---|---|---|---|
+    | Cascade Lake (crhtc53) | OpenBLAS auto: SkylakeX (AVX-512) | **65.9** | 7.10 |
+    | | OpenBLAS forced Haswell (AVX2) | 37.9 | 7.11 |
+    | | MKL auto: `avx512` kernels, branch AVX512_E1 | 64.6 | 7.22 |
+    | | MKL capped at AVX2: `avx2` kernels | 37.9 | 7.25 |
+    | Genoa (crhtc85) | OpenBLAS auto: Cooperlake (AVX-512) | **55.4** | 8.83 |
+    | | OpenBLAS forced Haswell (AVX2) | 50.8 | 8.75 |
+    | | MKL auto: `def` kernels, branch AUTO | 51.8 | **9.88** |
+    | | MKL capped at AVX2: `def` kernels | 51.7 | 9.89 |
+
+    - **On Intel, the two libraries are level.** MKL chose its AVX-512
+      kernels and came within 2% of OpenBLAS at DGEMM. Capped at AVX2, they
+      match exactly, and AVX-512 is worth 1.7x to both.
+    - **On AMD, MKL does not use AVX-512.** It loads its generic `def`
+      kernels whatever it is allowed, and runs DGEMM at AVX2-class speed. That
+      is 2% above OpenBLAS held to AVX2, and 7% below OpenBLAS left to choose.
+    - **MKL streams better on Genoa:** DGEMV runs 12% faster. That is the one
+      place MKL wins, and the measurement on one node makes it credible.
+    - **For the design:** a `DYNAMIC_ARCH` OpenBLAS in the portable base is
+      the right default. It matches MKL on Intel and gets AVX-512 on AMD where
+      MKL does not. The site's own MKL stays reachable per experiment by
+      preload, with nothing in the image, for codes that want it. This test
+      covered BLAS1-3 kernels only, not LAPACK, MKL's FFTs or its vector math,
+      which would need their own probes.
+
+    One run of 25 -- Genoa, `mkl-auto`, repeat 1 -- exited 139 after printing
+    a complete, valid result. It is the second such shutdown crash, and
+    both were on Genoa (crhtc72 before, crhtc85 now) under the host Open
+    MPI. Two in about 70 Genoa runs is a pattern worth chasing separately:
+    a core file, or the host MPI's finalize under UCX.
+
 ---
 
 ## 12. Decision log

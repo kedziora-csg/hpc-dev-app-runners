@@ -49,7 +49,7 @@ from . import cluster as cluster_mod
 from . import jobfile
 from . import yamlish
 
-AXES = ("images", "apps", "placements", "omp_variants")
+AXES = ("images", "apps", "placements", "omp_variants", "variants")
 JOB_ONLY_AXES = ("images", "apps")
 
 EXPERIMENT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -67,14 +67,18 @@ class Cell(object):
     results directory.
     """
 
-    def __init__(self, image, app, placement, omp, qualify_omp=False):
+    def __init__(self, image, app, placement, omp, qualify_omp=False,
+                 variant=None, qualify_variant=False):
         self.image = image
         self.app = app
         self.placement = placement
         self.omp = omp
+        self.variant = variant or {"name": "default"}
         self.name = placement["name"]
         if qualify_omp:
             self.name += "-" + omp["name"]
+        if qualify_variant:
+            self.name += "-" + self.variant["name"]
 
 
 class Job(object):
@@ -215,7 +219,19 @@ def _check_semantics(exp):
                             "all but the first would be dropped silently"
                             % (axis, len(entries)))
 
-    for axis in ("apps", "placements", "omp_variants"):
+    # A variant's env is the user's, layered on the harness's.  Names the
+    # harness or the placement owns would be overwritten under it -- or would
+    # overwrite it -- so they are refused rather than resolved by precedence.
+    for variant in exp.data.get("variants") or []:
+        for key in sorted(variant.get("env") or {}):
+            if key.startswith("HPCRUN_") or key.startswith("BENCH_") or \
+                    key in ("OMP_NUM_THREADS", "OMP_PROC_BIND", "OMP_PLACES"):
+                problems.append(
+                    "variants.%s.env: %s belongs to the harness or the placement; "
+                    "set OMP_* through omp_variants and placements"
+                    % (variant["name"], key))
+
+    for axis in ("apps", "placements", "omp_variants", "variants"):
         seen = set()
         for entry in exp.data.get(axis) or []:
             label = entry.get("label") or entry["name"]
@@ -227,6 +243,7 @@ def _check_semantics(exp):
     for name, profile in (exp.data.get("profiles") or {}).items():
         for field, axis, key in (("placement", "placements", "name"),
                                  ("omp", "omp_variants", "name"),
+                                 ("variant", "variants", "name"),
                                  ("app", "apps", "label")):
             want = profile.get(field)
             if want is None:
@@ -298,14 +315,22 @@ def expand(exp, profile=None, images=None):
         # More than one OMP variant inside a job means two cells can share a
         # placement name, which is a collision in every filename a cell writes.
         qualify_omp = ("omp_variants" in cell_axes and len(axes["omp_variants"]) > 1)
+        qualify_variant = ("variants" in cell_axes and len(axes["variants"]) > 1)
         cells = []
         for cell_combo in _product([axes[a] for a in cell_axes]):
             varying = dict(zip(cell_axes, cell_combo))
             cells.append(Cell(
                 image=image, app=app,
-                placement=varying.get("placements", axes["placements"][0]),
-                omp=varying.get("omp_variants", axes["omp_variants"][0]),
-                qualify_omp=qualify_omp))
+                # A cell takes each axis from what varies inside the job, else
+                # from what this job fixed, else the axis's only entry.
+                placement=varying.get("placements", fixed.get("placements",
+                                                              axes["placements"][0])),
+                omp=varying.get("omp_variants", fixed.get("omp_variants",
+                                                          axes["omp_variants"][0])),
+                qualify_omp=qualify_omp,
+                variant=varying.get("variants", fixed.get("variants",
+                                                          axes["variants"][0])),
+                qualify_variant=qualify_variant))
         key = "-".join([_coord_name("images", image)] +
                        [_coord_name(a, fixed[a]) for a in naming])
         jobs.append(Job(key, image, app, cells, exp.defaults))
@@ -366,6 +391,7 @@ def _axis_values(exp, profile, images):
         "placements": list(exp.data["placements"]),
         "omp_variants": list(exp.data.get("omp_variants") or
                              [{"name": "default"}]),
+        "variants": list(exp.data.get("variants") or [{"name": "default"}]),
     }
     if profile is None:
         return values
@@ -378,7 +404,7 @@ def _axis_values(exp, profile, images):
     if named.get("images"):
         values["images"] = list(named["images"])
     for field, axis in (("placement", "placements"), ("omp", "omp_variants"),
-                        ("app", "apps")):
+                        ("variant", "variants"), ("app", "apps")):
         want = named.get(field)
         if want is not None:
             values[axis] = [e for e in values[axis]

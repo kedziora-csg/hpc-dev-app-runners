@@ -251,10 +251,10 @@ want "casper's hpcg set is the openmpi half" \
 # own spelling of it.
 want "the app workflow's matrix is the set the Makefile pulls" \
     "$(cd ../sif && make --no-print-directory echo-derecho-hpcg | sed 's/\.sif//g')" \
-    "$(python3 ../apps/matrix.py derecho | python3 -c 'import json, sys
+    "$(python3 ../apps/matrix.py derecho --apps hpcg | python3 -c 'import json, sys
 print(" ".join(e["tag"] for e in json.load(sys.stdin)["include"]))')"
 want "nvhpc is built with -tp=, the rest with -march=" "-march=znver3 -tp=zen3" \
-    "$(python3 ../apps/matrix.py derecho --mpis mpich --compilers 'gcc14 nvhpc' | python3 -c 'import json, sys
+    "$(python3 ../apps/matrix.py derecho --apps hpcg --mpis mpich --compilers 'gcc14 nvhpc' | python3 -c 'import json, sys
 print(" ".join(e["march"] for e in json.load(sys.stdin)["include"]))')"
 python3 ../apps/matrix.py casper --mpis mpich >/dev/null 2>&1
 want "the matrix can narrow a cluster's set but never widen it" 2 "$?"
@@ -721,6 +721,62 @@ grep -q '^\. "/' "${d}/job.pbs" \
 ) && ok "job.env sources in bash and defines every cell field" \
   || bad "job.env does not define what runner.sh reads"
 
+#-- variants: environment settings as an axis, allowed inside one job ---------
+# The point of the axis is to put every variant on the SAME node, which apps:
+# cannot do -- so per_job must accept it, and each cell must carry its own env.
+vbase='schema: 2
+cluster: derecho
+defaults: {nodes: 1}
+images: {list: [leap-oneapi-mpich-hpcg-znver3.sif]}
+apps: [{name: hpcg}]
+placements: [{name: pureMPI, ranks_per_node: 128, threads: 1}]
+variants:
+  - {name: haswell,  env: {OPENBLAS_CORETYPE: Haswell}}
+  - {name: skylakex, env: {OPENBLAS_CORETYPE: SkylakeX, NOTE: "two words"}}'
+printf '%s\n' "${vbase}
+sweep: {matrix: [images, apps, placements, variants], per_job: [placements, variants]}" > "${TMP}/var.yaml"
+./submit "${TMP}/var.yaml" --dry-run --results-dir "${TMP}/varjob" >/dev/null 2>&1
+want "variants in per_job make one job" 1 "$(ls -d "${TMP}"/varjob/*/ 2>/dev/null | wc -l | tr -d ' ')"
+( . "$(echo "${TMP}"/varjob/*/job.env)" >/dev/null 2>&1
+  [ "${HPCRUN_CELL_COUNT}" = 2 ] || exit 1
+  [ "${HPCRUN_CELL_0_NAME}" = pureMPI-haswell ] || exit 1
+  [ "${HPCRUN_CELL_1_VARIANT}" = skylakex ] || exit 1
+  [ "${HPCRUN_CELL_1_ENV_COUNT}" = 2 ] || exit 1
+  [ "${HPCRUN_CELL_1_ENV_0}" = "NOTE=two words" ] || exit 1
+  [ "${HPCRUN_CELL_1_ENV_1}" = "OPENBLAS_CORETYPE=SkylakeX" ]
+) && ok "each cell carries its variant's name and env, values with spaces intact" \
+  || bad "job.env does not carry the variants" "$(grep VARIANT\\\|_ENV "${TMP}"/varjob/*/job.env)"
+
+printf '%s\n' "${vbase}
+sweep: {matrix: [images, apps, placements, variants], per_job: [placements]}" > "${TMP}/var2.yaml"
+./submit "${TMP}/var2.yaml" --dry-run --results-dir "${TMP}/varjob2" >/dev/null 2>&1
+want "variants outside per_job make one job each, named for them" \
+     "leap-oneapi-mpich-hpcg-znver3-haswell leap-oneapi-mpich-hpcg-znver3-skylakex" \
+     "$(ls "${TMP}/varjob2" | tr '\n' ' ' | sed 's/ $//')"
+( . "${TMP}/varjob2/leap-oneapi-mpich-hpcg-znver3-skylakex/job.env" >/dev/null 2>&1
+  [ "${HPCRUN_CELL_0_VARIANT}" = skylakex ] ) \
+  && ok "a job fixed on one variant gives its cells that variant" \
+  || bad "a job-level variant did not reach its cells"
+
+case_exit "a variant setting a harness variable is refused (3)" 3 "${vbase/NOTE/HPCRUN_QUEUE}
+sweep: {matrix: [images, apps, placements, variants], per_job: [placements, variants]}"
+case_exit "a variant setting OMP_PLACES is refused (3)" 3 "${vbase/NOTE/OMP_PLACES}
+sweep: {matrix: [images, apps, placements, variants], per_job: [placements, variants]}"
+case_exit "two variants not crossed is refused (3)" 3 "${vbase}
+sweep: {matrix: [images, apps, placements], per_job: [placements]}"
+
+# runner.sh's variant_apply: exports a cell's settings and UNSETS the previous
+# cell's, so no row runs under a value it does not record.
+( . "$(echo "${TMP}"/varjob/*/job.env)" >/dev/null 2>&1
+  cell_variant=(haswell skylakex)
+  eval "$(sed -n '/^variant_name="" variant_env=()/,/^}/p' runner.sh)"
+  variant_apply 1
+  [ "${OPENBLAS_CORETYPE}" = SkylakeX ] && [ "${NOTE}" = "two words" ] || exit 1
+  variant_apply 0
+  [ "${OPENBLAS_CORETYPE}" = Haswell ] && [ -z "${NOTE+set}" ] && [ "${variant_name}" = haswell ]
+) && ok "variant_apply exports one cell's env and clears the last one's" \
+  || bad "variant_apply leaks or misses a setting"
+
 # Two entries of one app must not collide, or one silently overwrites the other.
 ./submit derecho-osu --dry-run --results-dir "${TMP}/osu" >/dev/null 2>&1
 n="$(ls -d "${TMP}/osu"/* 2>/dev/null | wc -l | tr -d '[:space:]')"
@@ -886,6 +942,27 @@ want "--per-run keeps every run" 6 \
 ./collect "${TMP}/res" --best 2>/dev/null | grep -q 'gflops median=85 min=84.6 (n=3)' \
     && ok "--best ranks on the median, not the mean or a single sample" \
     || bad "--best median is wrong" "$(./collect "${TMP}/res" --best 2>/dev/null | grep gflops)"
+
+# Two variants of one placement are two cells, and the table names them.
+mkdir -p "${TMP}/vres/j1"
+python3 - "${TMP}/vres/j1/results.jsonl" <<'PY'
+import json, sys
+rows = [{"schema": 2, "app": {"name": "blas"}, "image": {"sif": "x.sif"},
+         "placement": {"name": "pureMPI", "ranks_per_node": 16, "threads": 1,
+                       "omp_variant": "percore", "verdict": "ok", "rules": []},
+         "variant": {"name": v, "env": {"OPENBLAS_CORETYPE": c}},
+         "repeat": r, "repeats": 2, "warm": True, "wall_s": 5.0, "exit": 0,
+         "metrics": {"dgemm_gflops_rank": g + r}}
+        for v, c, g in (("haswell", "Haswell", 50), ("skylakex", "SkylakeX", 55))
+        for r in (1, 2)]
+open(sys.argv[1], "w").write("".join(json.dumps(x) + "\n" for x in rows))
+PY
+vtable="$(./collect "${TMP}/vres" 2>/dev/null)"
+want "collect keeps two variants of one placement as two cells" 2 \
+    "$(printf '%s\n' "${vtable}" | grep -cE ' (haswell|skylakex) ')"
+printf '%s\n' "${vtable}" | head -1 | grep -q VARIANT \
+    && ok "collect shows a VARIANT column when rows have one" \
+    || bad "collect shows no VARIANT column" "${vtable}"
 
 # The whole point of the sweep: its output is a runnable configuration.
 ./collect "${TMP}/res" --emit-profile > "${TMP}/profile.yaml" 2>/dev/null

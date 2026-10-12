@@ -1,0 +1,43 @@
+# blas -- DGEMM (BLAS3) and DGEMV (BLAS2) through OpenBLAS, built DYNAMIC_ARCH.
+#
+# Test 2 of the seam study (BenchmarkRunnerPlan.md, section 11 item 11):
+# arithmetic-bound and bandwidth-bound linear algebra, one portable build,
+# with OPENBLAS_CORETYPE selecting which generation's kernels run.
+app: blas
+version: "@OPENBLAS_VERSION@"
+binary: /container/bin/blas_probe
+primary_fom: dgemm_gflops_rank
+
+requires:
+  mpi: true
+  openmp: false
+  min_ranks: 1
+
+figures_of_merit:
+  dgemm_gflops_rank:  {units: GFLOP/s, better: higher, note: "median rank, all ranks busy at once"}
+  dgemm_gflops_total: {units: GFLOP/s, better: higher}
+  dgemv_gbs_rank:     {units: GB/s, better: higher, note: "matrix bytes streamed, median rank"}
+  dgemv_gbs_total:    {units: GB/s, better: higher}
+  wall_s:             {units: s, better: lower, provided_by: runner}
+
+success_criteria:
+  app_self_validates: true
+
+notes: |
+  launch prints `blas_probe N M reps`: BLAS_N (default 2048; 256 at
+  HPCRUN_SCALE=smoke) for DGEMM, BLAS_M (8192; 512) for DGEMV, BLAS_REPS (5).
+  Each rank multiplies its own matrices single-threaded.
+
+  OPENBLAS_CORETYPE forces a kernel set -- Haswell or Zen for AVX2,
+  SkylakeX or Cooperlake for AVX-512.  Unset, OpenBLAS picks from CPUID.
+  extract reports the core that actually ran as `core`, so a forced type the
+  library ignored is visible.
+
+  Another CBLAS can answer the calls instead -- MKL preloaded from the host
+  with APPTAINERENV_LD_PRELOAD=<...>/libmkl_rt.so.2.  The probe asks the
+  dynamic linker which library defines cblas_dgemm and reports it as
+  `blas_lib`; for MKL, `mkl_version`, `mkl_branch` and `mkl_kernels`, the
+  per-ISA kernel library MKL loaded (avx512, avx2, ..., or def, its generic
+  one).  MKL_ENABLE_INSTRUCTIONS caps MKL's choice; MKL_THREADING_LAYER=
+  SEQUENTIAL keeps a rank single-threaded.  Forcing an AVX-512 type on a host without
+  AVX-512 dies with SIGILL; that is the user's choice to make, not a fault.

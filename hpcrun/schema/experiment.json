@@ -192,6 +192,40 @@
         }
       }
     },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Environment settings crossed like any other axis, and -- unlike apps -- allowed in per_job, so one job can run every variant on the SAME node. That is the point: on a shared node, which kernel set or library build is faster is only answerable when both ran on one machine. Each variant's env is exported for its cells only, for the app, its hooks and its extract, and recorded in every result row. Defaults to one variant with no settings.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+            "description": "Joins the cell's name -- placement_<cell>-<variant>.out, run_<cell>-<variant>/ -- when a job runs more than one variant."
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "NAME: value, set for this variant's cells. Not HPCRUN_* (the harness's) and not OMP_NUM_THREADS, OMP_PROC_BIND or OMP_PLACES (the placement's and omp_variants').",
+            "patternProperties": {
+              "^[A-Za-z_][A-Za-z0-9_]*$": {
+                "type": [
+                  "string",
+                  "integer",
+                  "boolean"
+                ],
+                "description": "The value, exported as it is written."
+              }
+            }
+          }
+        }
+      }
+    },
     "sweep": {
       "type": "object",
       "additionalProperties": false,
@@ -208,7 +242,8 @@
               "images",
               "apps",
               "placements",
-              "omp_variants"
+              "omp_variants",
+              "variants"
             ]
           },
           "description": "The axes crossed. Every axis with two or more entries must appear here; hpcrun/validate refuses to drop values silently."
@@ -221,7 +256,8 @@
               "images",
               "apps",
               "placements",
-              "omp_variants"
+              "omp_variants",
+              "variants"
             ]
           },
           "description": "Which of those axes ONE job iterates. The rest become separate jobs. This is the knob that trades queue wait against job length."
@@ -259,6 +295,10 @@
             "repeats": {
               "type": "integer",
               "minimum": 1
+            },
+            "variant": {
+              "type": "string",
+              "description": "The variant this profile runs, by name."
             }
           }
         }

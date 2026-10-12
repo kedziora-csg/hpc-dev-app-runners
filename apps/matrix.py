@@ -5,6 +5,7 @@
     apps/matrix.py casper --apps hpcg            one app
     apps/matrix.py derecho --compilers gcc14 --mpis openmpi
     apps/matrix.py derecho --table               the same, for a person
+    apps/matrix.py derecho --tag-suffix pbase    every tag ends -pbase
 
 The workflow's only view of the machine descriptions.  The images: block of
 sites/<site>/<cluster>.yaml already says which OS, compilers, MPI families and
@@ -48,6 +49,9 @@ def main():
     ap.add_argument("--apps", default="")
     ap.add_argument("--compilers", default="")
     ap.add_argument("--mpis", default="")
+    ap.add_argument("--tag-suffix", default="",
+                    help="append -SUFFIX to every app tag: a build that must not "
+                         "take the regular tag, because one tag means one build")
     ap.add_argument("--table", action="store_true",
                     help="print a table rather than the JSON matrix")
     args = ap.parse_args()
@@ -60,6 +64,13 @@ def main():
     entries = narrow(entries, "app", args.apps)
     entries = narrow(entries, "compiler", args.compilers)
     entries = narrow(entries, "mpi", args.mpis)
+    suffix = args.tag_suffix.strip()
+    if suffix:
+        if not suffix.replace("_", "").isalnum() or suffix != suffix.lower():
+            raise BenchError("--tag-suffix %r: lower-case letters, digits and _ "
+                             "only" % suffix, 2)
+        for e in entries:
+            e["tag"] += "-" + suffix
 
     if args.table:
         for e in entries:

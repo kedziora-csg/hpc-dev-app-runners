@@ -176,6 +176,94 @@ app_extract "${run}" "${TMP}/osu-empty.kv"
 [ ! -s "${TMP}/osu-empty.kv" ] && ok "osu: an empty table is a missing metric, not a failure" \
                                || bad "osu: empty output produced metrics"
 
+#-- heffte: launch sizes the cube, extract judges the error against tolerance ---
+echo
+app_resolve heffte "${LAUNCH}" "${TMP}/heffte" >/dev/null 2>&1
+run="${TMP}/heffte/run"; mkdir -p "${run}"
+app_export_geometry "${run}" pureMPI 1 128 128 1
+want "heffte: launch defaults to fftw at 512^3" \
+     "/container/bin/speed3d_r2c fftw double 512 512 512 -n10" "$(HPCRUN_SCALE=node app_argv)"
+want "heffte: a smoke cell gets a tiny cube, and the backend is a knob" \
+     "/container/bin/speed3d_r2c stock double 32 32 32 -n10" \
+     "$(HPCRUN_SCALE=smoke HEFFTE_BACKEND=stock app_argv)"
+
+cat > "${run}/app.out" <<'HEFFTEOUT'
+-----------------------------------------------------------------------------
+heFFTe performance test
+-----------------------------------------------------------------------------
+Backend:   fftw
+Size:      512x512x512
+MPI ranks:  128
+Time per run: 0.0839 (s)
+Performance:  120.5 GFlops/s
+Memory usage: 31MB/rank
+Tolerance:    1e-11
+Max error:    2.3e-15
+HEFFTEOUT
+app_extract "${run}" "${TMP}/heffte.kv"
+has "heffte: extract reads the time per transform" "${TMP}/heffte.kv" "fft_time_s=0.0839"
+has "heffte: extract reads speed3d's GFlops"      "${TMP}/heffte.kv" "gflops=120.5"
+has "heffte: an error within tolerance is valid"  "${TMP}/heffte.kv" "valid=true"
+sed -i 's/^Max error:.*/Max error:    3.0e-9/' "${run}/app.out"
+app_extract "${run}" "${TMP}/heffte-bad.kv"
+has "heffte: an error past tolerance is invalid"  "${TMP}/heffte-bad.kv" "valid=false"
+
+want "heffte: HEFFTE_FFTW picks the FFTW build behind the driver" \
+     "/container/bin/speed3d_r2c_avx512 fftw double 512 512 512 -n10" \
+     "$(HPCRUN_SCALE=node HEFFTE_FFTW=avx512 app_argv)"
+has "heffte: extract records which FFTW ran" "${TMP}/heffte.kv" "fftw_build=base"
+
+#-- blas: DGEMM and DGEMV, and which kernel set actually ran ---------------------
+echo
+app_resolve blas "${LAUNCH}" "${TMP}/blas" >/dev/null 2>&1
+run="${TMP}/blas/run"; mkdir -p "${run}"
+app_export_geometry "${run}" pureMPI 1 128 128 1
+want "blas: launch sizes DGEMM and DGEMV" "/container/bin/blas_probe 2048 8192 5" \
+     "$(HPCRUN_SCALE=node app_argv)"
+cat > "${run}/app.out" <<'BLASOUT'
+blas_probe: ranks 128, dgemm order 2048, dgemv order 8192, best of 5
+BLAS library: /container/openblas/0.3.30-dynamic/lib/libopenblas.so.0
+BLAS: openblas
+Core: SkylakeX
+Config: OpenBLAS 0.3.30 NO_LAPACK DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=1
+DGEMM GFLOPS per rank (median): 51.200
+DGEMM GFLOPS per rank (min): 49.000
+DGEMM GFLOPS total: 6553.600
+DGEMV GB/s per rank (median): 2.100
+DGEMV GB/s total: 268.800
+Valid: true
+BLASOUT
+OPENBLAS_CORETYPE=SkylakeX app_extract "${run}" "${TMP}/blas.kv"
+has "blas: extract reads the DGEMM rate"          "${TMP}/blas.kv" "dgemm_gflops_rank=51.200"
+has "blas: extract reads the DGEMV bandwidth"     "${TMP}/blas.kv" "dgemv_gbs_rank=2.100"
+has "blas: extract records the core that ran"     "${TMP}/blas.kv" "core=SkylakeX"
+has "blas: extract records the core asked for"    "${TMP}/blas.kv" "coretype_forced=SkylakeX"
+has "blas: the probe's own check is the verdict"  "${TMP}/blas.kv" "valid=true"
+has "blas: extract names the library that ran"    "${TMP}/blas.kv" "blas_lib=openblas"
+
+# The same probe with MKL preloaded: it reports MKL, and not OpenBLAS's core.
+cat > "${run}/app.out" <<'BLASOUT'
+blas_probe: ranks 16, dgemm order 2048, dgemv order 4096, best of 5
+BLAS library: /glade/u/apps/casper/25.10/spack/opt/spack/intel-oneapi-mkl/2025.2.0/x/mkl/2025.2/lib/libmkl_rt.so.2
+BLAS: mkl
+MKL version: Intel(R) oneAPI Math Kernel Library Version 2025.2-Product Build 20250620 for Intel(R) 64 architecture applications
+MKL branch: AUTO
+MKL kernels: def
+DGEMM GFLOPS per rank (median): 40.100
+DGEMM GFLOPS per rank (min): 39.000
+DGEMM GFLOPS total: 641.600
+DGEMV GB/s per rank (median): 8.700
+DGEMV GB/s total: 139.200
+Valid: true
+BLASOUT
+MKL_ENABLE_INSTRUCTIONS=AVX2 app_extract "${run}" "${TMP}/mkl.kv"
+has "blas: with MKL preloaded, extract names MKL"        "${TMP}/mkl.kv" "blas_lib=mkl"
+has "blas: extract reads MKL's version"                  "${TMP}/mkl.kv" "mkl_version=2025.2"
+has "blas: extract reads the kernel library MKL loaded"  "${TMP}/mkl.kv" "mkl_kernels=def"
+has "blas: extract records the MKL instruction cap"      "${TMP}/mkl.kv" "mkl_instructions=AVX2"
+grep -q '^core=' "${TMP}/mkl.kv" && bad "blas: an MKL row carries an OpenBLAS core" \
+                                 || ok "blas: an MKL row carries no OpenBLAS core"
+
 #-- a bare executable is a legal, hook-free app --------------------------------
 echo
 unset HPCRUN_APP_DIR

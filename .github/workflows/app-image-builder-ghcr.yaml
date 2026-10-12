@@ -69,6 +69,11 @@ on:
         type: string
         required: true
         default: "26.08"
+      tag_suffix:
+        description: "Appended to every app tag, for a build that must not take the regular one (e.g. pbase: the seam study's portable-base builds). Empty for normal builds."
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -91,9 +96,11 @@ jobs:
           APPS: ${{ inputs.apps }}
           COMPILERS: ${{ inputs.compilers }}
           MPIS: ${{ inputs.mpis }}
+          TAG_SUFFIX: ${{ inputs.tag_suffix }}
         run: |
           set -eo pipefail
-          args=("${CLUSTER}" --apps "${APPS}" --compilers "${COMPILERS}" --mpis "${MPIS}")
+          args=("${CLUSTER}" --apps "${APPS}" --compilers "${COMPILERS}" --mpis "${MPIS}"
+                --tag-suffix "${TAG_SUFFIX}")
           python3 apps/matrix.py "${args[@]}" --table | tee -a "${GITHUB_STEP_SUMMARY}"
           echo "matrix=$(python3 apps/matrix.py "${args[@]}")" >> "${GITHUB_OUTPUT}"
 
