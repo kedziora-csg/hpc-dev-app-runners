@@ -2247,6 +2247,58 @@ All four DECISIONs are answered — see §12. What remains open:
       probes FC even with `NOFORTRAN=1`, and the image's nvfortran or ifx
       rejects the flags it tries.
 
+    *First results, tests 1 and 2 (run 2026-10-05 to 10-12; results in
+    `hpcrun-avx512/` in the checkout).* Medians of three repeats; harness on
+    `seam-study`. Casper rows are on shared nodes, each job on a different
+    node, so differences under about 5% are noise.
+
+    | Test | Node | Kernels | Result (median) |
+    |---|---|---|---|
+    | FFT, 512^3, 128 ranks | Derecho, Zen 3 | base FFTW (scalar) / AVX2 / AVX-512 build | 0.2082 / 0.2088 / 0.2085 s |
+    | FFT, 256^3, 16 ranks | Casper Genoa, Zen 4 | base / AVX2 / AVX-512 | 0.0355 / 0.0344 / 0.0345 s |
+    | DGEMM, per rank, all ranks busy | Derecho, Zen 3 | auto (Zen) / Haswell / Zen | 27.4 / 27.6 / 27.4 GFLOP/s |
+    | DGEMM | Casper Genoa | auto (Cooperlake) / Haswell (AVX2) / SkylakeX (AVX-512) | 55.8 / 50.9 / 55.8 GFLOP/s |
+    | DGEMM | Casper Cascade Lake | SkylakeX (AVX-512) | 84.6 GFLOP/s; AVX2 run lost, see below |
+    | DGEMV, per rank | Derecho | all three | 2.37 GB/s |
+    | DGEMV | Casper Genoa | auto / Haswell / SkylakeX | 11.3 / 11.5 / 15.4 GB/s |
+
+    What it shows so far:
+    - **Run-time dispatch works, and is safe.** On an AVX-512 host, the
+      avx512 FFTW's planner chose AVX-512 codelets (`fftw_print_plan` under
+      `FFTW_ESTIMATE`). On Derecho the same library fell back to AVX2 and
+      ran exactly as fast as the AVX2 build. OpenBLAS picked Zen kernels on
+      Derecho and Cooperlake (AVX-512) on Genoa unaided, matching the best
+      forced choice each time. Every run validated.
+    - **For the distributed FFT, SIMD of any width is worth at most a few
+      percent** -- 3% on Genoa, inside the noise; nothing on Derecho. It is
+      bound by data movement, as `derecho-seam` found.
+    - **For DGEMM, AVX-512 is worth about 10% on Zen 4**, which executes
+      AVX-512 as two 256-bit halves. On Cascade Lake, AVX-512 DGEMM ran at
+      84.6 GFLOP/s a core, the highest per-core figure measured. The AVX2
+      run that would say how much of that is AVX-512 was lost.
+    - **DGEMV on Genoa ran 34% faster with AVX-512 kernels.** That is not
+      what a bandwidth-bound kernel should do. The three jobs ran on three
+      different shared nodes. Treat it as unexplained until a repeat on one
+      node confirms it.
+
+    *Lost runs, and the fix.* Five of six Cascade Lake jobs failed before
+    running. Open MPI refused to map 16 ranks x 2 CPUs ("bound to CPUs in
+    more than one package"): on the two-socket node, PBS's 32 CPUs left
+    some rank's pair straddling the sockets. The 16 x 2 placement was meant
+    to stop two ranks sharing a core. The Genoa placement reports show it
+    was unnecessary: PBS hands a shared job distinct physical cores, never
+    SMT siblings. Both Casper experiments now use 16 x 1, with five repeats.
+
+    *Still needed.*
+    - Rerun both Casper experiments on Cascade Lake, for the AVX2 against
+      AVX-512 DGEMM figure and the FFT row. Rerun on Genoa too, at 16 x 1,
+      so the two node types compare like for like.
+    - A way to compare kernel sets on the SAME node. An experiment's
+      `apps:` axis cannot vary inside a job, so each kernel set lands on its
+      own shared node, and node-to-node noise is as large as some of the
+      effects. A cell-level `env:` axis -- `omp_variants` generalised --
+      would put all three in one job.
+
 ---
 
 ## 12. Decision log

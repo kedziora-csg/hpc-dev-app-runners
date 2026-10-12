@@ -19,10 +19,12 @@
 # Shared nodes, so a plumbing-grade measurement: co-tenants are noise this
 # cannot see.  Treat differences under about 5% as noise; repeat to check.
 #
-# 16 ranks x 2 "threads": the threads are not used by the app, they make each
-# rank's binding two logical CPUs -- both SMT siblings of one core -- so no two
-# ranks share a core's vector units.  With 16 x 1, PBS hands out 16 logical
-# CPUs, which on these nodes can be 8 cores' sibling pairs.
+# 16 ranks x 1.  PBS hands a shared job distinct physical cores, not SMT
+# siblings (the first run's placement report shows 32 cores 15..46 for a
+# 32-CPU request), so no two ranks share a core's vector units.  A first
+# version asked 16 x 2 to make sure of that, and on the two-socket Cascade
+# Lake nodes Open MPI refused to map it: a rank's two CPUs fell in different
+# packages.
 schema: 2
 cluster: casper
 subcluster: htc-genoa
@@ -30,7 +32,7 @@ subcluster: htc-genoa
 defaults:
   nodes: 1
   walltime: "00:20:00"
-  repeats: 3
+  repeats: 5
   scale: node
   exclusive: false
   allow_undersubscribed: true
@@ -44,7 +46,7 @@ apps:
   - {name: heffte, label: fftw-avx512, env: {HEFFTE_BACKEND: fftw, HEFFTE_FFTW: avx512, HEFFTE_N: 256}}
 
 placements:
-  - {name: rank-per-core, ranks_per_node: 16, threads: 2}
+  - {name: pureMPI, ranks_per_node: 16, threads: 1}
 
 omp_variants:
   - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}

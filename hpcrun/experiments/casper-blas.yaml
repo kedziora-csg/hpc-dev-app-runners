@@ -12,7 +12,7 @@
 #     ../submit casper-blas --account <PROJECT>                       # htc-genoa (Zen 4)
 #     ../submit casper-blas --account <PROJECT> --subcluster htc-cascadelake
 #
-# Shared nodes; see casper-simd.yaml for the noise caveat and why 16 x 2.
+# Shared nodes; see casper-simd.yaml for the noise caveat and why 16 x 1.
 schema: 2
 cluster: casper
 subcluster: htc-genoa
@@ -20,7 +20,7 @@ subcluster: htc-genoa
 defaults:
   nodes: 1
   walltime: "00:20:00"
-  repeats: 3
+  repeats: 5
   scale: node
   exclusive: false
   allow_undersubscribed: true
@@ -36,7 +36,7 @@ apps:
   - {name: blas, label: skylakex, env: {OPENBLAS_CORETYPE: SkylakeX, BLAS_M: 4096}}
 
 placements:
-  - {name: rank-per-core, ranks_per_node: 16, threads: 2}
+  - {name: pureMPI, ranks_per_node: 16, threads: 1}
 
 omp_variants:
   - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
