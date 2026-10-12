@@ -2395,6 +2395,43 @@ All four DECISIONs are answered — see §12. What remains open:
     cluster description, beside the host-MPI recipe, would be the lasting
     form.
 
+    *MKL against OpenBLAS: results, 2026-10-12.* `casper-blas`, five
+    variants on one node, five repeats, harness `fde3bd7`, `blas` image
+    `sha256:8d6aa07d...`. Results are in `hpcrun-avx512/{genoa-mkl,cascadelake-mkl}`.
+    Medians, per core, all 16 ranks busy:
+
+    | Node | Library and code path | DGEMM GFLOP/s | DGEMV GB/s |
+    |---|---|---|---|
+    | Cascade Lake (crhtc53) | OpenBLAS auto: SkylakeX (AVX-512) | **65.9** | 7.10 |
+    | | OpenBLAS forced Haswell (AVX2) | 37.9 | 7.11 |
+    | | MKL auto: `avx512` kernels, branch AVX512_E1 | 64.6 | 7.22 |
+    | | MKL capped at AVX2: `avx2` kernels | 37.9 | 7.25 |
+    | Genoa (crhtc85) | OpenBLAS auto: Cooperlake (AVX-512) | **55.4** | 8.83 |
+    | | OpenBLAS forced Haswell (AVX2) | 50.8 | 8.75 |
+    | | MKL auto: `def` kernels, branch AUTO | 51.8 | **9.88** |
+    | | MKL capped at AVX2: `def` kernels | 51.7 | 9.89 |
+
+    - **On Intel, the two libraries are level.** MKL chose its AVX-512
+      kernels and came within 2% of OpenBLAS at DGEMM. Capped at AVX2, they
+      match exactly, and AVX-512 is worth 1.7x to both.
+    - **On AMD, MKL does not use AVX-512.** It loads its generic `def`
+      kernels whatever it is allowed, and runs DGEMM at AVX2-class speed. That
+      is 2% above OpenBLAS held to AVX2, and 7% below OpenBLAS left to choose.
+    - **MKL streams better on Genoa:** DGEMV runs 12% faster. That is the one
+      place MKL wins, and the measurement on one node makes it credible.
+    - **For the design:** a `DYNAMIC_ARCH` OpenBLAS in the portable base is
+      the right default. It matches MKL on Intel and gets AVX-512 on AMD where
+      MKL does not. The site's own MKL stays reachable per experiment by
+      preload, with nothing in the image, for codes that want it. This test
+      covered BLAS1-3 kernels only, not LAPACK, MKL's FFTs or its vector math,
+      which would need their own probes.
+
+    One run of 25 -- Genoa, `mkl-auto`, repeat 1 -- exited 139 after printing
+    a complete, valid result. It is the second such shutdown crash, and
+    both were on Genoa (crhtc72 before, crhtc85 now) under the host Open
+    MPI. Two in about 70 Genoa runs is a pattern worth chasing separately:
+    a core file, or the host MPI's finalize under UCX.
+
 ---
 
 ## 12. Decision log
