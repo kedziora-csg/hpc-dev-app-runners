@@ -2364,6 +2364,13 @@ All four DECISIONs are answered — see §12. What remains open:
     `collect` now prints a text metric -- the kernel set that ran, the
     backend -- when every repeat agrees, rather than `-`.
 
+    *Derecho, one node (dec0902, dec2442), same harness.* DGEMM runs at 27.4
+    GFLOP/s a core under every kernel set: auto (Zen), Haswell and Zen all
+    match. DGEMV runs at 2.37 GB/s a core with all 128 cores streaming. The
+    FFT takes 0.2079 / 0.2086 / 0.2087 s with the base / AVX2 / AVX-512
+    FFTW. The AVX-512 build fell back to AVX2 here and ran exactly as fast,
+    which is the safety the design needs.
+
 ---
 
 ## 12. Decision log
