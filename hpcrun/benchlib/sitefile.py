@@ -373,6 +373,14 @@ def cross_checks(data):
                 "to it, so it has to be told where that tree is -- usually "
                 "'${NAME}' for the variable the MPI module sets." % family)
 
+    # A host library's env goes through a space-separated NAME=VALUE list in
+    # cluster.sh, so a value may not hold a space.
+    for name, lib in sorted((data.get("host_libraries") or {}).items()):
+        for key, value in sorted((lib.get("env") or {}).items()):
+            if " " in str(value):
+                out.append("host_libraries.%s.env.%s holds a space, which the "
+                           "generated NAME=VALUE list cannot carry" % (name, key))
+
     images = data.get("images") or {}
     if ("target" in images) != ("march" in images):
         out.append(
@@ -754,6 +762,23 @@ def render(sf, source_rel=None):
                          "family.  Where a workaround specific to this machine goes.")
     out.append("")
 
+    hostlibs = d.get("host_libraries") or {}
+    if hostlibs:
+        names = sorted(hostlibs)
+        out.append("#-- host libraries an experiment may preload " + "-" * 29)
+        out.append("# By name, from a variant's host_library:.  The runner preloads the files")
+        out.append("# inside the container (LD_PRELOAD) for that variant's cells and sets the")
+        out.append("# env, the way the MPI recipe puts the host's MPI in.  Literal text: a")
+        out.append("# ${NAME} is expanded by the runner.")
+        out.append(_assert("HPCRUN_HOST_LIBRARIES", " ".join(names), "host_libraries"))
+        out += _case("bench_site_host_library_preload",
+                     dict((n, list(hostlibs[n]["preload"])) for n in names), names)
+        out += _case("bench_site_host_library_env",
+                     dict((n, ["%s=%s" % (k, v) for k, v in
+                               sorted((hostlibs[n].get("env") or {}).items())])
+                          for n in names), names)
+        out.append("")
+
     out.append("#-- the module environment every job starts from " + "-" * 26)
     out.append("# Order is the content, so this is a list rather than one command.")
     out.append("# Silenced because Lmod narrates every step; a failure still comes back")
@@ -774,6 +799,8 @@ def render(sf, source_rel=None):
     out.append("export HPCRUN_BIND_MAP HPCRUN_LIB_DIRS")
     if sf.subclusters:
         out.append("export HPCRUN_SUBCLUSTERS HPCRUN_SUBCLUSTER HPCRUN_SUBCLUSTER_VERIFIED")
+    if d.get("host_libraries"):
+        out.append("export HPCRUN_HOST_LIBRARIES")
     # With sub-clusters, a key any entry states is exported; `export` of a
     # name an arm has unset marks it without giving it a value.
     nodes = [e["node"] for e in sf.subclusters.values()] or [node]

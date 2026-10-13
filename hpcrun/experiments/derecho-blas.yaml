@@ -20,10 +20,13 @@ images:
 
 apps:
   - {name: blas}
+# mkl: the site's oneMKL from the host, by the name sites/ncar/derecho.yaml
+# declares it under -- see casper-blas.yaml.
 variants:
   - {name: auto}
   - {name: haswell, env: {OPENBLAS_CORETYPE: Haswell}}
   - {name: zen,     env: {OPENBLAS_CORETYPE: Zen}}
+  - {name: mkl,     host_library: mkl}
 
 placements:
   - {name: pureMPI, ranks_per_node: 128, threads: 1}

@@ -38,6 +38,7 @@
 #   HPCRUN_CELL_<i>_VARIANT             the variant's name (experiment `variants:`)
 #   HPCRUN_CELL_<i>_ENV_COUNT           how many NAME=value settings it has
 #   HPCRUN_CELL_<i>_ENV_<j>             each one, exported for this cell only
+#   HPCRUN_CELL_<i>_HOST_LIBRARY        a host library to preload, by name
 #
 # A cell states only what it ASKS for.  What it should GET -- L3, NUMA and
 # socket footprint, threads per core -- follows from the topology probed at the
@@ -252,7 +253,7 @@ img_digest="$(sif_digest "${container_img}")"
 # 8x16; on any other node it is the same three ideas, correctly sized.
 #-------------------------------------------------------------------------------
 cell_name=() cell_ppn=() cell_threads=() cell_omp=() cell_bind=() cell_places=()
-cell_variant=()
+cell_variant=() cell_hostlib=()
 
 if [ "${HPCRUN_CELL_COUNT:-0}" -gt 0 ] 2>/dev/null; then
     i=0
@@ -264,6 +265,7 @@ if [ "${HPCRUN_CELL_COUNT:-0}" -gt 0 ] 2>/dev/null; then
         eval "cell_bind+=(\"\${HPCRUN_CELL_${i}_OMP_PROC_BIND:-}\")"
         eval "cell_places+=(\"\${HPCRUN_CELL_${i}_OMP_PLACES:-}\")"
         eval "cell_variant+=(\"\${HPCRUN_CELL_${i}_VARIANT:-}\")"
+        eval "cell_hostlib+=(\"\${HPCRUN_CELL_${i}_HOST_LIBRARY:-}\")"
         i=$(( i + 1 ))
     done
 else
@@ -277,9 +279,46 @@ else
         cell_bind+=("${OMP_PROC_BIND:-close}")
         cell_places+=("${OMP_PLACES:-cores}")
         cell_variant+=("")
+        cell_hostlib+=("")
     done
 fi
 [ "${#cell_name[@]}" -gt 0 ] || { echo "no cells to run"; exit 1; }
+
+#-------------------------------------------------------------------------------
+# Host libraries a variant preloads (the cluster description's host_libraries:).
+# Resolved and checked for EVERY cell before the first one runs: a path that
+# moved with a system update should cost one line now, not a job whose MKL
+# cells silently ran OpenBLAS -- LD_PRELOAD of a missing file is a warning,
+# not an error, and the run goes on with the image's own library.
+#-------------------------------------------------------------------------------
+# host_library_resolve <name> -- its preload list, colon separated, ${NAME}
+# expanded; prints why and returns 1 if any file is missing.
+host_library_resolve () {
+    local name="$1" entry var out=""
+    command -v bench_site_host_library_preload >/dev/null 2>&1 || {
+        echo "host library '${name}': cluster ${HPCRUN_CLUSTER} declares no host_libraries" >&2
+        return 1; }
+    for entry in $(bench_site_host_library_preload "${name}"); do
+        case "${entry}" in
+            '${'*'}'*)
+                var="${entry#\$\{}"; var="${var%%\}*}"
+                entry="${!var:-}${entry#*\}}" ;;
+        esac
+        [ -f "${entry}" ] || {
+            echo "host library '${name}': ${entry} does not exist" >&2
+            echo "  update host_libraries.${name}.preload in the cluster's YAML and" >&2
+            echo "  run hpcrun/sitegen --write" >&2
+            return 1; }
+        out="${out:+${out}:}${entry}"
+    done
+    [ -n "${out}" ] || { echo "host library '${name}' is not declared for ${HPCRUN_CLUSTER}" >&2; return 1; }
+    echo "${out}"
+}
+for _lib in $(printf '%s\n' "${cell_hostlib[@]}" | sort -u); do
+    [ -n "${_lib}" ] || continue
+    _path="$(host_library_resolve "${_lib}")" || exit 1
+    echo "host lib  ${_lib}: ${_path}"
+done
 
 #-------------------------------------------------------------------------------
 # 6. The application's contract.  Everything this script knows about the app
@@ -401,6 +440,10 @@ record_common () {
     if [ -n "${variant_name}" ] && \
        { [ "${variant_name}" != default ] || [ "${#variant_env[@]}" -gt 0 ]; }; then
         result_str  variant.name "${variant_name}"
+        if [ -n "${variant_hostlib}" ]; then
+            result_str variant.host_library         "${variant_hostlib}"
+            result_str variant.host_library_preload "${variant_preload}"
+        fi
         local kv
         for kv in "${variant_env[@]}"; do
             result_str "variant.env.${kv%%=*}" "${kv#*=}"
@@ -412,12 +455,30 @@ record_common () {
 # export this cell's.  Set or UNSET, never inherited, for the same reason as
 # the OMP settings below: a value carried over from the previous cell would
 # label the row with a setting it did not run under.
-variant_name="" variant_env=()
+variant_name="" variant_env=() variant_hostlib="" variant_preload=""
 variant_apply () {
     local i="$1" n j kv
     for kv in "${variant_env[@]}"; do unset "${kv%%=*}"; done
     variant_env=()
     variant_name="${cell_variant[$i]}"
+    variant_hostlib="${cell_hostlib[$i]:-}" variant_preload=""
+
+    # The host library first: its preload, as the container runtime spells an
+    # environment variable meant for INSIDE the container only (apptainer:
+    # APPTAINERENV_LD_PRELOAD), so mpiexec and the runtime on the host never
+    # load it; then its own env.  The variant's env comes after, so an
+    # experiment can override what the cluster set.  All of it lands in
+    # variant_env, so the next cell unsets it and the row records it.
+    if [ -n "${variant_hostlib}" ]; then
+        variant_preload="$(host_library_resolve "${variant_hostlib}")" || return 1
+        kv="$(printf '%s' "${HPCRUN_CONTAINER_RUNTIME:-apptainer}" | tr '[:lower:]' '[:upper:]')ENV_LD_PRELOAD=${variant_preload}"
+        variant_env+=("${kv}")
+        export "${kv%%=*}=${kv#*=}"
+        for kv in $(bench_site_host_library_env "${variant_hostlib}"); do
+            variant_env+=("${kv}")
+            export "${kv%%=*}=${kv#*=}"
+        done
+    fi
     eval "n=\"\${HPCRUN_CELL_${i}_ENV_COUNT:-0}\""
     j=0
     while [ "${j}" -lt "${n}" ] 2>/dev/null; do
@@ -436,7 +497,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
     omp_name="${cell_omp[$idx]}"
     omp_bind="${cell_bind[$idx]}"
     omp_places="${cell_places[$idx]}"
-    variant_apply "${idx}"
+    variant_apply "${idx}" || exit 1
     idx=$(( idx + 1 ))
     nranks=$(( NNODES * ppn ))
 
@@ -449,6 +510,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
 
     echo
     echo "=== ${name}: ${ppn} ranks/node x ${nthreads} threads (${nranks} ranks)${omp_name:+, omp=${omp_name}}${variant_name:+, variant=${variant_name}} ==="
+    [ -n "${variant_hostlib}" ] && echo "    host library: ${variant_hostlib}"
     [ "${#variant_env[@]}" -gt 0 ] && echo "    env: ${variant_env[*]}"
 
     #---------------------------------------------------------------------------

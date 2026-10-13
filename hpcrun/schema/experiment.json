@@ -222,6 +222,11 @@
                 "description": "The value, exported as it is written."
               }
             }
+          },
+          "host_library": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "description": "A library the cluster's description declares under host_libraries:, preloaded inside the container for this variant's cells -- the site's own MKL, say, in place of the image's OpenBLAS. Its env is set first, then this variant's env, so the variant can override it."
           }
         }
       }

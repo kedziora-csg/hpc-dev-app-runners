@@ -386,6 +386,15 @@ want "an image set in a site file is refused" reject "${out}"
 # The generator writes into a shell file every job sources, so a value it cannot
 # spell safely is refused rather than quoted.  Quoting arbitrary text correctly
 # is the kind of thing that works until the day it does not.
+cluster_case "a host library with a preload is accepted" ok "${cluster_base}
+host_libraries:
+  mkl: {preload: [\"\${MKLROOT}/lib/libmkl_rt.so.2\"], env: {MKL_THREADING_LAYER: SEQUENTIAL}}"
+cluster_case "a host library env value with a space is refused" reject "${cluster_base}
+host_libraries:
+  mkl: {preload: [/opt/mkl/libmkl_rt.so.2], env: {X: \"a b\"}}"
+cluster_case "a host library with a relative preload is refused" reject "${cluster_base}
+host_libraries:
+  mkl: {preload: [lib/libmkl_rt.so.2]}"
 cluster_case "a value carrying a quote is refused, not quoted" reject \
     "${cluster_base%$'\n'*}
   openmpi: {launcher: openmpi, overlay: host-openmpi, env: {X: \"a'\\\"b\"}}"
@@ -765,6 +774,17 @@ sweep: {matrix: [images, apps, placements, variants], per_job: [placements, vari
 case_exit "two variants not crossed is refused (3)" 3 "${vbase}
 sweep: {matrix: [images, apps, placements], per_job: [placements]}"
 
+# Host libraries: a variant names one the cluster declares, never a path.
+case_exit "a host library the cluster does not declare is refused (3)" 3 "${vbase}
+  - {name: other, host_library: nosuch}
+sweep: {matrix: [images, apps, placements, variants], per_job: [placements, variants]}"
+case_exit "host_library and a preload in env together are refused (3)" 3 "${vbase}
+  - {name: other, host_library: mkl, env: {APPTAINERENV_LD_PRELOAD: /x.so}}
+sweep: {matrix: [images, apps, placements, variants], per_job: [placements, variants]}"
+case_exit "a declared host library is accepted (0)" 0 "${vbase}
+  - {name: other, host_library: mkl}
+sweep: {matrix: [images, apps, placements, variants], per_job: [placements, variants]}"
+
 # runner.sh's variant_apply: exports a cell's settings and UNSETS the previous
 # cell's, so no row runs under a value it does not record.
 ( . "$(echo "${TMP}"/varjob/*/job.env)" >/dev/null 2>&1
@@ -776,6 +796,28 @@ sweep: {matrix: [images, apps, placements], per_job: [placements]}"
   [ "${OPENBLAS_CORETYPE}" = Haswell ] && [ -z "${NOTE+set}" ] && [ "${variant_name}" = haswell ]
 ) && ok "variant_apply exports one cell's env and clears the last one's" \
   || bad "variant_apply leaks or misses a setting"
+
+# ...and for a host library: the preload as an env var meant for INSIDE the
+# container only, the library's own env, the variant's after it -- and a
+# missing file stops the job rather than run the cell on the image's library.
+: > "${TMP}/libfake.so"
+( HPCRUN_CONTAINER_RUNTIME=apptainer
+  bench_site_host_library_preload () { case "$1" in fake) echo "\${FAKEROOT}/libfake.so" ;; gone) echo /nonexistent/lib.so ;; esac; }
+  bench_site_host_library_env () { case "$1" in fake) echo "FAKE_LAYER=SEQ FAKE_CAP=AVX512" ;; esac; }
+  export FAKEROOT="${TMP}"
+  eval "$(sed -n '/^host_library_resolve () {/,/^}/p' runner.sh)"
+  eval "$(sed -n '/^variant_name="" variant_env=()/,/^}/p' runner.sh)"
+  cell_variant=(mkl plain gone) cell_hostlib=(fake "" gone)
+  HPCRUN_CELL_0_ENV_COUNT=1 HPCRUN_CELL_0_ENV_0="FAKE_CAP=AVX2" HPCRUN_CELL_1_ENV_COUNT=0
+  variant_apply 0 || exit 1
+  [ "${APPTAINERENV_LD_PRELOAD}" = "${TMP}/libfake.so" ] && [ "${FAKE_LAYER}" = SEQ ] \
+      && [ "${FAKE_CAP}" = AVX2 ] && [ "${variant_preload}" = "${TMP}/libfake.so" ] || exit 2
+  variant_apply 1 || exit 3
+  [ -z "${APPTAINERENV_LD_PRELOAD+set}" ] && [ -z "${FAKE_LAYER+set}" ] || exit 4
+  variant_apply 2 2>/dev/null && exit 5
+  exit 0
+) && ok "a host library is preloaded in the container, its env set, the variant's on top, and gone next cell" \
+  || bad "a host library variant is applied wrongly (code $?)"
 
 # Two entries of one app must not collide, or one silently overwrites the other.
 ./submit derecho-osu --dry-run --results-dir "${TMP}/osu" >/dev/null 2>&1

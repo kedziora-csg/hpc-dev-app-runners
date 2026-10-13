@@ -152,6 +152,7 @@ def job_env(exp, job, results_dir, profile=None):
             "HPCRUN_CELL_%d_OMP_PROC_BIND=%s" % (i, _sh(cell.omp.get("OMP_PROC_BIND", ""))),
             "HPCRUN_CELL_%d_OMP_PLACES=%s" % (i, _sh(cell.omp.get("OMP_PLACES", ""))),
             "HPCRUN_CELL_%d_VARIANT=%s" % (i, _sh(cell.variant["name"])),
+            "HPCRUN_CELL_%d_HOST_LIBRARY=%s" % (i, _sh(cell.variant.get("host_library", ""))),
         ]
         # The variant's env, one NAME=value per line so a value may hold
         # spaces.  The runner exports these for this cell only.
@@ -190,6 +191,7 @@ def job_record(exp, job, results_dir, profile=None):
                    "omp": dict({"name": c.omp["name"]},
                                **{k: v for k, v in c.omp.items() if k != "name"}),
                    "variant": {"name": c.variant["name"],
+                               "host_library": c.variant.get("host_library"),
                                "env": dict(c.variant.get("env") or {})}}
                   for c in job.cells],
     }

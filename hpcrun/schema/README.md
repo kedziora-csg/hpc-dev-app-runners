@@ -127,6 +127,7 @@ Environment settings crossed like any other axis, and -- unlike apps -- allowed 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | [`env`](#experimentvariantsenv) | object |  | no other keys | NAME: value, set for this variant's cells. Not HPCRUN_* (the harness's) and not OMP_NUM_THREADS, OMP_PROC_BIND or OMP_PLACES (the placement's and omp_variants'). |
+| `host_library` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | A library the cluster's description declares under host_libraries:, preloaded inside the container for this variant's cells -- the site's own MKL, say, in place of the image's OpenBLAS. Its env is set first, then this variant's env, so the variant can override it. |
 | `name` | string | yes | matches `/^[A-Za-z0-9][A-Za-z0-9_.-]*$/` | Joins the cell's name -- placement_<cell>-<variant>.out, run_<cell>-<variant>/ -- when a job runs more than one variant. |
 
 ##### `experiment.variants.env`
@@ -197,6 +198,7 @@ What one cluster provides, stated once and split across two files. sites/<site>.
 | [`container`](#clustercontainer) | object |  | no other keys | How a container is run here. The bind list is site-specific in the strongest sense: apptainer treats a missing bind source as fatal, so binding a filesystem this machine does not have turns 'that mount is absent' into 'the job will not start'. |
 | `default_subcluster` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | The sub-cluster used when an experiment names none. Required once subclusters: exists, and must be one of its keys: which node type a job lands on is a decision, so it is written down rather than taken from whichever entry comes first. |
 | `description` | string |  |  | What this machine is, for whoever reads a results directory a year from now. Copied into the generated block as a comment. |
+| [`host_libraries`](#clusterhost_libraries) | object |  | no other keys | Libraries this cluster provides on the host that an experiment may put in place of the container's own, by name -- the way mpi: puts the host's MPI in. A variant names one with host_library:, and the runner preloads it inside the container for that variant's cells and sets its env. Declared here, once, because the paths are this machine's and change when it is updated; an experiment names only the library. Nothing is added to the image. |
 | [`images`](#clusterimages) | object |  | no other keys | The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.set names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced. |
 | [`modules`](#clustermodules) | object |  | no other keys | The module environment, which is the one thing every job here must do identically and the thing that was copied into five PBS scripts before this file existed. |
 | [`mpi`](#clustermpi) | object |  | no other keys | One entry per container MPI family this site can host. A family absent here is one this machine cannot run, which the runner reports as such rather than attempting and failing inside the container. |
@@ -226,6 +228,33 @@ host path to in-container path, for a directory that must not land on top of the
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `<name>` | string |  | key matches `/^/[^ ]*$/`, matches `/^/[^ ]*$/` | Where the host path appears inside the container. |
+
+#### `cluster.host_libraries`
+
+Libraries this cluster provides on the host that an experiment may put in place of the container's own, by name -- the way mpi: puts the host's MPI in. A variant names one with host_library:, and the runner preloads it inside the container for that variant's cells and sets its env. Declared here, once, because the paths are this machine's and change when it is updated; an experiment names only the library. Nothing is added to the image.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| [`<name>`](#clusterhost_librariesname) | object |  | key matches `/^[a-z][a-z0-9_-]*$/`, no other keys | One host library. |
+
+##### `cluster.host_libraries.<name>`
+
+One host library.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `description` | string |  |  | What it is, and which module provides it. |
+| [`env`](#clusterhost_librariesnameenv) | object |  | no other keys | Set inside the container with the library -- MKL_THREADING_LAYER, for one. A variant's own env is applied after, so an experiment can override. |
+| `notes` | string |  |  | Free text: what was checked, and what would make it stop being true. |
+| `preload` | list of string | yes | at least 1 entry | Shared objects preloaded inside the container (LD_PRELOAD), in order. Absolute paths under a filesystem container.binds already binds; ${NAME} is allowed for a variable the environment sets. The runner refuses a job whose file is not there. |
+
+###### `cluster.host_libraries.<name>.env`
+
+Set inside the container with the library -- MKL_THREADING_LAYER, for one. A variant's own env is applied after, so an experiment can override.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `<name>` | string, integer or boolean |  | key matches `/^[A-Za-z_][A-Za-z0-9_]*$/` | The value, exported as it is written. |
 
 #### `cluster.images`
 

@@ -351,6 +351,55 @@
         }
       }
     },
+    "host_libraries": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Libraries this cluster provides on the host that an experiment may put in place of the container's own, by name -- the way mpi: puts the host's MPI in. A variant names one with host_library:, and the runner preloads it inside the container for that variant's cells and sets its env. Declared here, once, because the paths are this machine's and change when it is updated; an experiment names only the library. Nothing is added to the image.",
+      "patternProperties": {
+        "^[a-z][a-z0-9_-]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "preload"
+          ],
+          "description": "One host library.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "What it is, and which module provides it."
+            },
+            "preload": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^(/|\\$\\{)[A-Za-z0-9_./${}+-]*$"
+              },
+              "description": "Shared objects preloaded inside the container (LD_PRELOAD), in order. Absolute paths under a filesystem container.binds already binds; ${NAME} is allowed for a variable the environment sets. The runner refuses a job whose file is not there."
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Set inside the container with the library -- MKL_THREADING_LAYER, for one. A variant's own env is applied after, so an experiment can override.",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_]*$": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean"
+                  ],
+                  "description": "The value, exported as it is written."
+                }
+              }
+            },
+            "notes": {
+              "type": "string",
+              "description": "Free text: what was checked, and what would make it stop being true."
+            }
+          }
+        }
+      }
+    },
     "cluster": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_-]*$",

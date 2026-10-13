@@ -169,3 +169,17 @@ mpi:
       compilers here: gcc14 and nvhpc resolved to openmpi/5.0.8, oneapi to
       5.0.9, so a comparison across those images is also a comparison across two
       MPI versions.  Derecho gave 5.0.9 for all three.
+
+# Host libraries an experiment may put in place of the image's, by name: a
+# variant says `host_library: mkl` and the runner preloads it inside the
+# container for that variant's cells.  The site's own oneMKL, from its
+# mkl/2025.2.0 module; libmkl_rt finds its per-ISA kernel libraries beside
+# itself.  /glade is already bound.  Measured on Casper, 2026-10-12: on Intel it
+# matches a DYNAMIC_ARCH OpenBLAS at DGEMM, on AMD it loads its generic `def`
+# kernels and forgoes AVX-512 (BenchmarkRunnerPlan.md, section 11 item 11).
+host_libraries:
+  mkl:
+    description: "oneMKL 2025.2 (Casper's mkl/2025.2.0 module), single-threaded"
+    preload: [/glade/u/apps/casper/25.10/spack/opt/spack/intel-oneapi-mkl/2025.2.0/intel-oneapi-compilers/2025.2.1/e2rm/mkl/2025.2/lib/libmkl_rt.so.2]
+    env:
+      MKL_THREADING_LAYER: SEQUENTIAL

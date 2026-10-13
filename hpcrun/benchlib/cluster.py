@@ -40,7 +40,8 @@ EXPORTED = ("HPCRUN_SITE", "HPCRUN_CLUSTER", "HPCRUN_ROOT", "HPCRUN_IMAGE_DIR",
             "HPCRUN_WALLTIME_MAX", "HPCRUN_CORES_PER_NODE", "HPCRUN_SMT",
             "HPCRUN_TARGET_ARCH", "HPCRUN_TOPOLOGY_MODE", "HPCRUN_NODE_SELECT",
             "HPCRUN_PLACE", "HPCRUN_NCPUS",
-            "HPCRUN_SUBCLUSTER", "HPCRUN_SUBCLUSTERS", "HPCRUN_SUBCLUSTER_VERIFIED")
+            "HPCRUN_SUBCLUSTER", "HPCRUN_SUBCLUSTERS", "HPCRUN_SUBCLUSTER_VERIFIED",
+            "HPCRUN_HOST_LIBRARIES")
 
 
 class Cluster(object):
@@ -77,6 +78,8 @@ class Cluster(object):
         self.subcluster = ((values.get("HPCRUN_SUBCLUSTER") or "")
                            if self.subclusters else "")
         self.subcluster_verified = values.get("HPCRUN_SUBCLUSTER_VERIFIED") != "0"
+        # Host libraries a variant may preload, by name (host_libraries:).
+        self.host_libraries = (values.get("HPCRUN_HOST_LIBRARIES") or "").split()
 
         self.cores_per_node = _int(values.get("HPCRUN_CORES_PER_NODE"))
         self.smt = _int(values.get("HPCRUN_SMT"))
