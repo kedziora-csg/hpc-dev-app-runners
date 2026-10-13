@@ -23,6 +23,21 @@ be licensed under **Apache License 2.0** (§4, "License").
 Phase 4.7 (`BenchRunnerPlanAddendum.md`) does not depend on any of this: it
 moves nothing out of `containers/` or `scripts/`, and changes no image name.
 
+**Where things stand, 2026-10-13.** Phase 5 ran ahead of the factory's move.
+Its app images build on today's `hpcdev-derecho` base images, with the base
+repository as a workflow input so the switch is one default. So the move in
+§5 is now the main step outstanding. It is also what removes two faults
+phase 5 inherited:
+- **Casper runs base images named for Derecho.** They are
+  `hpcdev-derecho-x86_64:leap-...`.
+- **Those base images are tuned for Zen 3.** Their libraries were compiled
+  `-march=znver3`, which permits AMD-only instructions, so they are not
+  guaranteed to run on Casper's Intel Cascade Lake nodes. The start-of-job
+  architecture check inspects the app's binary, not the base's libraries.
+
+The steps in §5 are rewritten with what the seam study measured
+(`BenchmarkRunnerPlan.md` §11 item 11).
+
 ---
 
 ## 1. What exists today
@@ -138,6 +153,9 @@ account's (§6).
   `build_common.cfg`, `report_placement.cxx` and `build_report-placement.sh`,
   `build_osu-micro-benchmarks.sh` with `app.d/osu/`, the `hello_world` sources,
   `remove_static_bloat.sh`, and the install helpers.
+- Not `derecho-images-ghcr.yaml`. It builds the tuned `hpcdev-derecho` base,
+  and the factory publishes portable images only (§7). Its images stay
+  published for existing pins, and nothing rebuilds them.
 - Upstream's app recipes (`build_wrf.sh`, `build_mpas.sh`, `build_cesm.sh`,
   ...). They test that the stack can build real science codes, which is a
   factory concern, and they cost no image space (§4, "What the images are made
@@ -199,6 +217,36 @@ consecutive layers in the 2026-08-24 build.
    argument (`FINAL_TARGET=mpi`), and it saves about 10-14 minutes of build time
    per image, not space. Worth having only if the factory's CI budget is tight.
 
+### What to add, from the seam study
+
+The seam study found that a portable base loses nothing where its libraries
+pick their kernels at run time (`BenchmarkRunnerPlan.md` §11 item 11). Today's
+base images have no such libraries. Three changes, each measured, make the
+portable base deliver AVX-512 where it pays:
+
+5. **A `DYNAMIC_ARCH` OpenBLAS in every image.** The base carries no BLAS
+   today. One portable OpenBLAS picked AVX-512 kernels on its own on Cascade
+   Lake (65.9 GFLOP/s a core at DGEMM, 1.74x its AVX2 kernels) and on Genoa,
+   and Zen kernels on Derecho. On Intel it matched MKL. On AMD it beat MKL,
+   which never uses AVX-512 there. Built with the system gcc, no `-march`,
+   `TARGET=GENERIC`, single-threaded, BLAS only, as `apps/blas/build.sh` does
+   it today.
+6. **FFTW with its SIMD codelets.** `fftlibs` configures FFTW with no
+   `--enable-sse2/avx/avx2/avx512`, so its codelets are scalar. FFTW picks
+   them from CPUID at run time, so enabling them is safe in a portable image:
+   on Derecho the AVX-512 build fell back to AVX2 and ran exactly as fast.
+   For HeFFTe's distributed FFT they bought nothing measurable, which is an
+   argument about that app, not about FFTW.
+7. **`report_cpu_features`: say where AVX-512 is.** It answers only "is any
+   `%zmm` named", which a oneAPI binary answers yes for whenever it links
+   Intel's run-time-dispatched SVML. hpcrun's `check_arch.sh` works around
+   it today. The tool should report the functions instead, and its "ISA
+   needed" line should say it is meaningful only for a binary built with
+   `-mneeded`.
+
+`CONTRACT.md` (above) then promises the dispatching BLAS and FFTW, beside
+`report_placement` and OSU.
+
 ### License
 
 **Apache License 2.0**, the most common license among NCAR's public
@@ -236,34 +284,77 @@ The combinations the clusters need, at the least:
 
 ## 5. Moving it, and what this repository becomes
 
-1. **Settle what is left in §6:** the registry (Q3) and the Actions setting
-   for outside contributors (Q2). Q1 and Q2 themselves are answered.
-2. **Copy the factory, with its history, into the NCAR repository.** On a
-   fresh clone -- never the working one -- `git filter-repo` rewrites the
-   history to keep only the paths in §4, and the result is pushed to the empty
+Rewritten 2026-10-13. Phase 5 is done, on the old base images, so the move
+is what comes next.
+
+0. **Decisions -- yours.**
+   - The registry (§6, Q3). GHCR under the NCAR organisation is the simpler
+     choice.
+   - The Actions setting that requires approval before an outside
+     contributor's workflow runs (Q2).
+   - The licence change, for which benkirk's approval of the pull request
+     that adds `LICENSE` and `NOTICE` is the one thing still needed from him
+     (§4, "License").
+1. **Copy the factory, with its history, into the NCAR repository.** On a
+   fresh clone -- never the working one -- `git filter-repo` keeps only the
+   paths in §4, "What it contains", and the result is pushed to the empty
    repository. Keeping the history keeps the commit messages that explain each
-   factory fix, which `CLAUDE.md` refers to. The first change on top of it
-   replaces `LICENSE.md` with Apache 2.0's `LICENSE` and adds `NOTICE`, as a
-   pull request benkirk approves (§4, "License"). The pushes are yours to
-   make.
-3. **Trim and publish there:** the `chown` fix and optional conda (§4), the
-   workflows reduced to one set and pointed at the chosen registry, and a first
-   full publish of the combinations in §4.
-4. **Switch this repository to the new images.** This waits for phase 5's
-   `apps/Dockerfile`, because the new factory's images no longer carry
-   `build_hpcg.sh`, and today's app layer runs it out of the base image
-   (finding F1). Then `GHCR_BASE_REF` in the delivery `Makefile` and the app
-   workflow's base repository point at the new factory.
-5. **Delete the factory from here:** `containers/devenv`, `test`, `publish`
-   and `demo`, the rest of `scripts/`, `src/`, `.github/actions/`, the four
-   `*-ghcr` factory workflows, and upstream's workflows listed in §1. The old
-   registry repositories stay in place until nothing pins them, then can be
-   deleted. This repository's own license is a separate decision, best taken
-   once the factory's Creative Commons files have left it.
+   factory fix, which `CLAUDE.md` refers to. The pushes are yours to make.
+2. **Trim, add and publish there.**
+   - The trims in §4: the `chown` fix, and conda optional.
+   - The three additions in §4, "What to add": a `DYNAMIC_ARCH` OpenBLAS,
+     FFTW's SIMD codelets, and `report_cpu_features`' function-level AVX-512
+     report.
+   - `CONTRACT.md` stating them.
+   - The workflows reduced to one set, pointed at the chosen registry.
+   - A first publish of the portable set the clusters need: leap x {oneapi,
+     gcc14, nvhpc} x {mpich, openmpi}. A TACC set follows once a TACC
+     cluster has been drafted and probed (`sites/README.md`).
+3. **Per-sub-cluster app targets, in this repository** (`BenchmarkRunnerPlan.md`,
+   "Per-sub-cluster app targets"). They go in now, so the rebuild in step 4
+   builds each node type's app images once, on the portable base.
+4. **Switch this repository to the factory's images, and rebuild.**
+   - `GHCR_BASE_REF` in `sif/Makefile`, the `From:` lines of `sif/Deffile`
+     and `sif/Deffile.apps`, and the app workflow's `base_repo` default all
+     point at the factory.
+   - One app-image dispatch per cluster. Then `make <cluster>-hpcg` on each
+     cluster.
+   - **Acceptance:** `derecho-hpcg`, and `casper-hpcg` on both Casper node
+     types, against the existing numbers. HPCG links only MPI and the
+     compiler runtime, so a portable base should change nothing. A
+     difference is a finding.
+   - `hpcrun/tests/test_app_contract.sh` tests OSU's contract from
+     `scripts/app.d/osu/`, which moves to the factory with the OSU recipe.
+     Keep a copy under `hpcrun/tests/fixtures/` -- the contract is the
+     interface, and the copy is what a test holds the image to -- rather
+     than fetch it from the factory at test time.
+5. **Delete the factory from here:**
+   - `containers/` and the rest of `scripts/`;
+   - `src/`, `.github/actions/`;
+   - the factory's `*-ghcr` workflows, `derecho-images-ghcr.yaml` with
+     them, and upstream's workflows listed in §1.
+
+   `CLAUDE.md` keeps its runner half, and `README.md` is rewritten for what is
+   left. The old registry repositories, `hpcdev-derecho-x86_64` among them,
+   stay until nothing pins them, then can be deleted.
+6. **This repository's own licence:** a separate decision, best taken once the
+   factory's Creative Commons files have left it.
 
 This repository is then `apps/`, `sif/`, `hpcrun/` and `sites/`, one app-image
 workflow, and a `CLAUDE.md` about the runner. It depends on the factory only
 through the base contract in §4, and it publishes only app images.
+
+**What the names become.**
+
+| Today | After the move |
+|---|---|
+| base: `hpcdev-derecho-x86_64:leap-gcc14-openmpi-latest` | base: `<factory registry>/hpcdev-x86_64:leap-gcc14-openmpi-latest`, portable, named for OS, compiler and MPI only |
+| app: `hpcdev-apps-x86_64:leap-gcc14-openmpi-hpcg-znver3-latest`, on Casper's Genoa and Cascade Lake alike | app: `...-hpcg-znver3` on Derecho, `...-hpcg-znver4` on Genoa, `...-hpcg-cascadelake` on Cascade Lake, each built for its node type |
+| `derecho-images-ghcr.yaml`, `sif/Makefile`'s comment on why the base repository is named for Derecho | gone |
+
+Image **sets** keep their cluster names (`casper-hpcg`), because a set does
+belong to a cluster. What changes is that a set resolves to the images of
+the sub-cluster an experiment runs on.
 
 ---
 
@@ -371,13 +462,17 @@ automatically.
 
 ## 9. Order
 
-1. Q1 and Q2 in §6 are answered. Choose the registry (Q3), and make the
-   Actions setting for outside contributors (Q2).
-2. Move the factory and trim it (§5, steps 2 and 3).
-3. Phase 5 of `BenchmarkRunnerPlan.md`: `apps/`, the generic app Dockerfile,
-   app images named by §2 and built on the new factory's images; then switch
-   this repository over (§5, step 4).
-4. Delete the factory from this repository (§5, step 5).
+Rewritten 2026-10-13; §5 has the detail.
 
-Meanwhile the benchmark work continues unchanged: phase 4.7 and the
-sub-cluster half of phase 4.5 touch neither the factory nor any image name.
+1. Decide the registry and the Actions setting, and ask benkirk to approve
+   the licence pull request (§5, step 0).
+2. Move the factory; trim, add and publish there (§5, steps 1 and 2).
+3. Per-sub-cluster app targets, here (§5, step 3).
+4. Switch this repository over, rebuild, and run the acceptance jobs (§5,
+   step 4).
+5. Delete the factory from here (§5, step 5).
+6. Then phase 4.6, Slurm, for TACC -- starting with `hpcrun/clusterinit` and a
+   probe job there, which say which parts of 4.6 the machine needs.
+
+Phase 5 (app images) and the sub-cluster half of phase 4.5 are done, on the
+old base images; the switch in step 4 is where they move onto the factory's.

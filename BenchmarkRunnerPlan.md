@@ -1158,6 +1158,7 @@ Each phase is independently useful and independently revertible.
 | **4.6** | A second scheduler: Slurm, for TACC. Named the PBS assumptions and the Slurm shape; **implement when there is an account to test against** | The abstraction is half there already — per-scheduler templates, an `srun` arm in `mpi_launch_flags`, `scheduler.kind`. What is missing is three places that still assume PBS in code. Designing the rest from a manual is how the Casper node type came out wrong twice. |
 | **4.7** | Lay the repository out by concern: `bench/` to the root as `hpcrun/`, `sites/` beside it, the runner's libraries into `hpcrun/lib/`, the SIF build into `sif/`, `NCAR_HPC_ROOT` removed; then image sets and the host-MPI root read from the machine description. **Proposed; runs before the sub-cluster half of 4.5.** See below and `BenchRunnerPlanAddendum.md` | Sub-clusters should be written at the final paths, and TACC is the point at which a runner loading its libraries from `ncar-hpc/` through `NCAR_HPC_ROOT` stops being awkward and becomes false. |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9); carry `app_march_flags` through as a per-app build-arg (§3) | CI now validates the contract on every app build. The microarchitecture override belongs here because this is where an app image is built for a *named machine* rather than for everyone. |
+| **5b** | Per-sub-cluster app targets: a sub-cluster's `images.target`/`march` override its cluster's, so each node type gets app images built for it (Casper: `znver4` for Genoa, `cascadelake` for Cascade Lake). **Proposed 2026-10-13; lands with the factory switch** -- see "Per-sub-cluster app targets" below and `ImagePublishingPlan.md` §5, steps 3-4 | Casper runs Derecho's Zen 3 app builds today, forgoing AVX-512 on both node types, and on its own base images named for and tuned to Derecho. The switch to the factory's portable base rebuilds every app image anyway, so the targets cost no extra rebuild there -- and not before, so no Cascade Lake build sits on a Zen 3-tuned base. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
 
@@ -1839,6 +1840,80 @@ next machine should not.
   template, the node list, and a host-MPI overlay for Intel MPI or
   MVAPICH.
 
+### Per-sub-cluster app targets (phase 5b), proposed 2026-10-13
+
+**The problem.** Casper's two node types run Derecho's builds, at two levels:
+- **The base images** are `hpcdev-derecho-x86_64:leap-...`: named for
+  Derecho, with libraries compiled `-march=znver3`. That permits AMD-only
+  instructions, so they are not guaranteed to run on Cascade Lake, and the
+  start-of-job check inspects only the app's binary. The factory's move fixes
+  this: its base images are portable and named for OS, compiler and MPI
+  only (`ImagePublishingPlan.md` §5).
+- **The app images** are built for `znver3`, because the target is stated
+  once per cluster, in `images.target`. Genoa and Cascade Lake both have
+  AVX-512, and the seam study measured what that is worth to
+  arithmetic-bound code: DGEMM ran 1.1x faster on Zen 4 and 1.7x on Cascade
+  Lake. A library that dispatches at run time reaches that from a portable
+  build. An app's OWN compute-bound loops reach it only when the app is
+  built for the node type. This step is what fixes that.
+
+The study's conclusion, which this keeps, is that the base stays portable.
+Tuning goes in the app layer, and run-time dispatch in the base's libraries
+covers the rest. A sub-cluster chooses its app target, not its base image.
+
+**The description.** A sub-cluster may carry `images.target` and
+`images.march`, overriding its cluster's. The OS, compilers, MPI families
+and apps stay cluster-wide: they follow the host's modules, which do not
+vary by node type.
+
+```yaml
+# sites/ncar/casper.yaml
+images: {os: leap, compilers: [oneapi, gcc14, nvhpc], mpi: [openmpi], apps: [hpcg]}
+subclusters:
+  htc-genoa:
+    images: {target: znver4, march: {default: -march=znver4, nvhpc: -tp=zen4}}
+    node: {...}
+  htc-cascadelake:
+    images: {target: cascadelake, march: {default: -march=cascadelake, nvhpc: TODO}}
+    node: {...}
+```
+
+nvhpc's `-tp` spelling for Cascade Lake is to be read from the NVHPC
+documentation, not guessed. `sitegen --check`'s rule that two clusters
+naming one target must spell it identically extends to sub-clusters across
+the whole site.
+
+**Names.** One tag still means one build. The target is in the tag and the
+`.sif` name -- `leap-gcc14-openmpi-hpcg-znver4.sif`, `...-cascadelake.sif`
+-- and `images.mk` gains them. A set keeps its cluster's name
+(`casper-hpcg`), and resolves to the images of the sub-cluster the
+experiment runs on. So `casper-hpcg --subcluster htc-cascadelake` runs
+Cascade Lake builds, with no change to the experiment.
+
+**Checks.**
+- `validate` refuses an image whose `hpcdev.target` label (or name) is not
+  the node type's.
+- `apps/matrix.py <cluster>` lists each distinct target across a cluster's
+  sub-clusters once, so one dispatch builds them all, and images shared
+  between clusters are still built once.
+- Test: the sets for each sub-cluster, the override, the refusal, and the
+  matrix.
+
+**When.** With the factory switch (`ImagePublishingPlan.md` §5, step 3),
+before its rebuild, so each node type's app images are built once and on
+the portable base. Not before: a Cascade Lake build on today's Zen 3-tuned
+base would keep the AMD-instruction risk underneath it.
+
+**Acceptance.** `casper-hpcg` on both node types after the rebuild.
+- `run.meta` records `image_target znver4` on Genoa and `cascadelake` on
+  Cascade Lake.
+- The architecture check passes.
+- `report_cpu_features` shows the binary using AVX-512.
+- HPCG is bound by memory bandwidth, so its figure need not move.
+
+What an app's own arithmetic gains is measured with the first
+compute-bound app the project adds, not with HPCG.
+
 ### Phase 4.7, proposed: lay the repository out by concern
 
 The full proposal, with line references and the move list, is in
@@ -2136,7 +2211,8 @@ All four DECISIONs are answered — see §12. What remains open:
       cluster's, so Casper's two node types can get native app images
       (`znver4`, `cascadelake`). That is the per-sub-cluster build block the
       addendum's F2 sketched and phase 5 set aside, because both node types
-      ran one set.
+      ran one set. **Scheduled 2026-10-13 as phase 5b**, with the factory
+      switch: see "Per-sub-cluster app targets".
     - The start-of-job architecture check also scans for vendor-specific
       instructions, so a `znver3` binary on an Intel node is refused in one
       line rather than failing mid-run.
@@ -2393,7 +2469,7 @@ All four DECISIONs are answered — see §12. What remains open:
     Today's base images carry no BLAS at all, and an FFTW with no SIMD.
     Both are factory changes, to make in the new factory. What dispatch
     cannot reach is an app's OWN arithmetic-bound loops. For those the
-    per-sub-cluster `images.target` step (above) is the remaining piece: an
+    per-sub-cluster `images.target` step (phase 5b) is the remaining piece: an
     app built `-march=cascadelake` for Casper's Intel nodes, from the same
     portable base.
 
