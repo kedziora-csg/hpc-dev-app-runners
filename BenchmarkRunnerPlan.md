@@ -2455,6 +2455,13 @@ All four DECISIONs are answered — see §12. What remains open:
       then the variant's, so an experiment can override the cluster.
     - Rows record `variant.host_library` and the resolved preload path.
 
+    Checked in a real job on 2026-10-12: `casper-blas` on Genoa, harness
+    `7b678bb`, results in `hpcrun-avx512/genoa-hostlib`. The runner
+    resolved `mkl` before the first cell. Both MKL cells recorded
+    `blas_lib=mkl`, `mkl_kernels=def`, the library's name and its resolved
+    path. MKL ran at 50.8 GFLOP/s against OpenBLAS's 55.2, the same picture
+    as the hand-written preload.
+
 ---
 
 ## 12. Decision log
