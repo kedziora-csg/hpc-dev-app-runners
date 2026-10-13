@@ -1,0 +1,521 @@
+#!/usr/bin/env python3
+"""clusterinit -- draft a new cluster's description from the machine itself.
+
+    clusterinit draft     <site>/<cluster>   write sites/<site>/<cluster>.yaml, from the login node
+    clusterinit probe-job <site>/<cluster>   write a job that measures one compute node
+
+    options for draft:
+      --scheduler pbspro|slurm   when it cannot be told from the commands on PATH
+      --select-attr NAME         the PBS node resource that names a processor type
+                                 (default: cpu_type, when the nodes carry it)
+      --stdout                   print the draft instead of writing it
+    options for probe-job:
+      --select EXPR              how to ask for the node type: cpu_type=genoa (PBS),
+                                 or a partition name (Slurm)
+      --account A --queue Q      put into the job's directives
+      --dir DIR                  where the script and its output go
+
+WHY
+
+Describing Casper took three tries, because the first description came from a
+documentation table instead of from the machine: it named a node type the
+scheduler did not hand out, a CPU count the scheduler would not grant, and a
+geometry for nodes nobody got.  Everything in a cluster description that the
+machine can answer is asked of the machine here, and everything it cannot
+answer is left as a marked TODO -- never guessed.
+
+WHAT IT ASKS, AND WHERE
+
+    the scheduler        which of qsub/pbsnodes or sbatch/sinfo is on PATH
+    node types           pbsnodes -a -F json (grouped by --select-attr, ncpus,
+                         ngpus), or sinfo (partition, CPUs, sockets:cores:threads)
+    schedulable CPUs     the same: resources_available.ncpus, or sinfo's %c
+    the distro           /etc/os-release, mapped to a base-image OS name
+    compilers and MPIs   Lmod: `module -t spider`, for the module names the
+                         images' compiler and MPI tags can be matched to
+    host libraries       Lmod: the mkl module's MKLROOT
+    container runtime    an apptainer or singularity module or binary
+
+WHAT IT CANNOT
+
+The hardware geometry of a PBS node (pbsnodes reports schedulable CPUs, not
+cores, sockets or caches) -- the probe job measures that and prints a node:
+block to paste.  Which host-MPI recipe fits: Open MPI and Cray MPICH have
+recipes; Intel MPI and MVAPICH do not yet, and are named as such.  The module
+bootstrap's order, and any site-wide binds.  The draft says which is which.
+
+The result is marked verified: false.  hpcrun/validate says so on every run
+until a job has confirmed it; then you delete the line.  See sites/README.md.
+"""
+
+import argparse
+import collections
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SITES_DIR = os.path.join(os.path.dirname(HERE), "sites")
+
+# Container compiler tags the images use, and the module names a site may
+# provide them under, in the order tried.  The tag is what images.compilers
+# and modules.compiler_map are keyed by.
+COMPILER_MODULES = (
+    ("oneapi", ("intel", "intel-oneapi-compilers", "oneapi")),
+    ("gcc14",  ("gcc",)),                    # only a 14.x version qualifies
+    ("nvhpc",  ("nvhpc", "nvidia")),
+    ("aocc",   ("aocc",)),
+)
+# Host MPI modules, and what the runner can do with each today.
+MPI_MODULES = (
+    ("openmpi", "openmpi", "host-openmpi", "openmpi"),
+    ("cray-mpich", "mpich", "cray-mpich-abi", "pals"),
+)
+UNSUPPORTED_MPI = ("impi", "intel-mpi", "intel-oneapi-mpi", "mvapich", "mvapich2",
+                   "mvapich-plus")
+OS_MAP = (
+    (r"^(opensuse-leap|sles)$", lambda v: "leap"),
+    (r"^(almalinux|rocky|rhel|centos)$", lambda v: "almalinux" + v.split(".")[0]),
+    (r"^ubuntu$", lambda v: {"22.04": "jammy", "24.04": "noble"}.get(v, "")),
+)
+
+
+def run(argv, timeout=120):
+    """stdout+stderr of a command, or "" when it is missing or fails."""
+    if not shutil.which(argv[0]) and not os.path.isabs(argv[0]):
+        return ""
+    try:
+        p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout, universal_newlines=True)
+        return p.stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def lmod(*args):
+    """Lmod's own command, which writes to stderr; '' where there is no Lmod."""
+    cmd = os.environ.get("LMOD_CMD")
+    return run([cmd, "bash"] + list(args)) if cmd else ""
+
+
+def spider(name):
+    """The module/version names Lmod knows for `name`, newest last."""
+    out = lmod("-t", "spider", name)
+    found = [l.strip() for l in out.splitlines()
+             if l.strip().startswith(name + "/") and not l.strip().endswith("/")]
+    return sorted(set(found), key=_version_key)
+
+
+def _version_key(mod):
+    return [int(x) if x.isdigit() else x for x in re.split(r"[./-]", mod.split("/", 1)[-1])]
+
+
+#-------------------------------------------------------------------------------
+# Facts
+#-------------------------------------------------------------------------------
+
+def detect_scheduler():
+    if shutil.which("pbsnodes") or shutil.which("qsub"):
+        return "pbspro"
+    if shutil.which("sinfo") or shutil.which("sbatch"):
+        return "slurm"
+    return ""
+
+
+def pbs_node_types(select_attr=None, text=None):
+    """[(select, ncpus, ngpus, count, queues)], one per node type, biggest first."""
+    if text is None:
+        text = run(["pbsnodes", "-a", "-F", "json"])
+    try:
+        nodes = json.loads(text).get("nodes", {})
+    except ValueError:
+        return []
+    attr = select_attr
+    if attr is None:
+        attr = "cpu_type" if any("cpu_type" in (n.get("resources_available") or {})
+                                 for n in nodes.values()) else ""
+    groups = collections.Counter()
+    queues = collections.defaultdict(set)
+    for node in nodes.values():
+        r = node.get("resources_available") or {}
+        key = ("%s=%s" % (attr, r[attr]) if attr and attr in r else "",
+               int(r.get("ncpus", 0) or 0), int(r.get("ngpus", 0) or 0))
+        groups[key] += 1
+        for q in str(r.get("Qlist", "")).split(","):
+            if q and q != "system":
+                queues[key].add(q)
+    return [(k[0], k[1], k[2], n, sorted(queues[k]))
+            for k, n in sorted(groups.items(), key=lambda kv: -kv[1])]
+
+
+def slurm_node_types(text=None):
+    """[(partition, cpus, sockets, cores_per_socket, threads, count)]."""
+    if text is None:
+        text = run(["sinfo", "-N", "-h", "-o", "%P|%c|%z"])
+    groups = collections.Counter()
+    for line in text.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) != 3:
+            continue
+        part, cpus, sct = parts
+        try:
+            s, c, t = (int(x) for x in sct.split(":"))
+            groups[(part.rstrip("*"), int(cpus), s, c, t)] += 1
+        except ValueError:
+            continue
+    return [k + (n,) for k, n in sorted(groups.items(), key=lambda kv: -kv[1])]
+
+
+def os_name(path="/etc/os-release"):
+    try:
+        fields = dict(l.rstrip("\n").split("=", 1) for l in open(path) if "=" in l)
+    except OSError:
+        return "", ""
+    ident = fields.get("ID", "").strip('"')
+    version = fields.get("VERSION_ID", "").strip('"')
+    pretty = fields.get("PRETTY_NAME", "").strip('"')
+    for pattern, name in OS_MAP:
+        if re.match(pattern, ident):
+            return name(version), pretty
+    return "", pretty
+
+
+def compilers():
+    """{tag: module} for the compiler tags this machine has a module for."""
+    out = {}
+    for tag, names in COMPILER_MODULES:
+        for name in names:
+            mods = spider(name)
+            if tag == "gcc14":
+                mods = [m for m in mods if m.split("/", 1)[-1].startswith("14.")]
+            if mods:
+                out[tag] = mods[-1]
+                break
+    return out
+
+
+def mpis():
+    """[(module, family, overlay, launcher)] supported; [modules] that are not."""
+    ok = [(spider(m)[-1], fam, ov, la) for m, fam, ov, la in MPI_MODULES if spider(m)]
+    other = [spider(m)[-1] for m in UNSUPPORTED_MPI if spider(m)]
+    return ok, other
+
+
+def module_root_var(module, pattern):
+    """The variable `module show` sets to the install prefix, or ''.
+
+    The bare name first: in a hierarchical Lmod the newest version may sit
+    under a compiler that is not loaded, while the default one is visible."""
+    text = lmod("show", module.split("/")[0]) or lmod("show", module)
+    for name in re.findall(r'setenv\("([A-Za-z_][A-Za-z0-9_]*)"', text):
+        if re.search(pattern, name):
+            return name
+    return ""
+
+
+def mkl():
+    """(which module, libmkl_rt path) -- ('', '') when there is no MKL module.
+
+    The bare name first, as for the MPI root: the default module is the one
+    a job's environment can load.  The path, not the newest version spider
+    lists, is what the description must name."""
+    for name in ("mkl", "intel-oneapi-mkl"):
+        mods = spider(name)
+        if not mods:
+            continue
+        for module, label in ((name, "the default %s module" % name),
+                              (mods[-1], "the %s module" % mods[-1])):
+            m = re.search(r'setenv\("MKLROOT","([^"]+)"', lmod("show", module))
+            if not m:
+                continue
+            for sub in ("lib", "lib/intel64"):
+                path = os.path.join(m.group(1), sub, "libmkl_rt.so.2")
+                if os.path.isfile(path):
+                    return label, path
+        return "the %s module" % mods[-1], ""
+    return "", ""
+
+
+def runtime():
+    for name in ("apptainer", "singularity"):
+        if spider(name) or shutil.which(name):
+            return name, (spider(name) or [name])[-1]
+    return "", ""
+
+
+#-------------------------------------------------------------------------------
+# The draft
+#-------------------------------------------------------------------------------
+
+def draft(site, cluster, scheduler, select_attr):
+    lines = []
+    w = lines.append
+    sched = scheduler or detect_scheduler()
+    osn, pretty = os_name()
+    comps = compilers()
+    ok_mpi, other_mpi = mpis()
+    mkl_mod, mkl_path = mkl()
+    rt, rt_mod = runtime()
+
+    w("# %s -- a cluster of the %s site.  DRAFTED by hpcrun/clusterinit; every" % (cluster, site))
+    w("# line marked TODO is something the machine could not answer from a login")
+    w("# node.  Work through sites/README.md, \"Adding a cluster\", then run")
+    w("#     hpcrun/sitegen %s --write     and     hpcrun/validate <experiment>" % cluster)
+    w("schema: 1")
+    w("site: %s" % site)
+    w("cluster: %s" % cluster)
+    w("description: \"TODO: what this machine is, for whoever reads a result in a year\"")
+    w("# Delete once a job has run here and its results look right.")
+    w("verified: false")
+    w("")
+    w("scheduler:")
+    if sched:
+        w("  kind: %s" % sched)
+        w("  submit: %s" % ("qsub" if sched == "pbspro" else "sbatch"))
+    else:
+        w("  # TODO: kind (pbspro or slurm) and submit -- neither was on PATH")
+    if sched == "slurm":
+        w("  # NOTE: the runner's Slurm job template is not written yet (plan phase")
+        w("  # 4.6); validate and the description work, submit does not.")
+    w("  # queue: TODO      # the default queue or partition jobs go to")
+    w("  # walltime_max: \"12:00:00\"   # TODO: the queue's limit, so validate can refuse longer")
+    w("")
+
+    # Node types.
+    if sched == "pbspro":
+        types = pbs_node_types(select_attr)
+        w("# Node types, from pbsnodes (%d type(s); most numerous first):" % len(types))
+        for sel, ncpus, ngpus, n, queues in types[:12]:
+            w("#   %4d nodes  ncpus=%-4d ngpus=%-2d %-26s queues: %s"
+              % (n, ncpus, ngpus, sel or "(no selector)", ",".join(queues) or "-"))
+        w("# Keep the type(s) you will run on.  ncpus is what PBS hands out; the")
+        w("# hardware geometry comes from the probe job:")
+        w("#     hpcrun/clusterinit probe-job %s/%s --select <selector>" % (site, cluster))
+        cpu = [t for t in types if not t[2]] or types
+        if cpu:
+            sel, ncpus = cpu[0][0], cpu[0][1]
+            w("node:")
+            w("  # TODO: cores, smt, sockets, smt_stride, cores_per_l3, cores_per_numa,")
+            w("  # target_arch -- paste the node: block the probe job prints.")
+            w("  ncpus: %d" % ncpus)
+            if sel:
+                w("  select: %s" % sel)
+            w("  topology: probe")
+    elif sched == "slurm":
+        types = slurm_node_types()
+        w("# Node types, from sinfo (partition, CPUs, sockets x cores x threads):")
+        for part, cpus, s, c, t, n in types[:12]:
+            w("#   %4d nodes  %-16s cpus=%-4d %dx%dx%d" % (n, part, cpus, s, c, t))
+        if types:
+            part, cpus, s, c, t, n = types[0]
+            w("node:")
+            w("  # From sinfo for partition %s.  Confirm with the probe job, which also" % part)
+            w("  # measures the caches and NUMA domains sinfo does not report:")
+            w("  #     hpcrun/clusterinit probe-job %s/%s --select %s" % (site, cluster, part))
+            w("  cores: %d" % (s * c))
+            w("  smt: %d" % t)
+            w("  sockets: %d" % s)
+            if cpus != s * c * t:
+                w("  ncpus: %d" % cpus)
+            w("  # TODO: smt_stride, cores_per_l3, cores_per_numa, target_arch")
+            w("  topology: probe")
+    else:
+        w("node:   # TODO: no scheduler found to ask; run the probe job by hand")
+    w("")
+
+    w("# The images: one OS close to the host's, the compilers there are host")
+    w("# modules for, the MPI families the host can put its own MPI in for.")
+    w("# Host OS: %s" % (pretty or "unknown"))
+    w("images:")
+    w("  os: %s" % osn if osn else "  # os: TODO   # no base-image OS matches this distro")
+    w("  compilers: [%s]" % ", ".join(sorted(comps)) if comps else "  compilers: []   # TODO")
+    w("  mpi: [%s]" % ", ".join(sorted({f for _, f, _, _ in ok_mpi}))
+      if ok_mpi else "  mpi: []   # TODO: no MPI this runner can use from the host")
+    w("  apps: [hpcg]")
+    w("  # target: TODO     # the microarchitecture to build app images for, and")
+    w("  # march: {default: TODO}   # each compiler's spelling of it; or leave both")
+    w("  #                           # out for the base images' own flags")
+    w("")
+
+    w("modules:")
+    w("  # TODO: the module commands every job runs first, in order -- whatever")
+    w("  # makes `module load` work in a batch job on this machine.")
+    w("  bootstrap:")
+    w("    - module load %s" % (rt_mod or "TODO-container-runtime"))
+    if comps:
+        w("  # From Lmod.  Pin a version where the image's compiler must be matched.")
+        w("  compiler_map:")
+        for tag in sorted(comps):
+            w("    %s: %s" % (tag, comps[tag]))
+    if ok_mpi:
+        w("  mpi_map:")
+        for mod, fam, _, _ in ok_mpi:
+            w("    %s: %s" % (fam, "\"\"" if mod.startswith("cray-mpich") else mod.split("/")[0]))
+    w("")
+
+    w("container:")
+    w("  runtime: %s" % (rt or "TODO     # apptainer or singularity: neither found"))
+    w("  # binds: [TODO]    # the shared filesystems a job reads and writes")
+    w("")
+
+    w("mpi:")
+    if not ok_mpi:
+        w("  # TODO: no host MPI with a recipe here.")
+    for mod, fam, overlay, launcher in ok_mpi:
+        w("  %s:" % fam)
+        w("    launcher: %s" % launcher)
+        w("    overlay: %s" % overlay)
+        if overlay == "host-openmpi":
+            var = module_root_var(mod, r"(ROOT|PREFIX|HOME).*OPENMPI|OPENMPI.*(ROOT|PREFIX|HOME)|MPI_(ROOT|HOME)")
+            if var:
+                w("    root: '${%s}'    # set by the %s module" % (var, mod.split("/")[0]))
+            else:
+                w("    # root: '${TODO}'   # TODO: the variable `module show openmpi` sets")
+                w("    #                   # to its install prefix")
+    for mod in other_mpi:
+        w("  # %s is here, and has no recipe yet.  Intel MPI is MPICH-ABI compatible," % mod)
+        w("  # so an mpich image could use it through a new overlay -- plan phase 4.6.")
+    w("")
+
+    if mkl_mod and mkl_path:
+        w("# The site's oneMKL, for experiments that name `host_library: mkl`.")
+        w("host_libraries:")
+        w("  mkl:")
+        w("    description: \"oneMKL from %s, single-threaded\"" % mkl_mod)
+        w("    preload: [%s]" % mkl_path)
+        w("    env: {MKL_THREADING_LAYER: SEQUENTIAL}")
+    elif mkl_mod:
+        w("# TODO: %s exists; declare it as a host library once its libmkl_rt is" % mkl_mod)
+        w("# found (`module show` it for MKLROOT):")
+        w("# host_libraries:")
+        w("#   mkl: {preload: [<MKLROOT>/lib/libmkl_rt.so.2], env: {MKL_THREADING_LAYER: SEQUENTIAL}}")
+    return "\n".join(lines) + "\n"
+
+
+def site_skeleton(site):
+    return """# %s -- the site: what every cluster of it shares.  Drafted by
+# hpcrun/clusterinit with nothing in it but defaults; move values here from a
+# cluster file once two clusters state them identically.
+schema: 1
+site: %s
+paths:
+  scratch: ${SCRATCH}    # TODO: the variable the login environment sets, if any
+""" % (site, site)
+
+
+#-------------------------------------------------------------------------------
+# The probe job
+#-------------------------------------------------------------------------------
+
+PROBE_BODY = r'''
+# Measures one node and prints a node: block to paste into %(yaml)s.
+set -u
+. "%(lib)s/probe_topology.sh" || exit 1
+. "%(lib)s/check_arch.sh"     || exit 1
+out="%(dir)s/probe-$(hostname -s).json"
+probe_topology "${out}" || exit 1
+echo "== $(hostname -s): $(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"')"
+lscpu | grep -E 'Model name|Socket|Core|Thread|NUMA node\(s\)|L3'
+flags="$(grep -m1 '^flags' /proc/cpuinfo)"
+level="$(_arch_level_name "$(_arch_level_x86 "${flags}")")"
+j () { sed -n "s/.*\"$1\": *\([0-9]*\).*/\1/p" "${out}" | head -1; }
+cores=$(j cores_per_node) smt=$(j smt) sockets=$(j sockets)
+echo
+echo "# Paste into %(yaml)s, from %(sched_note)s, $(date +%%F):"
+echo "node:"
+echo "  cores: ${cores}"
+echo "  smt: ${smt}"
+echo "  sockets: ${sockets}"
+echo "  smt_stride: $(j smt_stride)"
+echo "  cores_per_l3: $(j cores_per_l3)"
+echo "  cores_per_numa: $(j cores_per_numa)"
+echo "  target_arch: ${level}"
+echo "  # and keep the ncpus and select the draft has"
+'''
+
+
+def probe_job(site, cluster, select, account, queue, scheduler, outdir=None):
+    sched = scheduler or detect_scheduler()
+    ydir = outdir or os.path.join(SITES_DIR, site, cluster)
+    os.path.isdir(ydir) or os.makedirs(ydir)
+    lib = os.path.join(HERE, "lib")
+    yaml = os.path.join(SITES_DIR, site, cluster + ".yaml")
+    if sched == "pbspro":
+        head = ["#!/bin/bash", "#PBS -N probe_%s" % cluster, "#PBS -j oe",
+                "#PBS -l walltime=00:05:00",
+                "#PBS -l select=1:ncpus=1%s" % ((":" + select) if select else ""),
+                "#PBS -o %s/probe.log" % ydir]
+        if account:
+            head.insert(2, "#PBS -A %s" % account)
+        if queue:
+            head.insert(2, "#PBS -q %s" % queue)
+        path, note = os.path.join(ydir, "probe.pbs"), "a PBS job (select %s)" % (select or "any")
+    elif sched == "slurm":
+        head = ["#!/bin/bash", "#SBATCH -J probe_%s" % cluster, "#SBATCH -N 1",
+                "#SBATCH -n 1", "#SBATCH -t 00:05:00",
+                "#SBATCH -o %s/probe.log" % ydir]
+        if select:
+            head.append("#SBATCH -p %s" % select)
+        if account:
+            head.append("#SBATCH -A %s" % account)
+        path, note = os.path.join(ydir, "probe.slurm"), "a Slurm job (partition %s)" % (select or "default")
+    else:
+        raise SystemExit("no scheduler found; pass --scheduler")
+    text = "\n".join(head) + "\n" + PROBE_BODY % {
+        "lib": lib, "dir": ydir, "yaml": yaml, "sched_note": note}
+    open(path, "w").write(text)
+    os.chmod(path, 0o755)
+    return path, sched
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("command", choices=("draft", "probe-job"))
+    ap.add_argument("target", metavar="SITE/CLUSTER")
+    ap.add_argument("--scheduler", choices=("pbspro", "slurm"))
+    ap.add_argument("--select-attr")
+    ap.add_argument("--select")
+    ap.add_argument("--account")
+    ap.add_argument("--queue")
+    ap.add_argument("--stdout", action="store_true")
+    ap.add_argument("--dir", help="probe-job: where the script and its output go "
+                                  "(default: sites/<site>/<cluster>/)")
+    args = ap.parse_args()
+
+    if not re.match(r"^[a-z][a-z0-9_-]*/[a-z][a-z0-9_-]*$", args.target):
+        ap.error("give SITE/CLUSTER, lower case, e.g. tacc/stampede3")
+    site, cluster = args.target.split("/")
+
+    if args.command == "probe-job":
+        path, sched = probe_job(site, cluster, args.select, args.account,
+                                args.queue, args.scheduler,
+                                os.path.abspath(args.dir) if args.dir else None)
+        print("wrote %s" % path)
+        print("submit it with:  %s %s" % ("qsub" if sched == "pbspro" else "sbatch", path))
+        print("then read %s for the node: block" % os.path.join(os.path.dirname(path), "probe.log"))
+        return 0
+
+    text = draft(site, cluster, args.scheduler, args.select_attr)
+    if args.stdout:
+        sys.stdout.write(text)
+        return 0
+    yaml = os.path.join(SITES_DIR, site, cluster + ".yaml")
+    if os.path.exists(yaml):
+        print("%s exists; not overwriting it (use --stdout to compare)" % yaml, file=sys.stderr)
+        return 1
+    os.path.isdir(os.path.dirname(yaml)) or os.makedirs(os.path.dirname(yaml))
+    open(yaml, "w").write(text)
+    print("wrote %s" % yaml)
+    site_yaml = os.path.join(SITES_DIR, site + ".yaml")
+    if not os.path.exists(site_yaml):
+        open(site_yaml, "w").write(site_skeleton(site))
+        print("wrote %s (a skeleton: nothing shared yet)" % site_yaml)
+    print("next: work through the TODOs, then  hpcrun/sitegen %s --write" % cluster)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

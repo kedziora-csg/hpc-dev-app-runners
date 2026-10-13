@@ -1803,6 +1803,42 @@ phase 5. `Placement_derecho.pbs` and the legacy scripts hard-code their own
 `qsub -v HPCRUN_SUBCLUSTER=...` for the geometry, not for the request. Neither
 runs on a cluster that has sub-clusters today.
 
+### Adding a cluster, made routine (2026-10-13, branch `cluster-onboarding`)
+
+Done ahead of TACC, because describing Casper took three tries and the
+next machine should not.
+
+- **`cluster.sh` is wholly generated for a new cluster.** About ten
+  hand-written lines at the bottom of every profile found the clone, the
+  images, the results root and scratch. They were identical everywhere and
+  missing from a new cluster's file, so a fresh profile never found its
+  clone. Those lines now end the generated block. The results root comes
+  from the scheduler's own variable (`PBS_O_WORKDIR`, `SLURM_SUBMIT_DIR`),
+  and scratch from a new `paths:` block in the site file. For a cluster
+  with no `cluster.sh` yet, `sitegen` also writes the operator's four
+  overrides, all blank. A test generates a Slurm cluster in a throwaway
+  clone and sources its profile under `set -u`.
+- **`hpcrun/clusterinit draft <site>/<cluster>`** writes the cluster's
+  YAML from what a login node can answer:
+  - node types and grantable CPUs (`pbsnodes`/`sinfo`);
+  - the distro, mapped to a base-image OS;
+  - compiler and MPI modules, and the MPI's prefix variable (Lmod);
+  - MKL as a host library;
+  - the container runtime.
+
+  The draft is `verified: false`. Everything it cannot answer is a
+  commented-out TODO, so `sitegen` refuses the draft by name until a person
+  supplies it.
+- **`clusterinit probe-job`** writes a one-CPU job that prints a `node:`
+  block to paste, measured by `probe_topology`. Run on Casper, both node
+  types' blocks matched `casper.yaml` exactly. Casper's draft, with the
+  probe's block and two TODOs filled in (queue and binds), loads as a
+  complete description.
+- **[sites/README.md](sites/README.md)** is the guide: the five steps,
+  and what a Slurm site still needs from phase 4.6. That is the job
+  template, the node list, and a host-MPI overlay for Intel MPI or
+  MVAPICH.
+
 ### Phase 4.7, proposed: lay the repository out by concern
 
 The full proposal, with line references and the move list, is in
