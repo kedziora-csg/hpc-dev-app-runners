@@ -6,9 +6,9 @@
 # and the split is the point:
 #
 #   THE PART YOU EDIT is four paths -- where the checkout is, where the images
-#   are, where results go, which scratch.  Those are properties of the OPERATOR.
-#   They differ between two people on the same machine, and nothing can work
-#   them out for you.
+#   are, where results go, which scratch.  Those are properties of the OPERATOR,
+#   and all four are optional: left blank, each is worked out at the end of
+#   the generated block.
 #
 #   THE GENERATED PART, between the markers below, is everything that is a
 #   property of the MACHINE: the scheduler dialect, the module bootstrap, the
@@ -66,8 +66,9 @@ HPCRUN_IMAGE_DIR="${HPCRUN_IMAGE_DIR:-}"
 #HPCRUN_RESULTS_ROOT=${SCRATCH}/hpcdev-bench
 HPCRUN_RESULTS_ROOT="${HPCRUN_RESULTS_ROOT:-}"
 
-# Big, fast, purgeable space, for apps that stage large input trees.
-HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-${SCRATCH:-/glade/derecho/scratch/${USER}}}"
+# Big, fast, purgeable space, for apps that stage large input trees.  Blank
+# means the site's: paths.scratch in ../../ncar.yaml.
+HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-}"
 
 
 #-------------------------------------------------------------------------------
@@ -274,24 +275,23 @@ export HPCRUN_BIND_MAP HPCRUN_LIB_DIRS
 export HPCRUN_SUBCLUSTERS HPCRUN_SUBCLUSTER HPCRUN_SUBCLUSTER_VERIFIED
 export HPCRUN_HOST_LIBRARIES
 export HPCRUN_WALLTIME_MAX HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_NCPUS HPCRUN_TARGET_ARCH HPCRUN_NODE_SELECT
-# <<< END GENERATED
 
-
-#-------------------------------------------------------------------------------
-# Defaults for anything left blank above.  Nothing here needs editing.
-#-------------------------------------------------------------------------------
+#-- paths the top of this file left blank ---------------------------------
+# sites/<site>/<cluster>/ is three levels below the repository root, where
+# hpcrun/ and sif/ are, so a profile inside a checkout finds both from its
+# own location.  A copy outside one (~/.config/hpcrun/cluster.sh) must set
+# HPCRUN_ROOT at the top instead.
 _CLUSTER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# sites/<site>/<cluster>/ is three levels below the repository root, which is
-# where hpcrun/ and sif/ are.  A generated job script names runner.sh outright,
-# so this is for the hand-qsub path, which has only the profile to go on.
-if [ -z "${HPCRUN_ROOT}" ] && [ -x "${_CLUSTER_HERE}/../../../hpcrun/runner.sh" ]; then
+if [ -z "${HPCRUN_ROOT:-}" ] && [ -x "${_CLUSTER_HERE}/../../../hpcrun/runner.sh" ]; then
     HPCRUN_ROOT="$(cd "${_CLUSTER_HERE}/../../../hpcrun" && pwd)"
 fi
-
-if [ -z "${HPCRUN_IMAGE_DIR}" ] && [ -d "${HPCRUN_ROOT}/../sif" ]; then
+if [ -z "${HPCRUN_IMAGE_DIR:-}" ] && [ -d "${HPCRUN_ROOT:-}/../sif" ]; then
     HPCRUN_IMAGE_DIR="$(cd "${HPCRUN_ROOT}/../sif" && pwd)"
 fi
+# Results go where the job was submitted from, unless the top says otherwise.
 : "${HPCRUN_RESULTS_ROOT:=${PBS_O_WORKDIR:-$(pwd)}}"
-
+# Scratch: paths.scratch, then paths.scratch_fallback.
+[ -n "${HPCRUN_SCRATCH:-}" ] || HPCRUN_SCRATCH="${SCRATCH:-}"
+[ -n "${HPCRUN_SCRATCH:-}" ] || HPCRUN_SCRATCH="/glade/derecho/scratch/${USER:-}"
 export HPCRUN_ROOT HPCRUN_IMAGE_DIR HPCRUN_RESULTS_ROOT HPCRUN_SCRATCH
+# <<< END GENERATED

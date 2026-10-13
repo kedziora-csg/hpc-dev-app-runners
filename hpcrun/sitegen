@@ -137,8 +137,10 @@ def write_one(name):
     if os.path.isfile(path):
         text = io.open(path, encoding="utf-8").read()
     else:
+        # A new cluster: the operator's half is written once, all blank, so
+        # the file works as generated.  Never rewritten after this.
         os.path.isdir(os.path.dirname(path)) or os.makedirs(os.path.dirname(path))
-        text = ""
+        text = sitefile.operator_header(sf)
     new = sitefile.splice(text, block)
     if new == text:
         print("%s already current" % os.path.relpath(path, SITES_DIR))

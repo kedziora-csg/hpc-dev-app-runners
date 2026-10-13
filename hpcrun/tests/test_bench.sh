@@ -272,6 +272,40 @@ sys.path.insert(0, ".")
 from benchlib import sitefile
 print(" ".join(sitefile.image_sets(sitefile.load("derecho"))["derecho-hpcg"]))')"
 
+# A NEW cluster is one YAML file and `sitegen --write`: the profile it writes
+# must work as it stands, with no hand-copied lines from another cluster.  In
+# a throwaway clone -- hpcrun/ and sites/ side by side -- with a slurm cluster,
+# so the scheduler-specific default is exercised too.
+mkdir -p "${TMP}/clone"
+cp -r "${HERE}" "${TMP}/clone/hpcrun"
+mkdir -p "${TMP}/clone/sites/acme" "${TMP}/clone/sif"
+printf 'schema: 1\nsite: acme\npaths: {scratch: "${ACME_SCRATCH}", scratch_fallback: /scratch/fallback}\n' \
+    > "${TMP}/clone/sites/acme.yaml"
+cat > "${TMP}/clone/sites/acme/newbox.yaml" <<'NEWBOX'
+schema: 1
+site: acme
+cluster: newbox
+verified: false
+scheduler: {kind: slurm, submit: sbatch, queue: normal}
+modules:
+  bootstrap: [module load apptainer]
+  mpi_map: {openmpi: openmpi}
+node: {cores: 56, smt: 1}
+container: {runtime: apptainer, binds: [/scratch]}
+mpi:
+  openmpi: {launcher: openmpi, overlay: host-openmpi, root: "${OMPI_ROOT}"}
+NEWBOX
+( cd "${TMP}/clone/hpcrun" && ./sitegen newbox --write >/dev/null 2>&1 && ./sitegen --check >/dev/null 2>&1 )
+want "sitegen writes a new cluster's whole profile, and it checks clean" 0 "$?"
+newprof="$(cd /tmp && env -i PATH="${PATH}" HOME="${HOME}" SLURM_SUBMIT_DIR=/submitted bash -c 'set -u
+    . "$1" && echo "${HPCRUN_CLUSTER} ${HPCRUN_ROOT} ${HPCRUN_IMAGE_DIR} ${HPCRUN_RESULTS_ROOT} ${HPCRUN_SCRATCH}"' \
+    _ "${TMP}/clone/sites/acme/newbox/cluster.sh" 2>&1)"
+want "the new profile finds its clone, its images, slurm's submit dir and the fallback scratch" \
+    "newbox ${TMP}/clone/hpcrun ${TMP}/clone/sif /submitted /scratch/fallback" "${newprof}"
+grep -q '^HPCRUN_ROOT="${HPCRUN_ROOT:-}"$' "${TMP}/clone/sites/acme/newbox/cluster.sh" \
+    && ok "the new profile has the operator's overrides at the top, blank" \
+    || bad "the new profile has no operator section"
+
 # Rules the schema cannot state, plus the generator's own refusal to quote a
 # value it cannot safely write.  Each case is a file that is individually
 # well-formed and still describes a machine no job could run on.
