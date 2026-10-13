@@ -24,6 +24,23 @@
       "default": true,
       "description": "False means nothing here has been confirmed by a job that actually ran. hpcrun/validate says so out loud rather than letting an untested description pass for a measured one."
     },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where things go on this machine, as defaults an operator may override in the top of cluster.sh or from the environment. Usually stated once, in the site file. ${NAME} is expanded when the profile is sourced, and an unset NAME reads as empty.",
+      "properties": {
+        "scratch": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_./${}+-]*$",
+          "description": "Big, fast, purgeable space, for apps that stage large input trees -- HPCRUN_SCRATCH. Typically the variable the site's login environment sets, ${SCRATCH}."
+        },
+        "scratch_fallback": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_./${}+-]*$",
+          "description": "Used when scratch expands to nothing, as it can in a batch job whose shell never read the login environment."
+        }
+      }
+    },
     "scheduler": {
       "type": "object",
       "additionalProperties": false,

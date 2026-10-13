@@ -818,8 +818,97 @@ def render(sf, source_rel=None):
     present = [name for name, value in optional if value is not None]
     if present:
         out.append("export " + " ".join(present))
+    out += _paths_lines(sf)
     out.append(END)
     return "\n".join(out) + "\n"
+
+
+# Where each scheduler says a job was submitted from: the default results root.
+SUBMIT_DIR_VAR = {"pbspro": "PBS_O_WORKDIR", "slurm": "SLURM_SUBMIT_DIR"}
+
+
+def _expanding(text, where):
+    """Text for a DOUBLE-quoted assignment, expanded when the profile is sourced.
+
+    _safe has already allowed nothing but ${NAME} to carry a dollar, so there
+    is no command substitution to fear; each ${NAME} becomes ${NAME:-} so an
+    unset variable reads as empty under `set -u` rather than ending the job.
+    """
+    return VAR_REF.sub(lambda m: m.group(0)[:-1] + ":-}", _safe(text, where))
+
+
+def _paths_lines(sf):
+    """The defaults for whatever the operator left blank at the top of the file.
+
+    Generated, not hand-written, because nothing in it is a property of the
+    operator: every cluster.sh used to carry the same ten lines below the
+    block, which a new cluster's file -- written by sitegen alone -- lacked.
+    """
+    d = sf.data
+    kind = d["scheduler"]["kind"]
+    paths = d.get("paths") or {}
+    out = ["",
+           "#-- paths the top of this file left blank " + "-" * 33,
+           "# sites/<site>/<cluster>/ is three levels below the repository root, where",
+           "# hpcrun/ and sif/ are, so a profile inside a checkout finds both from its",
+           "# own location.  A copy outside one (~/.config/hpcrun/cluster.sh) must set",
+           "# HPCRUN_ROOT at the top instead.",
+           "_CLUSTER_HERE=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"",
+           "if [ -z \"${HPCRUN_ROOT:-}\" ] && [ -x \"${_CLUSTER_HERE}/../../../hpcrun/runner.sh\" ]; then",
+           "    HPCRUN_ROOT=\"$(cd \"${_CLUSTER_HERE}/../../../hpcrun\" && pwd)\"",
+           "fi",
+           "if [ -z \"${HPCRUN_IMAGE_DIR:-}\" ] && [ -d \"${HPCRUN_ROOT:-}/../sif\" ]; then",
+           "    HPCRUN_IMAGE_DIR=\"$(cd \"${HPCRUN_ROOT}/../sif\" && pwd)\"",
+           "fi",
+           "# Results go where the job was submitted from, unless the top says otherwise.",
+           ": \"${HPCRUN_RESULTS_ROOT:=${%s:-$(pwd)}}\""
+           % SUBMIT_DIR_VAR.get(kind, "PWD")]
+    if paths.get("scratch") or paths.get("scratch_fallback"):
+        out.append("# Scratch: paths.scratch, then paths.scratch_fallback.")
+        for key in ("scratch", "scratch_fallback"):
+            if paths.get(key):
+                out.append("[ -n \"${HPCRUN_SCRATCH:-}\" ] || HPCRUN_SCRATCH=\"%s\""
+                           % _expanding(paths[key], "paths." + key))
+    out.append("export HPCRUN_ROOT HPCRUN_IMAGE_DIR HPCRUN_RESULTS_ROOT HPCRUN_SCRATCH")
+    return out
+
+
+def operator_header(sf):
+    """The hand-edited top of a NEW cluster.sh: the operator's overrides, all
+    blank, so the file works as written.  sitegen writes it once, when the file
+    does not exist yet, and never touches it again."""
+    c, site = sf.name, sf.site
+    return """#!/bin/bash
+#===============================================================================
+# sites/%(site)s/%(c)s/cluster.sh -- what a job needs to know about %(c)s.
+#
+# Sourced by every job, before anything else.  Two halves:
+#
+#   THE TOP is yours: four optional paths -- the checkout, the images, where
+#   results go, which scratch.  Blank, each is worked out (see the end of the
+#   generated block).  Set one only when the default is wrong for you.
+#
+#   THE GENERATED BLOCK, between the markers, is the machine: written by
+#   hpcrun/sitegen from ../../%(site)s.yaml and ../%(c)s.yaml.  Edit the YAML,
+#   not the block; hpcrun/sitegen --check fails while it is stale.
+#
+# Any setting also honours a value already in the environment, so a one-off
+# `HPCRUN_QUEUE=debug hpcrun/submit ...` wins over this file.
+#===============================================================================
+
+# The runner: your clone's hpcrun/.  Blank works inside the checkout.
+HPCRUN_ROOT="${HPCRUN_ROOT:-}"
+
+# Where the .sif images live.  Blank means the clone's sif/.
+HPCRUN_IMAGE_DIR="${HPCRUN_IMAGE_DIR:-}"
+
+# Where results directories are created.  Blank means where you submit from.
+HPCRUN_RESULTS_ROOT="${HPCRUN_RESULTS_ROOT:-}"
+
+# Big, fast, purgeable space.  Blank means the site's (paths.scratch).
+HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-}"
+
+""" % {"c": c, "site": site}
 
 
 #-------------------------------------------------------------------------------

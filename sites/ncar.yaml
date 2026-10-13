@@ -46,6 +46,13 @@ scheduler:
   kind: pbspro
   submit: qsub
 
+# Where things go.  Defaults only: an operator overrides them at the top of
+# cluster.sh, or from the environment.  SCRATCH is set by NCAR's login
+# environment; a batch shell may not have read it, hence the fallback.
+paths:
+  scratch: ${SCRATCH}
+  scratch_fallback: /glade/derecho/scratch/${USER}
+
 modules:
   # The NCAR environment, and the container runtime every cluster here uses.
   # Order is the content: `module reset` after loading ncarenv is not redundant,

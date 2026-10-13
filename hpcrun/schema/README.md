@@ -203,6 +203,7 @@ What one cluster provides, stated once and split across two files. sites/<site>.
 | [`modules`](#clustermodules) | object |  | no other keys | The module environment, which is the one thing every job here must do identically and the thing that was copied into five PBS scripts before this file existed. |
 | [`mpi`](#clustermpi) | object |  | no other keys | One entry per container MPI family this site can host. A family absent here is one this machine cannot run, which the runner reports as such rather than attempting and failing inside the container. |
 | [`node`](#clusternode) | object |  | no other keys | What one compute node has. FALLBACKS, not measurements: the job probes lscpu and topology.json carries its answer. These are what can be known before there is a node to ask, which is the only moment an illegal ranks x threads is still cheap to reject. |
+| [`paths`](#clusterpaths) | object |  | no other keys | Where things go on this machine, as defaults an operator may override in the top of cluster.sh or from the environment. Usually stated once, in the site file. ${NAME} is expanded when the profile is sourced, and an unset NAME reads as empty. |
 | [`scheduler`](#clusterscheduler) | object |  | no other keys | Which batch system, and how a job reaches it. |
 | `schema` | `1` |  |  | Format version of this file. Bumped only for a change that an older hpcrun/sitegen would misread. |
 | `site` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | The site this belongs to. In a site file it names the file itself; in a cluster file it names the parent, and is what sitegen merges with. |
@@ -356,6 +357,15 @@ What one compute node has. FALLBACKS, not measurements: the job probes lscpu and
 | `sockets` | integer |  | at least 1 | Populated sockets per node. Used to derive cores per socket, which is the granularity a rank should not straddle. |
 | `target_arch` | string |  | matches `/^[a-z0-9][a-z0-9._-]*$/` | The instruction set this hardware actually runs, in the spelling report_cpu_features prints. Checked against the app binary once at job start, which turns a SIGILL on every rank three hours into a queue into one line before the first cell. Deliberately a check and not an input: the image was built in CI long before this file was read, so a site can only refuse to measure an image, never change it. |
 | `topology` | `probe` \| `declared` |  | default `"probe"` | probe means lscpu on the compute node is the authority and the values above are only a last resort. declared means trust them, which is for a machine where lscpu is not available or not truthful. |
+
+#### `cluster.paths`
+
+Where things go on this machine, as defaults an operator may override in the top of cluster.sh or from the environment. Usually stated once, in the site file. ${NAME} is expanded when the profile is sourced, and an unset NAME reads as empty.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `scratch` | string |  | matches `/^[A-Za-z0-9_./${}+-]*$/` | Big, fast, purgeable space, for apps that stage large input trees -- HPCRUN_SCRATCH. Typically the variable the site's login environment sets, ${SCRATCH}. |
+| `scratch_fallback` | string |  | matches `/^[A-Za-z0-9_./${}+-]*$/` | Used when scratch expands to nothing, as it can in a batch job whose shell never read the login environment. |
 
 #### `cluster.scheduler`
 

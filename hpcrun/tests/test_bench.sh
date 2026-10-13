@@ -272,6 +272,90 @@ sys.path.insert(0, ".")
 from benchlib import sitefile
 print(" ".join(sitefile.image_sets(sitefile.load("derecho"))["derecho-hpcg"]))')"
 
+# A NEW cluster is one YAML file and `sitegen --write`: the profile it writes
+# must work as it stands, with no hand-copied lines from another cluster.  In
+# a throwaway clone -- hpcrun/ and sites/ side by side -- with a slurm cluster,
+# so the scheduler-specific default is exercised too.
+mkdir -p "${TMP}/clone"
+cp -r "${HERE}" "${TMP}/clone/hpcrun"
+mkdir -p "${TMP}/clone/sites/acme" "${TMP}/clone/sif"
+printf 'schema: 1\nsite: acme\npaths: {scratch: "${ACME_SCRATCH}", scratch_fallback: /scratch/fallback}\n' \
+    > "${TMP}/clone/sites/acme.yaml"
+cat > "${TMP}/clone/sites/acme/newbox.yaml" <<'NEWBOX'
+schema: 1
+site: acme
+cluster: newbox
+verified: false
+scheduler: {kind: slurm, submit: sbatch, queue: normal}
+modules:
+  bootstrap: [module load apptainer]
+  mpi_map: {openmpi: openmpi}
+node: {cores: 56, smt: 1}
+container: {runtime: apptainer, binds: [/scratch]}
+mpi:
+  openmpi: {launcher: openmpi, overlay: host-openmpi, root: "${OMPI_ROOT}"}
+NEWBOX
+( cd "${TMP}/clone/hpcrun" && ./sitegen newbox --write >/dev/null 2>&1 && ./sitegen --check >/dev/null 2>&1 )
+want "sitegen writes a new cluster's whole profile, and it checks clean" 0 "$?"
+newprof="$(cd /tmp && env -i PATH="${PATH}" HOME="${HOME}" SLURM_SUBMIT_DIR=/submitted bash -c 'set -u
+    . "$1" && echo "${HPCRUN_CLUSTER} ${HPCRUN_ROOT} ${HPCRUN_IMAGE_DIR} ${HPCRUN_RESULTS_ROOT} ${HPCRUN_SCRATCH}"' \
+    _ "${TMP}/clone/sites/acme/newbox/cluster.sh" 2>&1)"
+want "the new profile finds its clone, its images, slurm's submit dir and the fallback scratch" \
+    "newbox ${TMP}/clone/hpcrun ${TMP}/clone/sif /submitted /scratch/fallback" "${newprof}"
+grep -q '^HPCRUN_ROOT="${HPCRUN_ROOT:-}"$' "${TMP}/clone/sites/acme/newbox/cluster.sh" \
+    && ok "the new profile has the operator's overrides at the top, blank" \
+    || bad "the new profile has no operator section"
+
+# clusterinit: the parts that read the machine, against canned answers, and a
+# draft that a YAML reader accepts and sitegen refuses BY NAME until its TODOs
+# are done -- a draft that loaded with placeholder values in it would be a
+# description nobody had checked.
+ci_out="$(python3 - <<'PY'
+import importlib.machinery, importlib.util, json, os, tempfile, sys
+loader = importlib.machinery.SourceFileLoader("ci", "clusterinit")
+spec = importlib.util.spec_from_loader("ci", loader)
+ci = importlib.util.module_from_spec(spec); loader.exec_module(ci)
+nodes = {"nodes": {}}
+for i in range(5):
+    nodes["nodes"]["a%d" % i] = {"resources_available": {"cpu_type": "genoa", "ncpus": 62, "Qlist": "system,htc"}}
+for i in range(2):
+    nodes["nodes"]["g%d" % i] = {"resources_available": {"cpu_type": "milan", "ncpus": 128, "ngpus": 4, "Qlist": "nvgpu"}}
+print(ci.pbs_node_types(None, json.dumps(nodes)))
+print(ci.slurm_node_types("normal*|112|2:56:1\nnormal*|112|2:56:1\nskx|96|2:24:2\n"))
+d = tempfile.mkdtemp()
+for ident, ver, want in (("opensuse-leap", "15.6", "leap"), ("rocky", "9.4", "almalinux9"),
+                         ("ubuntu", "24.04", "noble"), ("arch", "1", "")):
+    open(os.path.join(d, "os"), "w").write('ID="%s"\nVERSION_ID="%s"\n' % (ident, ver))
+    print(ci.os_name(os.path.join(d, "os"))[0] == want)
+PY
+)"
+want "clusterinit groups PBS nodes by type, most numerous first" \
+    "[('cpu_type=genoa', 62, 0, 5, ['htc']), ('cpu_type=milan', 128, 4, 2, ['nvgpu'])]" \
+    "$(printf '%s\n' "${ci_out}" | sed -n 1p)"
+want "clusterinit reads Slurm's partitions and sockets x cores x threads" \
+    "[('normal', 112, 2, 56, 1, 2), ('skx', 96, 2, 24, 2, 1)]" \
+    "$(printf '%s\n' "${ci_out}" | sed -n 2p)"
+want "clusterinit maps a distro to a base-image OS, or to nothing" "True True True True" \
+    "$(printf '%s\n' "${ci_out}" | sed -n '3,6p' | tr '\n' ' ' | sed 's/ $//')"
+./clusterinit draft testsite/drafted --stdout > "${TMP}/drafted.yaml" 2>/dev/null
+python3 -c 'import sys; sys.path.insert(0, ".")
+from benchlib import yamlish; d = yamlish.load(sys.argv[1]); assert d["cluster"] == "drafted" and d["verified"] is False' \
+    "${TMP}/drafted.yaml" 2>/dev/null \
+    && ok "a draft parses, and says it is unverified" || bad "clusterinit's draft does not parse" "$(head -20 "${TMP}/drafted.yaml")"
+mkdir -p "${TMP}/dsites/sites/testsite"
+printf 'schema: 1\nsite: testsite\n' > "${TMP}/dsites/sites/testsite.yaml"
+cp "${TMP}/drafted.yaml" "${TMP}/dsites/sites/testsite/drafted.yaml"
+dout="$(python3 -c 'import sys; sys.path.insert(0, ".")
+from benchlib import BenchError, sitefile
+try:
+    sitefile.load(sys.argv[1]); print("loaded")
+except BenchError as e:
+    print("refused: " + " | ".join(e.detail))' "${TMP}/dsites/sites/testsite/drafted.yaml" 2>&1)"
+case "${dout}" in
+    refused:*queue*) ok "sitegen refuses an unfinished draft, naming what is missing" ;;
+    *) bad "an unfinished draft was not refused by name" "${dout}" ;;
+esac
+
 # Rules the schema cannot state, plus the generator's own refusal to quote a
 # value it cannot safely write.  Each case is a file that is individually
 # well-formed and still describes a machine no job could run on.
