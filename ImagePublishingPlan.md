@@ -340,6 +340,73 @@ is what comes next.
 6. **This repository's own licence:** a separate decision, best taken once the
    factory's Creative Commons files have left it.
 
+### Progress, as of 2026-10-19
+
+**Decisions taken.**
+- **Registry:** GHCR under NCAR. The workflows already default to
+  `ghcr.io/<owner>/hpcdev`, so in the NCAR repository that is
+  `ghcr.io/ncar/hpcdev-<arch>`.
+- **Outside contributors:** their workflows need approval before they run.
+- **Licence:** **CC BY-SA 4.0 for now**, as the original is. Apache 2.0
+  later, on benkirk's written agreement. If it is given by email rather than
+  as a pull request approval, the change is committed directly with the
+  email quoted in the commit message.
+- **A copy, not a move.** `benkirk/demo_github_actions` is left exactly as
+  it is. The factory in this fork stays until step 5.
+
+**Done.**
+- **Step 1.** `NCAR/hpc-dev-container-factory`'s `main` is this fork's
+  `main` run through `git filter-repo`: 243 commits, back to March 2025,
+  authorship intact. It keeps:
+  - `containers/{devenv,test,publish}/`, and `containers/refactor/` for its
+    history;
+  - `scripts/` and `.github/actions/`;
+  - the three GHCR workflows (`build-hpc-dev-image-ghcr`,
+    `matrix-build-images-ghcr`, `dial-an-image-ghcr`);
+  - `LICENSE.md`, `README.md`, `CLAUDE.md`, `DockerfileDoc.md`,
+    `.gitignore` and `.cspell.json`.
+
+  One commit on top says in the README where the copy comes from and that
+  it stays CC BY-SA. A second, by the operator, pins the Actions versions
+  and adds Dependabot, whose first pull request (#1, `actions/checkout`
+  5.1 -> 7.0.1) is open.
+- **Actions.** NCAR's organisation had disabled them for the repository. On
+  request, its administrators enabled them (2026-10-19).
+
+**In progress -- branches in the NCAR repository, pull requests to open.**
+1. **`ghcr-lowercase`** (`60040d1`). The first `dial-an-image-ghcr`
+   dispatch failed:
+   `invalid tag "ghcr.io/NCAR/hpcdev-x86_64-cache:...": repository name must be lowercase`.
+   `github.repository_owner` keeps the owner's case, and the build workflow
+   derives every tag from it. Fix: lower-case the repository once, where
+   every tag is derived. **Merge first.** Nothing builds in the NCAR
+   repository without it.
+2. **`final-stage-no-chown`** (`54c9edd`, on top of the above). `plainuser`
+   owns `/container` itself, `config_env.sh` and `logs/`, not the whole
+   tree. Nothing runs as `plainuser` (the image stays root), and it has
+   passwordless sudo, so the recursive `chown` bought nothing and doubled
+   every image. **Check:** dispatch
+   `dial-an-image-ghcr -f os=leap -f compiler=os-gcc -f mpi=openmpi -f conda=false`
+   from `main` (after 1) and from this branch, then compare the published
+   image's final layer. It should drop from roughly a quarter of the image
+   to a few MB.
+
+**Next, in order.**
+- The other §4 changes, one pull request each, each checked with one
+  `dial-an-image-ghcr` dispatch:
+  - conda optional, off for cluster images;
+  - a `DYNAMIC_ARCH` OpenBLAS;
+  - FFTW's SIMD codelets;
+  - `report_cpu_features` reporting functions.
+- Make the `hpcdev-x86_64` package public after its first publish (step 2).
+- Publish leap x {oneapi, gcc14, nvhpc} x {mpich, openmpi}, then steps 3-5
+  as above.
+
+The working clone used for those branches is on GLADE, at
+`/glade/derecho/scratch/kedziora/tmp/claude-50600/.../scratchpad/factory-dryrun`.
+Any clone of `NCAR/hpc-dev-container-factory` will do; the branches are
+pushed there.
+
 This repository is then `apps/`, `sif/`, `hpcrun/` and `sites/`, one app-image
 workflow, and a `CLAUDE.md` about the runner. It depends on the factory only
 through the base contract in §4, and it publishes only app images.
