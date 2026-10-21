@@ -134,7 +134,7 @@ out from where that file itself lives.
 
 ```bash
 export HPCRUN_ROOT=<checkout>/hpcrun          # once, in ~/.bashrc
-qsub -A <PROJECT> -v HPCRUN_ROOT,APP=hpcg,container_img=<checkout>/sif/leap-oneapi-mpich-hpcg.sif \
+qsub -A <PROJECT> -v HPCRUN_ROOT,APP=hpcg,container_img=<checkout>/sif/leap-oneapi-mpich-hpcg-znver3.sif \
     <checkout>/sites/ncar/derecho/App_benchmarker_derecho.pbs
 ```
 
@@ -245,7 +245,7 @@ does not exist or miss one that does; `test_bench.sh` fails if it is stale.
 ```bash
 ./submit derecho-hpcg --dry-run                # write job.pbs/env/json, submit nothing
 ./submit derecho-hpcg --nodes 4 --walltime 01:00:00
-./submit derecho-hpcg --images "leap-oneapi-mpich-hpcg.sif"
+./submit derecho-hpcg --images "leap-oneapi-mpich-hpcg-znver3.sif"
 ./submit derecho-hpcg --account <PROJECT> --profile production   # just the winner
 ```
 

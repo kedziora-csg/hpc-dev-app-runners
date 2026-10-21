@@ -30,7 +30,7 @@ images:
   # of "the six", which sif/Makefile builds under the same name.
   set: derecho-hpcg
   # or list the images to sweep, e.g. to run only some of the six:
-  # list: [leap-oneapi-mpich-hpcg.sif, leap-gcc14-mpich-hpcg.sif]
+  # list: [leap-oneapi-mpich-hpcg-znver3.sif, leap-gcc14-mpich-hpcg-znver3.sif]
 
 
 apps:
@@ -76,4 +76,4 @@ profiles:
   production:
     placement: ccd
     omp: percore
-    images: [leap-oneapi-mpich-hpcg.sif]
+    images: [leap-oneapi-mpich-hpcg-znver3.sif]
