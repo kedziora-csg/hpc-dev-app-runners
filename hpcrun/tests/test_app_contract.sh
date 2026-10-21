@@ -108,8 +108,14 @@ else
 fi
 
 # A smoke-scale cell must be seconds, not a minute -- this is what keeps CI cheap.
-HPCRUN_SCALE=smoke app_export_geometry "${run}" ccd 2 32 16 8
+# Set for the prepare call, not as a prefix to app_export_geometry: what a
+# function exports from a prefix assignment outlives the call in bash 3.2 and
+# not in bash 5.3, so a prefix would leave app_prepare a different scale on each.
+scale_was="${HPCRUN_SCALE}"
+export HPCRUN_SCALE=smoke
+app_export_geometry "${run}" ccd 2 32 16 8
 rm -f "${run}/hpcg.dat"; app_prepare "${run}" >/dev/null 2>&1
+export HPCRUN_SCALE="${scale_was}"
 want "hpcg: HPCRUN_SCALE=smoke shortens the run" "5" "$(sed -n 4p "${run}/hpcg.dat")"
 
 # extract against a real captured report
