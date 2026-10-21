@@ -1835,7 +1835,7 @@ next machine should not.
   types' blocks matched `casper.yaml` exactly. Casper's draft, with the
   probe's block and two TODOs filled in (queue and binds), loads as a
   complete description.
-- **[sites/README.md](sites/README.md)** is the guide: the five steps,
+- **[sites/README.md](../../sites/README.md)** is the guide: the five steps,
   and what a Slurm site still needs from phase 4.6. That is the job
   template, the node list, and a host-MPI overlay for Intel MPI or
   MVAPICH.

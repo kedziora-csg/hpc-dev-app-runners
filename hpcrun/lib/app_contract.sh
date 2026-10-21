@@ -19,7 +19,8 @@
 # a second application meant editing the runner, which does not scale and is the
 # whole reason there is a contract instead of another `case` arm.
 #
-# The test of this file is scripts/app.d/osu/: a second application, unlike the
+# The test of this file is OSU's contract (tests/fixtures/app.d/osu/, a copy of
+# what the base images carry): a second application, unlike the
 # first in every way that matters -- no input file, flags instead, results on
 # stdout instead of in a report -- added without a line changing here.
 #

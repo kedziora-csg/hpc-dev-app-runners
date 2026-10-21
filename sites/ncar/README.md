@@ -7,7 +7,7 @@ This document describes how this repository builds, deploys, and runs Apptainer 
 ## 1. How the Repository Deploys Apptainer Containers
 
 This repository employs a **hybrid building pattern**:
-1. **GitHub Actions (Cloud)**: Builds multi-layer Linux-based Docker images of the HPC developer software stacks, publishing them to a container registry (DockerHub or GitHub Container Registry - GHCR) under the name `hpcdev` or similar. No self-hosted runners or NCAR infrastructure are used during the Docker-building phase.
+1. **GitHub Actions (Cloud)**: The base images -- the HPC developer software stacks -- are built and published by [NCAR/hpc-dev-container-factory](https://github.com/NCAR/hpc-dev-container-factory) as `ghcr.io/ncar/hpcdev-x86_64`, portable and public. This repository's [app-image-builder-ghcr.yaml](../../.github/workflows/app-image-builder-ghcr.yaml) builds each cluster's apps on them, for the cluster's microarchitecture, and publishes them as `ghcr.io/kedziora-csg/hpcdev-apps-x86_64`. No self-hosted runners or NCAR infrastructure are used during the Docker-building phase.
 2. **NCAR Cluster (On-Platform SIF Construction)**: Once the Docker images are in the registry, operators or researchers log into Derecho/Casper to rebuild them as Apptainer Singularity Image Format (`.sif`) files. SIF builders can bind low-level system drivers and directories which can only be done directly on-platform.
 
 ### Key Deployment Components
@@ -36,28 +36,22 @@ All NCAR-specific deployment files are located under [sites/ncar/](./) — this 
 
 **No, you do not need to create or configure a self-hosted GitHub Actions runner.**
 
-* **Docker builds and pushing**: Handled fully by standard public GitHub-hosted runners (`ubuntu-latest` as defined in workflows such as [build-hpc-dev-image-ghcr.yaml](.github/workflows/build-hpc-dev-image-ghcr.yaml)).
+* **Docker builds and pushing**: Handled fully by standard public GitHub-hosted runners (`ubuntu-latest`), in the factory's workflows for base images and in [app-image-builder-ghcr.yaml](../../.github/workflows/app-image-builder-ghcr.yaml) for app images.
 * **Apptainer / SIF conversion**: Intended to be run directly on the Derecho/Casper platforms because compiling SIF files must leverage the platform's local scratch file system and can only pull images natively over NCAR internal systems. Operators or users run simple shells/Make commands to create SIF files on NCAR nodes.
 
 ---
 
 ## 3. How to Deploy and Rebuild Images on Derecho / Casper
 
-**Coming from the old layout** (everything under `containers/deploy/`, before
-phase 4.7a)?  After `git pull`, once:
+**Coming from `demo_github_actions`?**  This repository is its runner half,
+with the history kept.  Clone it fresh (Step 3.1) and, once:
 
-* move your images: `mv containers/deploy/ncar-hpc/libexec/*.sif sif/`, or set
-  `HPCRUN_IMAGE_DIR` to wherever you keep them.  Git does not move ignored files,
-  so they are still in the old directory; the `.def` files need not move, `make`
-  regenerates them.
-* if you copied a profile to `~/.config/hpcdev/`, delete it and use
-  `HPCRUN_ROOT` instead (Step 4.2a).  The old directory is no longer searched.
-* every `BENCH_` variable is now `HPCRUN_`: `BENCH_IMAGE_DIR` is
-  `HPCRUN_IMAGE_DIR`, `BENCH_SITE_CONF` is `HPCRUN_SITE_CONF`, `BENCH_APP_DIR`
-  is `HPCRUN_APP_DIR`, and so on.  Set them by their new names wherever you set
-  them by hand -- in `~/.bashrc`, or on a `qsub -v` line.  Images built before
-  the rename keep working: the runner still hands their hooks the old names.
-* type `hpcrun/` where you typed `containers/deploy/bench/`.
+* move your images: `mv <old clone>/sif/*.sif sif/`, or set `HPCRUN_IMAGE_DIR`
+  to wherever you keep them.  Images built from the old registries
+  (`kedziora-csg/hpcdev-derecho-x86_64`, `kedziora-csg/hpcdev-apps-x86_64`) keep
+  working, but `make check-images` reports them stale against the NCAR
+  registries, and `make <set>` replaces them.
+* if you set `HPCRUN_ROOT` to the old clone's `hpcrun/`, point it at this one.
 
 Follow these steps to deploy and build the `.sif` images on NCAR clusters:
 
@@ -65,8 +59,8 @@ Follow these steps to deploy and build the `.sif` images on NCAR clusters:
 Log into Derecho or Casper and clone this repository:
 ```bash
 ssh <username>@derecho.hpc.ucar.edu
-git clone https://github.com/ncar-cisl/demo_github_actions.git
-cd demo_github_actions
+git clone https://github.com/kedziora-csg/hpc-dev-app-runners.git
+cd hpc-dev-app-runners
 ```
 
 ### Step 3.2: Load System Modules
@@ -238,7 +232,7 @@ uses for autocomplete, and what makes an experiment or a contract something you
 can check without a cluster:
 
 ```bash
-./validate --app ../../../scripts/app.d/*/app.yaml
+./validate --app ../apps/*/app.d/app.yaml tests/fixtures/app.d/*/app.yaml
 ```
 
 Every key of both formats, with its type, its constraints and what it means, is
@@ -305,9 +299,9 @@ rank per core, one per L3, one per NUMA domain — which on Derecho is exactly
 
 The runner knows nothing about either app. What to write before the run, how to
 launch it, and how to read its output all come from `/container/app.d/<app>/` —
-see [`scripts/app.d/README.md`](../../../scripts/app.d/README.md). Adding a third
-application is a directory there and a line in its `build_<app>.sh`; it is not a
-change to the runner.
+see [`APP_CONTRACT.md`](../../APP_CONTRACT.md). Adding a third application is a
+directory under [`apps/`](../../apps/README.md); it is not a change to the
+runner.
 
 A bare executable also works, and gets you wall time and a placement verdict:
 

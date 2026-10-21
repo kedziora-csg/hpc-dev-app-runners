@@ -66,3 +66,14 @@ The captured files only need regenerating if `report_placement`'s output format
 changes. Re-run the relevant launch line from a `# launch` header inside the file
 itself, then copy the result back over the fixture, re-run
 `derived/make_derived.sh`, and re-run `../self_test.sh`.
+
+## The base images' app contract — `app.d/osu/`
+
+A copy of OSU's contract as the factory installs it at `/container/app.d/osu/`
+in every published base image (`scripts/app.d/osu/` in
+[NCAR/hpc-dev-container-factory](https://github.com/NCAR/hpc-dev-container-factory)).
+`../test_app_contract.sh` and `../test_bench.sh` run it beside the contracts in
+`apps/`. It is a copy on purpose: the contract is the interface, and the copy
+is what the tests hold the factory's images to. When the factory changes OSU's
+contract, copy the new files here and let the tests say whether the runner
+still reads them.

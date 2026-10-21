@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/kedziora-csg/demo_github_actions/hpcrun/schema/site.json",
+  "$id": "https://github.com/kedziora-csg/hpc-dev-app-runners/hpcrun/schema/cluster.json",
   "title": "Cluster description",
   "description": "What one cluster provides, stated once and split across two files. sites/<site>.yaml holds what every cluster of that site has in common; sites/<site>/<cluster>.yaml holds what makes this cluster itself. Both are checked against THIS schema -- a site file is a partial cluster description -- and hpcrun/sitegen merges them before generating anything, so the flat block a job sources is unchanged by the split. Merge rules: a scalar takes the cluster's value, a list takes the site's entries then the cluster's, a map merges key by key with the cluster winning. The rules that decide whether a MERGED description is complete are in benchlib/sitefile.py, not here, because neither file alone can satisfy them.",
   "type": "object",

@@ -1,0 +1,29 @@
+name: Off-cluster Tests
+
+#-------------------------------------------------------------------------------
+# make -C hpcrun test: the placement checker against its frozen reports, the
+# app contracts against a stub launcher, and the schemas, experiments and
+# cluster descriptions against each other, including that every generated
+# cluster.sh and images.mk is current.  No container, no scheduler, no image.
+#-------------------------------------------------------------------------------
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: make -C hpcrun test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Off-cluster tests
+        run: make -C hpcrun test
+

@@ -220,7 +220,9 @@ mkdir -p "${TMP}/arch"
 cat > "${TMP}/arch/rcf" <<'RCF'
 #!/bin/bash
 echo "  ISA flags: avx2 bmi1 bmi2 fma sse4_1 sse4_2"
-echo "  AVX-512 (zmm) used by binary: YES  (requires an AVX-512 host)"
+echo "  AVX-512 (zmm) used by binary: ${FAKE_USED:-YES}"
+[ -n "${FAKE_REQ:-}" ] && echo "  AVX-512 required: ${FAKE_REQ}"
+exit 0
 RCF
 cat > "${TMP}/arch/objdump" <<'OBJ'
 #!/bin/bash
@@ -244,6 +246,13 @@ arch () { # arch <FAKE_ZMM> -- "rc verdict"
 want "AVX-512 only in Intel's dispatched SVML is not a requirement" "0 ok" "$(arch svml)"
 want "AVX-512 in the binary's own code still refuses the job" "1 over-built" "$(arch own)"
 want "AVX-512 it cannot place still refuses the job" "1 over-built" "$(arch none)"
+# The factory's report_cpu_features says itself whether the binary needs it
+# (CONTRACT.md); objdump is then not asked, so "none" would refuse if it were.
+want "a report that says required: no is trusted" "0 ok" \
+     "$(FAKE_REQ='no  (only in run-time-dispatched routines, never run without AVX-512)' arch none)"
+want "a report that says required: YES refuses, with no zmm named" "1 over-built" \
+     "$(FAKE_USED='no  (but AVX-512 instructions on narrower registers, below)' \
+        FAKE_REQ='YES  (in 3 of its own functions; requires an AVX-512 host)' arch svml)"
 
 echo
 echo "  ${pass} passed, ${fail} failed"

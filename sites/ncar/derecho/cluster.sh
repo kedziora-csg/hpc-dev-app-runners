@@ -53,7 +53,7 @@
 # (~/.config/hpcrun/cluster.sh), because there is then nothing to work it out
 # from.
 HPCRUN_ROOT="${HPCRUN_ROOT:-}"
-#HPCRUN_ROOT=/glade/derecho/scratch/${USER}/demo_github_actions/hpcrun
+#HPCRUN_ROOT=/glade/derecho/scratch/${USER}/hpc-dev-app-runners/hpcrun
 
 # Where the .sif images live.  Separate from the harness because images are big
 # and often kept on a different filesystem from the code.  Blank means the

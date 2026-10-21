@@ -3,7 +3,8 @@
 # The second experiment, and the check that the config format is not
 # HPCG-shaped: OSU has no input file, takes its flags from a launch hook, and
 # reports on stdout.  Nothing here says any of that -- it is all in the app's
-# own contract, scripts/app.d/osu/.
+# own contract, which every base image carries at /container/app.d/osu/ (a copy
+# is in ../tests/fixtures/app.d/osu/).
 #
 #     ../validate derecho-osu
 #     ../submit   derecho-osu --account <PROJECT>

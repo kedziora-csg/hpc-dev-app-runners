@@ -2,8 +2,10 @@
 #-------------------------------------------------------------------------------
 # test_app_contract.sh -- run every contract in the repository against a stub
 # launcher, with no cluster, no container and no MPI.  They live in two places:
-# scripts/app.d/ for what the base images carry (OSU), apps/<app>/app.d/ for
-# the apps this repository builds on top of them (HPCG).
+# apps/<app>/app.d/ for the apps this repository builds on the base images, and
+# tests/fixtures/app.d/ for a copy of what the base images carry (OSU, from
+# NCAR/hpc-dev-container-factory's scripts/app.d/osu/), which is what this
+# suite holds the factory's images to.
 #
 #     ./test_app_contract.sh
 #
@@ -26,7 +28,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "${TMP}"' EXIT
 
 # One directory of every contract, as /container/app.d/ would hold them.
 APPD="${TMP}/app.d"; mkdir -p "${APPD}"
-for d in "${ROOT}"/scripts/app.d/*/ "${ROOT}"/apps/*/app.d/; do
+for d in "${HERE}"/fixtures/app.d/*/ "${ROOT}"/apps/*/app.d/; do
     [ -f "${d}/app.yaml" ] || continue
     name="$(sed -n 's/^app:[[:space:]]*//p' "${d}/app.yaml" | head -1)"
     ln -s "$(cd "${d}" && pwd)" "${APPD}/${name}"
@@ -204,7 +206,8 @@ app_extract "${run}" "${TMP}/heffte.kv"
 has "heffte: extract reads the time per transform" "${TMP}/heffte.kv" "fft_time_s=0.0839"
 has "heffte: extract reads speed3d's GFlops"      "${TMP}/heffte.kv" "gflops=120.5"
 has "heffte: an error within tolerance is valid"  "${TMP}/heffte.kv" "valid=true"
-sed -i 's/^Max error:.*/Max error:    3.0e-9/' "${run}/app.out"
+sed 's/^Max error:.*/Max error:    3.0e-9/' "${run}/app.out" > "${run}/app.out.new" \
+    && mv "${run}/app.out.new" "${run}/app.out"
 app_extract "${run}" "${TMP}/heffte-bad.kv"
 has "heffte: an error past tolerance is invalid"  "${TMP}/heffte-bad.kv" "valid=false"
 

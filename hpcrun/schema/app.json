@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/kedziora-csg/demo_github_actions/hpcrun/schema/app.json",
+  "$id": "https://github.com/kedziora-csg/hpc-dev-app-runners/hpcrun/schema/app.json",
   "title": "Application contract",
   "description": "What an application must declare so the runner can drive it without knowing which one it is. Installed into the image at /container/app.d/<app>/app.yaml by build_<app>.sh, beside the prepare/launch/extract hooks. An app with no hooks at all is legal: an app.yaml with just app and binary gets you wall time and a placement verdict, which is the ten-minute entry point that makes the contract adoptable.",
 

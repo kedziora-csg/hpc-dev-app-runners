@@ -1,24 +1,17 @@
-# The registry the Deffiles bootstrap from.  Stated once here so the digest
-# pinning below and the `From:` lines in Deffile/Deffile.apps cannot drift apart.
+# The registries the .sif files are built from, stated once: every .def is made
+# from the one Deffile with one of these filled in.
 #
-# hpcdev-derecho, not hpcdev: these images target this machine's CPU
-# (-march=znver3) and are not the portable factory images.  Same tag names, a
-# different promise, so a different repository -- see derecho-images-ghcr.yaml.
-GHCR_BASE_REF := ghcr.io/kedziora-csg/hpcdev-derecho-x86_64
+# Base images come from NCAR/hpc-dev-container-factory, which promises what
+# CONTRACT.md in that repository says: portable images, one tag per OS,
+# compiler and MPI.  App images are this repository's, built on those by
+# .github/workflows/app-image-builder-ghcr.yaml for the target in each tag, and
+# published to the registry of the repository's owner.
+GHCR_BASE_REF := ghcr.io/ncar/hpcdev-x86_64
 GHCR_APPS_REF := ghcr.io/kedziora-csg/hpcdev-apps-x86_64
 
-openmpi_images := almalinux9-gcc-openmpi.sif \
-                  almalinux9-gcc14-openmpi.sif \
-                  almalinux9-aocc-openmpi.sif \
-                  almalinux9-nvhpc-openmpi.sif \
-                  almalinux9-oneapi-openmpi.sif
-
-mpich_images := $(subst openmpi,mpich,$(openmpi_images))
-mpich3_images := $(subst openmpi,mpich3,$(openmpi_images))
-cpu_images := $(openmpi_images) $(mpich_images) $(mpich3_images)
-cuda_images := $(subst .sif,-cuda.sif,$(cpu_images))
-all_images :=  $(cuda_images) $(cpu_images)
-all: $(all_images)
+# The default: every image of every cluster described here (prerequisites below,
+# once images.mk has defined them).
+all:
 
 # Each cluster's image sets: `make derecho`, `make derecho-hpcg`, `make casper`,
 # and so on, with the echo- rules an experiment's `images.set:` names.
@@ -34,8 +27,10 @@ include $(sort $(wildcard ../sites/*/*/images.mk))
 #          EXTRA_APP_IMAGES=leap-gcc14-mpich-heffte-znver3-pbase.sif
 app_images += $(EXTRA_APP_IMAGES)
 
+all: $(sort $(cluster_images))
+
 echo:
-	@echo "$(all_images)"
+	@echo "$(sort $(cluster_images))"
 
 # What is on disk, and what the registry says now.  The answer to "is my .sif
 # current?", which `make` alone cannot tell you once a .sif exists: the .sif rule
@@ -55,7 +50,7 @@ check-images:
 	    t="$${i%.sif}" ; \
 	    case " $(app_images) " in \
 	        *" $$i "*) ref="$(GHCR_APPS_REF)" ;; \
-	        *) case "$$t" in *-hpcg) ref="$(GHCR_APPS_REF)" ;; *) ref="$(GHCR_BASE_REF)" ;; esac ;; \
+	        *) ref="$(GHCR_BASE_REF)" ;; \
 	    esac ; \
 	    have="$$(apptainer inspect $$i 2>/dev/null \
 	             | sed -n 's/.*image.base.digest[": ]*\([a-z0-9:]*\).*/\1/p' | head -1)" ; \
@@ -96,7 +91,7 @@ pristine:
 .PHONY: FORCE
 FORCE:
 
-.PRECIOUS: %.def %-hpcg.def $(sort $(app_images:.sif=.def))
+.PRECIOUS: %.def $(sort $(app_images:.sif=.def))
 
 # repin <deffile> -- keep, replace, or decline to replace the generated .def.
 define repin
@@ -113,24 +108,16 @@ endef
 
 # App images, by the list each cluster's images.mk states -- not by suffix,
 # since a name ends in its target (leap-oneapi-mpich-hpcg-znver3).  A static
-# pattern rule, so it wins over the two below for exactly these names.
-$(sort $(app_images:.sif=.def)): %.def: Deffile.apps pin_image_digest.sh FORCE
-	@cp $< $@.tmp
-	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*/g' $@.tmp
+# pattern rule, so it wins over the base-image rule below for exactly these.
+$(sort $(app_images:.sif=.def)): %.def: Deffile pin_image_digest.sh FORCE
+	@sed -e 's|<PLACEHOLDER_IMG_REF>|$(GHCR_APPS_REF):$*-latest|g' \
+	     -e 's|<PLACEHOLDER_IMG_TAG>|$*|g' $< > $@.tmp
 	@./pin_image_digest.sh --pin $@.tmp $(GHCR_APPS_REF):$*-latest
 	@$(repin)
 
-# App images named before targets were part of the name, which the app
-# repository still holds under these tags.
-%-hpcg.def: Deffile.apps pin_image_digest.sh FORCE
-	@cp $< $@.tmp
-	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*-hpcg/g' $@.tmp
-	@./pin_image_digest.sh --pin $@.tmp $(GHCR_APPS_REF):$*-hpcg-latest
-	@$(repin)
-
 %.def: Deffile pin_image_digest.sh FORCE
-	@cp $< $@.tmp
-	@sed -i 's/<PLACEHOLDER_IMG_TAG>/$*/g' $@.tmp
+	@sed -e 's|<PLACEHOLDER_IMG_REF>|$(GHCR_BASE_REF):$*-latest|g' \
+	     -e 's|<PLACEHOLDER_IMG_TAG>|$*|g' $< > $@.tmp
 	@./pin_image_digest.sh --pin $@.tmp $(GHCR_BASE_REF):$*-latest
 	@$(repin)
 

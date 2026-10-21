@@ -1,9 +1,11 @@
-# This TEMPLATED singulatrity Definition file will
-# be used to construct specific instances based on a make rule,
-# see for example "PLACEHOLDER_IMG_NAME" in Makefile
+# The Apptainer definition template for every .sif sif/Makefile builds, base
+# and app images alike.  The Makefile fills in <PLACEHOLDER_IMG_REF> (the
+# registry reference, repository:tag) and <PLACEHOLDER_IMG_TAG> (the tag
+# without -latest), then pin_image_digest.sh replaces the From: tag with the
+# digest it resolves to.
 
 Bootstrap: docker
-From: ghcr.io/kedziora-csg/hpcdev-derecho-x86_64:<PLACEHOLDER_IMG_TAG>-latest
+From: <PLACEHOLDER_IMG_REF>
 %post
     cat <<'EOF' >> /container/config_env.sh
 export NVCC_PREPEND_FLAGS=${NVCC_PREPEND_FLAGS//all-major/native}
@@ -22,7 +24,7 @@ EOF
 # Comments must stay OUTSIDE this section: every non-empty line inside %labels
 # is parsed as `KEY VALUE`.
 %labels
-    org.opencontainers.image.base.name ghcr.io/kedziora-csg/hpcdev-derecho-x86_64:<PLACEHOLDER_IMG_TAG>-latest
+    org.opencontainers.image.base.name <PLACEHOLDER_IMG_REF>
     org.opencontainers.image.base.digest <PLACEHOLDER_BASE_DIGEST>
     hpcdev.image_tag <PLACEHOLDER_IMG_TAG>
 

@@ -1,0 +1,12 @@
+# Keeps the commit-SHA pins on third-party actions current: opens one grouped PR a
+# month that bumps each SHA and its trailing "# vX.Y.Z" comment together. Review the
+# upstream changes before merging -- the pin is only as safe as that review.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

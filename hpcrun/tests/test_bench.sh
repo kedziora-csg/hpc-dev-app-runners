@@ -73,7 +73,7 @@ echo
 
 #-- the two YAML readers agree, file by file -----------------------------------
 echo "yaml readers"
-for f in experiments/*.yaml ../sites/*.yaml ../sites/*/*.yaml ../scripts/app.d/*/app.yaml ../apps/*/app.d/app.yaml; do
+for f in experiments/*.yaml ../sites/*.yaml ../sites/*/*.yaml tests/fixtures/app.d/*/app.yaml ../apps/*/app.d/app.yaml; do
     python3 - "$f" <<'PY' && ok "$(basename "$(dirname "$f")")/$(basename "$f"): PyYAML == built-in reader" \
                           || bad "$(basename "$(dirname "$f")")/$(basename "$f"): the two readers disagree"
 import sys
@@ -99,9 +99,9 @@ for f in experiments/*.yaml; do
     else bad "$(basename "$f") does not validate (exit ${rc})" \
              "$(HPCRUN_SITE_CONF="$(conf_for "$f")" ./validate "$f" 2>&1 | tail -5)"; fi
 done
-./validate --app ../scripts/app.d/*/app.yaml ../apps/*/app.d/app.yaml >/dev/null 2>&1 \
+./validate --app tests/fixtures/app.d/*/app.yaml ../apps/*/app.d/app.yaml >/dev/null 2>&1 \
     && ok "every app.yaml satisfies hpcrun/schema/app.json" \
-    || bad "an app.yaml fails hpcrun/schema/app.json" "$(./validate --app ../scripts/app.d/*/app.yaml ../apps/*/app.d/app.yaml 2>&1)"
+    || bad "an app.yaml fails hpcrun/schema/app.json" "$(./validate --app tests/fixtures/app.d/*/app.yaml ../apps/*/app.d/app.yaml 2>&1)"
 
 #-- the reference is generated, so it cannot be stale or incomplete quietly -----
 echo
@@ -352,7 +352,7 @@ try:
 except BenchError as e:
     print("refused: " + " | ".join(e.detail))' "${TMP}/dsites/sites/testsite/drafted.yaml" 2>&1)"
 case "${dout}" in
-    refused:*queue*) ok "sitegen refuses an unfinished draft, naming what is missing" ;;
+    refused:*scheduler*) ok "sitegen refuses an unfinished draft, naming what is missing" ;;
     *) bad "an unfinished draft was not refused by name" "${dout}" ;;
 esac
 

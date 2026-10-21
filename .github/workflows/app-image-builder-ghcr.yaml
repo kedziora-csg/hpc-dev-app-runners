@@ -12,6 +12,11 @@ name: Build and Smoke-test App Images (GHCR)
 # `make <cluster>-<app>` in sif/ pulls are one list.  The inputs below can only
 # narrow it.
 #
+# ON WHAT: the portable base images of NCAR/hpc-dev-container-factory,
+# ghcr.io/ncar/hpcdev-<arch>:<os>-<compiler>-<mpi>-<YY.MM>.  An app relies on
+# nothing in them beyond that repository's CONTRACT.md, and the smoke job checks
+# the contract in every app image with the factory's own check.
+#
 # HOW an app is built is apps/Dockerfile with apps/<app>/ from this checkout --
 # not a recipe baked into the base image, so a fix to an app's build or its
 # extractor reaches the next app image without a base rebuild.
@@ -22,10 +27,7 @@ name: Build and Smoke-test App Images (GHCR)
 #
 # NAMES: <apps_repo>-<arch>:<os>-<compiler>-<mpi>-<app>-<target>-{latest,<version>}.
 # The target is in the tag, and so in every .sif name, because one tag must
-# mean one build (ImagePublishingPlan.md section 2).
-#
-# Replaced hpcg-smoketest-ghcr.yaml (deleted in phase 5), whose HPCG-only steps
-# this generalises.
+# mean one build (docs/plans/ImagePublishingPlan.md section 2).
 #-------------------------------------------------------------------------------
 
 on:
@@ -58,17 +60,19 @@ on:
         description: "Base image repository, without the -<arch> suffix"
         type: string
         required: false
-        default: "ghcr.io/kedziora-csg/hpcdev-derecho"
+        default: "ghcr.io/ncar/hpcdev"
+      # Blank = ghcr.io/<this repository's owner>/hpcdev-apps, resolved below:
+      # a workflow's token can push only to its own owner's registry.
       apps_repo:
-        description: "App image repository, without the -<arch> suffix"
+        description: "App image repository, without the -<arch> suffix (blank = ghcr.io/<owner>/hpcdev-apps)"
         type: string
         required: false
-        default: "ghcr.io/kedziora-csg/hpcdev-apps"
+        default: ""
       image_version:
-        description: "Dated tag suffix: the base image's to build on, and the app image's to publish"
+        description: "Dated tag suffix (YY.MM): the base image's to build on, and the app image's to publish"
         type: string
         required: true
-        default: "26.08"
+        default: "26.10"
       tag_suffix:
         description: "Appended to every app tag, for a build that must not take the regular one (e.g. pbase: the seam study's portable-base builds). Empty for normal builds."
         type: string
@@ -87,7 +91,7 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: App images for this cluster
         id: matrix
@@ -123,7 +127,7 @@ jobs:
       ARCH: x86_64
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Resolve names
         id: image
@@ -131,6 +135,7 @@ jobs:
         env:
           BASE_REPO: ${{ inputs.base_repo }}
           APPS_REPO: ${{ inputs.apps_repo }}
+          OWNER: ${{ github.repository_owner }}
           VERSION: ${{ inputs.image_version }}
           APP: ${{ matrix.app }}
           BASE_TAG: ${{ matrix.base_tag }}
@@ -138,7 +143,7 @@ jobs:
         run: |
           lower () { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
           base_repo="$(lower "${BASE_REPO}")-${ARCH}"
-          apps_repo="$(lower "${APPS_REPO}")-${ARCH}"
+          apps_repo="$(lower "${APPS_REPO:-ghcr.io/${OWNER}/hpcdev-apps}")-${ARCH}"
           app_yaml="apps/${APP}/app.d/app.yaml"
           [ -f "${app_yaml}" ] || { echo "no ${app_yaml}"; exit 1; }
           version="$(sed -n 's/^version:[[:space:]]*//p' "${app_yaml}" | tr -d '"' | head -1)"
@@ -152,20 +157,20 @@ jobs:
           mkdir -p smoke-logs
 
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker BuildX
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # The labels are what a .sif made from this image says about itself:
       # apptainer build carries them over, and hpcrun's launcher reads
       # hpcdev.compiler and hpcdev.mpi before it falls back to the file name.
       - name: Build and publish ${{ matrix.tag }}
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           push: true
           load: false
@@ -195,16 +200,26 @@ jobs:
             hpcdev.target=${{ matrix.target }}
             hpcdev.march=${{ matrix.march }}
 
-      # The command goes to the image's ENTRYPOINT as plain words, with no
+      # Commands go to the image's ENTRYPOINT as plain words, with no
       # `bash -lc` of our own.  The base images' entrypoint is
       #     bash --rcfile /container/config_env.sh --login -c '${*}' --
       # which joins its arguments and splits them again on whitespace, so a
       # quoted script inside `bash -lc '...'` is taken apart: its first word
-      # becomes the script and the rest become $0, $1, ...  That is how the
-      # first dispatch ran smoke.sh with no arguments, and how the old
-      # hpcg-smoketest step -- one multi-line `bash -lc '...'` -- only ever
-      # ran `set`.  The entrypoint already gives a login shell, so the words
-      # are all that is needed; none of them may contain a space.
+      # becomes the script and the rest become $0, $1, ...  The entrypoint
+      # already gives a login shell, so the words are all that is needed; none
+      # of them may contain a space.
+      #
+      # The factory's own check of its contract, run in the app image: what
+      # the base promised, still true after the app was added on top.
+      - name: Base contract in ${{ matrix.tag }}
+        env:
+          APP_IMAGE: ${{ steps.image.outputs.app_image }}
+          TAG: ${{ matrix.tag }}
+        run: |
+          docker run --rm "${APP_IMAGE}" \
+            /container/extras/check_base_contract.sh --published \
+            2>&1 | tee "smoke-logs/${TAG}.contract.log"
+
       - name: Smoke-test ${{ matrix.tag }} through its app contract
         env:
           APP_IMAGE: ${{ steps.image.outputs.app_image }}
@@ -221,7 +236,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: smoke-${{ matrix.tag }}
           path: smoke-logs/*.log

@@ -13,13 +13,19 @@ apps/
     app.d/          the app contract: app.yaml, and prepare/launch/extract hooks
 ```
 
-**Why the recipe is here and not in the base image.** The app layer used to run
-`/container/extras/build_hpcg.sh` out of the base image, so it built whichever
-recipe was current when the base was built: a fix to HPCG's extractor needed a
-base rebuild before it reached an app image. Now `apps/Dockerfile` copies
-`apps/<app>/` from its own build context. From the base it relies only on its
-contract: `/container/config_env.sh`, `/container/extras/build_common.cfg`, the
-compilers and the MPI wrappers.
+**The base images** are
+[NCAR/hpc-dev-container-factory](https://github.com/NCAR/hpc-dev-container-factory)'s,
+`ghcr.io/ncar/hpcdev-x86_64:<os>-<compiler>-<mpi>-<YY.MM>`. They are portable,
+and an app relies on nothing in them beyond what that repository's
+[CONTRACT.md](https://github.com/NCAR/hpc-dev-container-factory/blob/main/CONTRACT.md)
+promises: `/container/config_env.sh`, `/container/extras/build_common.cfg`
+(`INSTALL_ROOT`, `STAGE_DIR`), `MARCH_FLAGS`, the compilers and the MPI
+wrappers, and the libraries by their variables (`OPENBLAS_ROOT`, `FFTW_ROOT`,
+`HEFFTE_ROOT`, ...).
+
+**Why the recipe is here and not in the base image.** `apps/Dockerfile` copies
+`apps/<app>/` from its own build context, so a fix to an app's build or its
+extractor reaches the next app image without a base rebuild.
 
 **What gets built** is not written here. Each cluster's
 `sites/<site>/<cluster>.yaml` states in its `images:` block the OS, compilers,
@@ -57,8 +63,8 @@ apptainer exec --cleanenv --writable-tmpfs --bind "$(mktemp -d):/tmp" \
 ```
 
 The private `/tmp` is not optional: apptainer binds the host's `/tmp` by
-default, the build stages its sources there, and the base images'
-`docker-clean` -- which `apps/Dockerfile` runs after the build -- empties it.
+default, the build stages its sources there (`STAGE_DIR`), and `apps/Dockerfile`
+empties it after the build.
 
 and `smoke.sh` inside any image that carries the app:
 

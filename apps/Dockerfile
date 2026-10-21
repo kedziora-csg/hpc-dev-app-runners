@@ -5,12 +5,12 @@
 #         --build-arg BASE_IMAGE=<registry>/<repo>:<os>-<compiler>-<mpi>-latest .
 #
 # The build context is the REPOSITORY ROOT, and the app's recipe comes from
-# apps/${APP}/ in it -- build.sh and the contract in app.d/ beside it.  The
-# old app layer ran /container/extras/build_hpcg.sh out of the base image
-# instead, so it built whatever recipe was current when the BASE was built, and
-# a fix to an extractor needed a base rebuild before it reached an app image.
-# From the base this relies on its contract only: /container/config_env.sh,
-# /container/extras/build_common.cfg, the compilers and the MPI wrappers.
+# apps/${APP}/ in it -- build.sh and the contract in app.d/ beside it -- so a
+# fix to an app's build or its extractor needs no base rebuild.
+# From the base this relies on its contract only (CONTRACT.md in
+# NCAR/hpc-dev-container-factory): /container/config_env.sh,
+# /container/extras/build_common.cfg, MARCH_FLAGS, the compilers and the MPI
+# wrappers.
 #
 # Driven by .github/workflows/app-image-builder-ghcr.yaml, which also sets the
 # image's labels -- what app, which version, which base, which target -- so a
@@ -59,8 +59,7 @@ RUN test -x "/container/apps-src/${APP}/build.sh" \
     && test -f "/container/app.d/${APP}/app.yaml" \
         || { echo "apps/${APP}/build.sh installed no contract at /container/app.d/${APP}"; exit 1; } \
     && echo "# --> apps/${APP}/build.sh run on $(date) and included in image." >> /container/config_env.sh \
-    && rm -rf /container/apps-src \
-    && docker-clean
+    && rm -rf /container/apps-src /tmp/* /var/tmp/*
 
 # Local Variables:
 # mode: dockerfile

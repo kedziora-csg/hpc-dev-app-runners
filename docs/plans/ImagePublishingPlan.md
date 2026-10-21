@@ -407,6 +407,70 @@ The working clone used for those branches is on GLADE, at
 Any clone of `NCAR/hpc-dev-container-factory` will do; the branches are
 pushed there.
 
+### Progress, as of 2026-10-21
+
+**Step 2 done in the factory.** Pull requests #2 (the clusters' six-image
+workflow), #3 (the section 4 additions: `DYNAMIC_ARCH` OpenBLAS, FFTW's SIMD
+codelets, `report_cpu_features`' function-level report, `CONTRACT.md` and
+`check_base_contract.sh`) and #4 (the README) are merged. The six portable
+images, leap x {oneapi, gcc14, nvhpc} x {mpich, openmpi}, were published on
+2026-10-20 as `ghcr.io/ncar/hpcdev-x86_64:leap-<compiler>-<mpi>-{26.10,latest}`,
+and resolve anonymously from a login node.
+
+**Step 5 changed: the runner moves too, rather than the fork being emptied.**
+The runner half -- `apps/`, `sif/`, `hpcrun/`, `sites/`, the app workflow, and
+these plans -- was copied the same way as the factory: `git filter-repo` on a
+fresh clone of the fork's `main`, keeping every path those files ever had
+(`containers/deploy/`, `containers/apps/`, `scripts/app.d/`,
+`scripts/build_hpcg.sh`, the old HPCG workflow), 134 commits. It goes first
+to `kedziora-csg/hpc-dev-app-runners`, because NCAR's approval of Actions for a
+new repository takes days, and moves to `NCAR/hpc-dev-app-runners` once they
+are approved there. Proposed: the fork is then left as it is and
+archived, instead of having its factory deleted, since nothing in it is left
+to maintain.
+
+**Step 4's switch, in code, in the new repository:**
+- `sif/Makefile` names both registries once, `ghcr.io/ncar/hpcdev-x86_64` and,
+  while the repository is in `kedziora-csg`,
+  `ghcr.io/kedziora-csg/hpcdev-apps-x86_64`; one `sif/Deffile` replaces the
+  two, and the Makefile fills in the reference.
+- The app workflow builds on `ghcr.io/ncar/hpcdev` by default, publishes to
+  `ghcr.io/<owner>/hpcdev-apps`, runs the factory's
+  `check_base_contract.sh --published` in every app image, and pins its
+  actions by commit, as NCAR's Actions policy requires.
+- OSU's contract is copied to `hpcrun/tests/fixtures/app.d/osu/`, and the app
+  contract's description is `APP_CONTRACT.md`, owned here.
+- `check_arch.sh` reads the factory's `AVX-512 required:` line, and keeps its
+  own by-function check for older images.
+- `apps/Dockerfile` no longer calls `docker-clean`, which the contract does not
+  promise.
+
+**The app images while the repository is in `kedziora-csg`.** They go to the
+package the fork's app images are in, `ghcr.io/kedziora-csg/hpcdev-apps-x86_64`,
+under the same names. The new builds' dated tags end `-26.10`, so the fork's
+`-26.08` pins are untouched; each `-latest` moves to the build on the
+factory's base, which is the rebuild step 4 asks for. The package is linked to
+`demo_github_actions`, so it must first grant `hpc-dev-app-runners` write
+access (the package's settings, "Manage Actions access"), or the workflow's
+push is refused.
+
+**Moving to `NCAR/hpc-dev-app-runners` later.** A repository transfer keeps
+the history, issues and pull requests, and GitHub redirects the old address.
+A user's packages do not move with it. So, at the move:
+- `GHCR_APPS_REF` in `sif/Makefile` becomes `ghcr.io/ncar/hpcdev-apps-x86_64`
+  (the workflow's default follows the owner on its own);
+- the `$id` of the three schemas in `hpcrun/schema/`, the clone address in
+  `sites/ncar/README.md` and its registry name there, and the line about the
+  move in `README.md`;
+- one app-image dispatch per cluster, to publish under NCAR, made public after
+  the first publish;
+- the factory's README, which names `kedziora-csg/demo_github_actions` as the
+  runner's home.
+
+**Left of step 4:** phase 5b first (per-sub-cluster targets), then one
+app-image dispatch per cluster from the new repository and the acceptance
+runs.
+
 This repository is then `apps/`, `sif/`, `hpcrun/` and `sites/`, one app-image
 workflow, and a `CLAUDE.md` about the runner. It depends on the factory only
 through the base contract in §4, and it publishes only app images.

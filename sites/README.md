@@ -131,7 +131,7 @@ Then delete `verified: false`. Do the same for each sub-cluster's own
 `clusterinit` and `sitegen` handle Slurm. The draft takes geometry straight
 from `sinfo`, and the profile defaults its results root to
 `SLURM_SUBMIT_DIR`. Three things are not built yet, and all are phase 4.6 in
-[BenchmarkRunnerPlan.md](../BenchmarkRunnerPlan.md):
+[BenchmarkRunnerPlan.md](../docs/plans/BenchmarkRunnerPlan.md):
 
 - **The job template.** `hpcrun/templates/` has `job.pbspro.tmpl` only, and
   `jobfile` renders PBS's single `select=` chunk. Slurm needs

@@ -18,11 +18,17 @@ contract nobody can satisfy in ten minutes gets bypassed.
 
 ## Where these live
 
-Two places in the repository, one at run time. A contract for a tool every
-base image carries -- OSU -- is here, in `scripts/app.d/`, and is installed by
-the base image's `build_<app>.sh`. A contract for an app this repository builds
-on top of a base image -- HPCG -- is in `apps/<app>/app.d/`, beside the
-`apps/<app>/build.sh` that installs it (see [apps/README.md](../../apps/README.md)).
+Two repositories, one place at run time. This repository defines the contract
+-- [`hpcrun/lib/app_contract.sh`](hpcrun/lib/app_contract.sh) drives it and
+[`hpcrun/schema/app.json`](hpcrun/schema/app.json) checks `app.yaml` -- and
+implements it for the apps it builds on the base images: HPCG and the rest are
+in `apps/<app>/app.d/`, beside the `apps/<app>/build.sh` that installs them (see
+[apps/README.md](apps/README.md)). The base images implement it for the one tool
+every image carries, OSU: its contract is `scripts/app.d/osu/` in
+[NCAR/hpc-dev-container-factory](https://github.com/NCAR/hpc-dev-container-factory),
+installed by that repository's `build_osu-micro-benchmarks.sh`, and a copy in
+[`hpcrun/tests/fixtures/app.d/osu/`](hpcrun/tests/fixtures/app.d/osu/) is what
+this repository's tests hold it to.
 
 Either way it ends up at `/container/app.d/<app>/`. The
 `.sif` then fully describes what it can run, the extractor travels with the app

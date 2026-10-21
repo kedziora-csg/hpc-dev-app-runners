@@ -23,7 +23,12 @@
 #
 # report_cpu_features, which already ships in every image, reports the host's ISA
 # flags and, for a given executable, whether it uses AVX-512 (x86) or SVE
-# (aarch64) registers.  That is one class of over-building, not all of them: a
+# (aarch64).  The factory's images also say whether the binary REQUIRES it --
+# outside routines that dispatch at run time, and counting AVX-512 instructions
+# on narrower registers -- in an "AVX-512 required:" line whose wording its
+# CONTRACT.md fixes.  That line is used when present; an image without it gets
+# this file's own by-function check.  Either way it is one class of
+# over-building, not all of them: a
 # binary compiled -march=x86-64-v3 and run on a v2 host would use AVX2 without
 # ever touching a zmm register, and nothing here would catch it.
 #
@@ -139,14 +144,28 @@ arch_check () {
     grep -q 'AVX-512 (zmm) used by binary: YES' "${out}" && needs_wide="AVX-512"
     grep -q 'SVE (z-regs) used by binary: YES'  "${out}" && needs_wide="SVE"
 
-    # report_cpu_features answers "does any instruction name a zmm register",
-    # which a oneAPI binary answers yes for whenever it links a routine that
+    local required=""
+    if grep -qE '^ *(AVX-512|SVE) required: ' "${out}"; then
+        required="$(sed -n 's/^ *\([A-Z0-9-]*\) required: YES.*/\1/p' "${out}" | head -1)"
+        if [ -n "${needs_wide}" ] && [ -z "${required}" ]; then
+            case "${needs_wide}:${flags}" in
+                AVX-512:*avx512*|SVE:*sve*) ;;
+                *) echo "note      ${needs_wide} only in run-time-dispatched routines," \
+                        "never run on this host (report_cpu_features)" ;;
+            esac
+        fi
+        needs_wide="${required}"
+    fi
+
+    # An older report_cpu_features answers only "does any instruction name a
+    # zmm register", which a oneAPI binary answers yes for whenever it links a
+    # routine that
     # dispatches at run time: the seam study's oneapi build refused itself on
     # Derecho over one instruction in __svml_cos2_z0.  So when the host lacks
     # AVX-512, ask WHERE: AVX-512 confined to dispatched routines is not a
     # requirement, and everything else still is.
     local wide_fns="" own_fns="" fn
-    if [ "${needs_wide}" = "AVX-512" ]; then
+    if [ "${needs_wide}" = "AVX-512" ] && [ -z "${required}" ]; then
         case "${flags}" in
             *avx512*) ;;
             *)

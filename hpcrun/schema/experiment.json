@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/kedziora-csg/demo_github_actions/hpcrun/schema/experiment.json",
+  "$id": "https://github.com/kedziora-csg/hpc-dev-app-runners/hpcrun/schema/experiment.json",
   "title": "Benchmark experiment",
   "description": "What to sweep: which images, which apps, which rank/thread decompositions, and how the cross product is split into jobs. Host-side only -- hpcrun/submit expands this into a flat job.env per job, and the job itself never parses YAML.",
   "type": "object",
