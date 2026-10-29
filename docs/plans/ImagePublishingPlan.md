@@ -467,9 +467,20 @@ A user's packages do not move with it. So, at the move:
 - the factory's README, which names `kedziora-csg/demo_github_actions` as the
   runner's home.
 
-**Left of step 4:** one app-image dispatch per cluster from the new
-repository and the acceptance runs. Phase 5b (per-sub-cluster targets) is in
-place, 2026-10-29, so casper's dispatch builds `znver4` and `cascadelake`.
+**Step 4 is done**, 2026-10-29.
+- **Derecho.** Its app images were dispatched from this repository at
+  `176506f`, on the factory's base, and run on 2026-10-22
+  (`runs/znver3-2026-10-22/`): 30 jobs of `derecho-hpcg`, `-osu`, `-blas` and
+  `-simd`, every one with the architecture check `ok`. Phase 5b changes
+  nothing Derecho builds or runs, and its `validate` accepts those images.
+- **The one gap is the site's, not the images'.** The three Open MPI
+  `osu_alltoall` jobs hit their 20-minute walltime. Bare-metal runs
+  (`runs/osu-baremetal-2026-10-22/README.md`) show why: the site's
+  `openmpi/5.0.9` module sends MPI traffic over TCP without warning, in a
+  container or out of one. It is for the module's maintainers.
+- **Casper.** After phase 5b, one dispatch built `znver4` and `cascadelake`,
+  and `casper-hpcg` was accepted on both node types (`BenchmarkRunnerPlan.md`,
+  "Per-sub-cluster app targets").
 
 This repository is then `apps/`, `sif/`, `hpcrun/` and `sites/`, one app-image
 workflow, and a `CLAUDE.md` about the runner. It depends on the factory only
