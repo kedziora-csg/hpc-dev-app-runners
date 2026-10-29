@@ -38,13 +38,14 @@ contract lacks, the change belongs in the factory, with its contract and its
 
 - **A fact about a machine is stated once, in its description.** The image set,
   CPU target and each compiler's spelling of it live in the cluster's `images:`
-  block; `apps/matrix.py`, `sif/Makefile` (through `images.mk`) and `hpcrun/` all
+  block, and a sub-cluster's own target in `subclusters.<name>.images`; `apps/matrix.py`, `sif/Makefile` (through `images.mk`) and `hpcrun/` all
   read it. Edit the YAML, then `hpcrun/sitegen <cluster> --write`; never edit
   `cluster.sh`'s generated block or `images.mk` by hand (a test fails while they are stale).
 - **One tag means one build.** Base images are portable and carry no target. App
   images carry the target in the tag, named for the microarchitecture (`znver3`,
-  `cascadelake`), not the cluster; `sitegen --check` refuses two clusters that
-  spell one target differently.
+  `cascadelake`), not the cluster; `sitegen --check` refuses two clusters (or
+  node types) that spell one target differently. An image set keeps its cluster's
+  name and resolves to the node type's target; `validate` refuses another's.
 - **Tuning belongs to the app layer.** `APP_MARCH_FLAGS` from the cluster's
   `images.march`. nvhpc ignores `-march=`: its spelling is `-tp=` (`-tp=zen3`).
 - **The runner never learns an app's name.** Everything app-specific is in

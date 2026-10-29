@@ -48,6 +48,21 @@ builds exactly that list, and `make derecho-hpcg` in `sif/` pulls exactly that
 list. The target is in every app image's tag and `.sif` name --
 `leap-oneapi-mpich-hpcg-znver3` -- because one tag must mean one build.
 
+A cluster of several node types can give each its own target: an entry of
+`subclusters:` may carry `images: {target, march}`, which replaces the
+cluster's for that node type. Casper's do, so `apps/matrix.py casper` lists
+every app image twice, `-znver4` for its Genoa nodes and `-cascadelake` for its
+Cascade Lake ones, and one dispatch builds both. Only targets some node type
+uses are built.
+
+**The smoke test on a runner without the target's ISA.** A GitHub-hosted
+runner is often a Zen 3, with no AVX-512. When the app binary needs AVX-512 and
+the runner lacks it, `smoke.sh` resolves the contract and runs its prepare and
+launch hooks, then prints `run skipped: host lacks the target's ISA` and exits
+0 rather than dying with SIGILL; the workflow turns that line into a warning.
+The image's first real run is then its first cluster job, whose architecture
+check is the same test on the right CPU.
+
 **What an app image says about itself.** The workflow labels each image
 `hpcdev.app`, `hpcdev.app.version`, `hpcdev.app.yaml.sha256`, `hpcdev.os`,
 `hpcdev.compiler`, `hpcdev.mpi`, `hpcdev.target` and `hpcdev.march`. `apptainer

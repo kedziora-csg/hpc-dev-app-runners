@@ -115,11 +115,11 @@ class Cluster(object):
         out of step with it.  sif/Makefile builds the same sets by the same
         names, through the images.mk sitegen writes from that block.  Read from
         the clone this profile points at, so the host and the Makefile beside
-        it cannot disagree.
+        it cannot disagree.  An app set resolves to the images built for this
+        node type, under the cluster's name.
         """
         from . import sitefile
-        start = os.path.dirname(self.bench_root) if self.bench_root else None
-        sets = sitefile.image_sets(sitefile.load(self.name, start))
+        sets = sitefile.image_sets(self._description(), self.subcluster or None)
         if name not in sets:
             raise BenchError(
                 "cluster %s has no image set %r" % (self.name, name), EXIT_ERROR,
@@ -128,6 +128,17 @@ class Cluster(object):
                  "images.set names a set from the images: block of the",
                  "cluster's description; or list the .sif files with images.list"])
         return list(sets[name])
+
+    def image_target(self):
+        """The target this node type's app images are built for; "" for none."""
+        from . import sitefile
+        return sitefile.image_target(self._description(), self.subcluster or None)[0]
+
+    def _description(self):
+        """The cluster's YAML, from the clone this profile points at."""
+        from . import sitefile
+        start = os.path.dirname(self.bench_root) if self.bench_root else None
+        return sitefile.load(self.name, start)
 
 
 def _int(text):

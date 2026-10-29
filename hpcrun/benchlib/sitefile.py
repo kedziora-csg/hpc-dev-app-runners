@@ -392,6 +392,22 @@ def cross_checks(data):
         if family != "default" and family not in (images.get("compilers") or []):
             out.append("images.march.%s spells the target for a compiler the set "
                        "does not build" % family)
+    # A sub-cluster's own target replaces the cluster's for its node type, and
+    # only the target: what is built still comes from the cluster's images:.
+    own = sorted(name for name, entry in subclusters.items() if entry.get("images"))
+    if own and not images:
+        out.append(
+            "subclusters %s state an app target, but there is no images: block "
+            "saying what to build for it" % ", ".join(own))
+    for name in own:
+        for family in sorted(subclusters[name]["images"].get("march") or {}):
+            if family != "default" and family not in (images.get("compilers") or []):
+                out.append("subclusters.%s.images.march.%s spells the target for a "
+                           "compiler the set does not build" % (name, family))
+    if own and len(own) == len(subclusters) and images.get("target"):
+        out.append(
+            "images.target %s is replaced by every sub-cluster's own, so nothing "
+            "would be built for it; drop it, with its march" % images["target"])
     compiler_map = (data.get("modules") or {}).get("compiler_map") or {}
     for compiler in images.get("compilers") or []:
         if compiler not in compiler_map:
@@ -915,7 +931,43 @@ HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-}"
 # Image sets, and the images.mk that hands them to sif/Makefile
 #-------------------------------------------------------------------------------
 
-def image_sets(sf):
+def image_target(sf, subcluster=None):
+    """(target, march) the app images for one node type are built for.
+
+    A sub-cluster's own images: replaces the cluster's target and march; one
+    that states none, or no sub-cluster at all, takes the cluster's.  ("", {})
+    is a cluster whose app images are built at the base image's own flags.
+    """
+    own = ((sf.subclusters.get(subcluster) or {}).get("images")
+           if subcluster else None)
+    images = own or sf.data.get("images") or {}
+    return images.get("target", ""), images.get("march") or {}
+
+
+def built_targets(sf):
+    """[(target, march)] the cluster's app images are built for, each once.
+
+    Only the targets some node type uses: Casper's sub-clusters both state
+    their own, so nothing is built for a cluster-wide one.  The default
+    sub-cluster's first, then the others by name.
+    """
+    subs = sf.subclusters
+    if not subs:
+        return [image_target(sf)]
+    names = sorted(subs, key=lambda n: (n != sf.default_subcluster, n))
+    out = []
+    for name in names:
+        built = image_target(sf, name)
+        if built[0] not in [t for t, _ in out]:
+            out.append(built)
+    return out
+
+
+def _suffix(target):
+    return ("-" + target) if target else ""
+
+
+def image_sets(sf, subcluster=None):
     """{set name: [.sif, ...]}, in the order a sweep should run them.
 
     `<cluster>` is the base set, every compiler crossed with every MPI family;
@@ -924,6 +976,11 @@ def image_sets(sf):
     leap-oneapi-mpich-hpcg-znver3.sif.  MPI is the outer loop, so each family's
     images are adjacent -- which is how the Makefile listed Derecho's six before
     this was generated.
+
+    An app set keeps the cluster's name on every node type, and resolves to the
+    images built for the one `subcluster` names: casper-hpcg is the znver4
+    builds on htc-genoa and the cascadelake ones on htc-cascadelake.  With no
+    sub-cluster named it is every target's, which is what `make` builds.
     """
     images = sf.data.get("images")
     if not images:
@@ -931,10 +988,12 @@ def image_sets(sf):
     base = ["%s-%s-%s.sif" % (images["os"], compiler, family)
             for family in images["mpi"] for compiler in images["compilers"]]
     sets = {sf.name: base}
-    suffix = ("-" + images["target"]) if images.get("target") else ""
+    targets = ([image_target(sf, subcluster)] if subcluster
+               else built_targets(sf))
     for app in images.get("apps") or []:
-        sets["%s-%s" % (sf.name, app)] = [i[:-4] + "-" + app + suffix + ".sif"
-                                          for i in base]
+        sets["%s-%s" % (sf.name, app)] = [
+            i[:-4] + "-" + app + _suffix(target) + ".sif"
+            for target, _ in targets for i in base]
     return sets
 
 
@@ -943,39 +1002,42 @@ def app_builds(sf):
 
     The same crossing as image_sets, plus what the build needs and the set
     names do not carry -- the base image's tag, and the flags for this
-    compiler.  Read by apps/matrix.py, which is the workflow's only view of the
-    cluster descriptions.
+    compiler.  Every target a node type uses, each once, so one dispatch builds
+    both of Casper's.  Read by apps/matrix.py, which is the workflow's only
+    view of the cluster descriptions.
     """
     images = sf.data.get("images") or {}
-    march = images.get("march") or {}
     out = []
     for app in images.get("apps") or []:
-        for family in images["mpi"]:
-            for compiler in images["compilers"]:
-                base = "%s-%s-%s" % (images["os"], compiler, family)
-                tag = base + "-" + app + (("-" + images["target"])
-                                          if images.get("target") else "")
-                out.append({"os": images["os"], "compiler": compiler,
-                            "mpi": family, "app": app, "base_tag": base,
-                            "tag": tag, "target": images.get("target", ""),
-                            "march": march.get(compiler, march.get("default", ""))})
+        for target, march in built_targets(sf):
+            for family in images["mpi"]:
+                for compiler in images["compilers"]:
+                    base = "%s-%s-%s" % (images["os"], compiler, family)
+                    out.append({"os": images["os"], "compiler": compiler,
+                                "mpi": family, "app": app, "base_tag": base,
+                                "tag": base + "-" + app + _suffix(target),
+                                "target": target,
+                                "march": march.get(compiler,
+                                                   march.get("default", ""))})
     return out
 
 
 def target_conflicts(sfs):
-    """Targets two clusters spell differently -- one tag that would mean two
-    builds, which is the rule the target exists to keep."""
+    """Targets two clusters, or two node types, spell differently -- one tag
+    that would mean two builds, which is the rule the target exists to keep."""
     seen, out = {}, []
     for sf in sfs:
-        images = sf.data.get("images") or {}
-        if not images.get("target"):
-            continue
-        spelled = images.get("march") or {}
-        target = images["target"]
-        if target in seen and seen[target][1] != spelled:
-            out.append("target %s is spelled %r by %s and %r by %s"
-                       % (target, seen[target][1], seen[target][0], spelled, sf.name))
-        seen.setdefault(target, (sf.name, spelled))
+        where = ([(sf.name, image_target(sf))] if not sf.subclusters else
+                 [("%s/%s" % (sf.name, n), image_target(sf, n))
+                  for n in sorted(sf.subclusters)])
+        for name, (target, spelled) in where:
+            if not target:
+                continue
+            if target in seen and seen[target][1] != spelled:
+                out.append("target %s is spelled %r by %s and %r by %s"
+                           % (target, seen[target][1], seen[target][0], spelled,
+                              name))
+            seen.setdefault(target, (name, spelled))
     return out
 
 

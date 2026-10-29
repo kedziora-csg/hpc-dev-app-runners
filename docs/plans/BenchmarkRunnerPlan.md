@@ -1158,7 +1158,7 @@ Each phase is independently useful and independently revertible.
 | **4.6** | A second scheduler: Slurm, for TACC. Named the PBS assumptions and the Slurm shape; **implement when there is an account to test against** | The abstraction is half there already — per-scheduler templates, an `srun` arm in `mpi_launch_flags`, `scheduler.kind`. What is missing is three places that still assume PBS in code. Designing the rest from a manual is how the Casper node type came out wrong twice. |
 | **4.7** | Lay the repository out by concern: `bench/` to the root as `hpcrun/`, `sites/` beside it, the runner's libraries into `hpcrun/lib/`, the SIF build into `sif/`, `NCAR_HPC_ROOT` removed; then image sets and the host-MPI root read from the machine description. **Proposed; runs before the sub-cluster half of 4.5.** See below and `BenchRunnerPlanAddendum.md` | Sub-clusters should be written at the final paths, and TACC is the point at which a runner loading its libraries from `ncar-hpc/` through `NCAR_HPC_ROOT` stops being awkward and becomes false. |
 | **5** | `app-image-builder-ghcr.yaml` + generic `containers/apps/Dockerfile`; **delete `matrix-smoketest-applications.yaml`** after enumerating what it covered (§9); carry `app_march_flags` through as a per-app build-arg (§3) | CI now validates the contract on every app build. The microarchitecture override belongs here because this is where an app image is built for a *named machine* rather than for everyone. |
-| **5b** | Per-sub-cluster app targets: a sub-cluster's `images.target`/`march` override its cluster's, so each node type gets app images built for it (Casper: `znver4` for Genoa, `cascadelake` for Cascade Lake). **Proposed 2026-10-13; lands with the factory switch** -- see "Per-sub-cluster app targets" below and `ImagePublishingPlan.md` §5, steps 3-4 | Casper runs Derecho's Zen 3 app builds today, forgoing AVX-512 on both node types, and on its own base images named for and tuned to Derecho. The switch to the factory's portable base rebuilds every app image anyway, so the targets cost no extra rebuild there -- and not before, so no Cascade Lake build sits on a Zen 3-tuned base. |
+| **5b** | Per-sub-cluster app targets: a sub-cluster's `images.target`/`march` override its cluster's, so each node type gets app images built for it (Casper: `znver4` for Genoa, `cascadelake` for Cascade Lake). **Proposed 2026-10-13; implemented 2026-10-29, acceptance runs pending** -- see "Per-sub-cluster app targets" below and `ImagePublishingPlan.md` §5, steps 3-4 | Casper runs Derecho's Zen 3 app builds today, forgoing AVX-512 on both node types, and on its own base images named for and tuned to Derecho. The switch to the factory's portable base rebuilds every app image anyway, so the targets cost no extra rebuild there -- and not before, so no Cascade Lake build sits on a Zen 3-tuned base. |
 | **6** | Decision point: Ramble/ReFrame re-evaluation against the §2 exit criterion, using the mapping table in §2 | Deliberate, with data. |
 | **6+** | Agent-assisted app onboarding, on top of the phase-3 schema | Optional. The contract, not the tooling, is what makes it possible. |
 
@@ -1913,6 +1913,37 @@ base would keep the AMD-instruction risk underneath it.
 
 What an app's own arithmetic gains is measured with the first
 compute-bound app the project adds, not with HPCG.
+
+*Progress, 2026-10-29.* Implemented; the dispatch, `make casper-hpcg` and
+the acceptance runs remain.
+- **Description.** `subclusters.<name>.images: {target, march}` in
+  `schema/cluster.json`. Casper's cluster-wide `znver3` is gone: only targets
+  some node type uses are built, and `sitegen` refuses a cluster target that
+  every node type replaces. Genoa is `znver4` (`-tp=zen4`), Cascade Lake
+  `cascadelake` (`-tp=cascadelake`). Both nvhpc spellings were read from
+  `nvc -help -tp` in the base image (nvhpc 26.5), and `-tp=zen4` was checked
+  to emit zmm code.
+- **Sets and builds.** `sitefile.image_sets(sf, subcluster)` resolves
+  `casper-hpcg` to the node type's images; with no sub-cluster it is every
+  target's, which `images.mk` and `make casper-hpcg` build.
+  `app_builds` lists each target once, so `matrix.py casper` is 18 images.
+  `target_conflicts` compares node types as well as clusters.
+- **Refusal.** `checks.images` reports `wrong` for an app image whose
+  `hpcdev.target` label -- or, unlabelled, the fifth word of its name -- is not
+  the node type's. `validate` and `submit` exit 5 on it. A portable image
+  passes anywhere.
+- **Seam experiments.** `casper-blas` and `casper-simd` list the Genoa build.
+  A Cascade Lake run names its own with `--images`.
+- **CI smoke test.** GitHub's runners are often Zen 3, with no AVX-512, and a
+  `znver4` or `cascadelake` binary would SIGILL there. `apps/smoke.sh` runs
+  `arch_check` first. When the binary needs what the host lacks, it prints
+  `run skipped: host lacks the target's ISA` and exits 0, after the contract
+  has been resolved and its prepare and launch hooks run. The workflow raises a
+  warning for it. Smoke tests on NCAR's CIRRUS runners, with the right CPUs,
+  are a later option.
+- **The factory** needed no change. Its contract already promises portable
+  bases (nvhpc at `-tp=x86-64-v3`), run-time-dispatching OpenBLAS and FFTW,
+  and the `AVX-512 required:` line.
 
 ### Phase 4.7, proposed: lay the repository out by concern
 

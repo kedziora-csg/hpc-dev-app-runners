@@ -138,6 +138,12 @@ def main():
         print("  build them with:  cd %s && make %s"
               % (exp.cluster.sif_dir, target), file=sys.stderr)
         return EXIT_IMAGE
+    wrong = [r for r in image_results if r.state == "wrong"]
+    if wrong:
+        print("error: these images were built for another node type:", file=sys.stderr)
+        for result in wrong:
+            print("    %s -- %s" % (result.subject, result.detail), file=sys.stderr)
+        return EXIT_IMAGE
 
     contract_results = checks.contracts(exp.cluster,
                                         [(j.image, j.app["name"]) for j in jobs])

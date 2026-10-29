@@ -38,11 +38,11 @@ APP_D = "/container/app.d"
 
 
 class Result(object):
-    """One check: ok, missing, or unchecked -- with why."""
+    """One check: ok, missing, wrong, or unchecked -- with why."""
 
     def __init__(self, subject, state, detail=""):
         self.subject = subject
-        self.state = state              # "ok" | "missing" | "unchecked"
+        self.state = state              # "ok" | "missing" | "wrong" | "unchecked"
         self.detail = detail
 
     def __str__(self):
@@ -63,14 +63,54 @@ def _which(name):
 
 
 def images(cluster, names):
+    """Each image is on disk, and an app image was built for this node type.
+
+    The target comes from the image's hpcdev.target label, and from its name
+    for an image older than the labels.  A portable image -- a base image, or
+    an app image built at the base's own flags -- names none and runs anywhere.
+    """
+    want = cluster.image_target()
     out = []
     for sif in names:
         path = cluster.image_path(sif)
-        if os.path.isfile(path):
-            out.append(Result(sif, "ok", path))
-        else:
+        if not os.path.isfile(path):
             out.append(Result(sif, "missing", "no such file: %s" % path))
+            continue
+        built = _label(path, "hpcdev.target") or _target_in_name(sif)
+        if want and built and built != want:
+            out.append(Result(sif, "wrong", "built for %s, but %s%s's app images "
+                              "are %s" % (built, cluster.name,
+                                          "/" + cluster.subcluster
+                                          if cluster.subcluster else "", want)))
+        else:
+            out.append(Result(sif, "ok", path))
     return out
+
+
+def _label(path, key):
+    """One label of a .sif, or "" when there is no apptainer to ask."""
+    if not have_apptainer():
+        return ""
+    try:
+        text = subprocess.check_output(["apptainer", "inspect", "--labels", path],
+                                       stderr=open(os.devnull, "w"))
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    for line in text.decode("utf-8", "replace").splitlines():
+        name, _, value = line.partition(":")
+        if name.strip() == key:
+            return value.strip()
+    return ""
+
+
+def _target_in_name(sif):
+    """The target of <os>-<compiler>-<mpi>-<app>-<target>[-<suffix>].sif.
+
+    No word of the name before it holds a dash, so it is always the fifth; a
+    base image's name has three words and no target.
+    """
+    words = os.path.basename(sif)[:-len(".sif")].split("-")
+    return words[4] if len(words) > 4 else ""
 
 
 def contracts(cluster, pairs):
@@ -152,7 +192,7 @@ def app_contracts(names):
 
 def missing(results):
     """The results that are definitely wrong.  `unchecked` is not one of them."""
-    return [r for r in results if r.state == "missing"]
+    return [r for r in results if r.state in ("missing", "wrong")]
 
 
 class Preflight(object):
@@ -188,7 +228,7 @@ def preflight(exp, jobs):
     gone = missing(image_results)
     if gone and code == EXIT_OK:
         code = EXIT_IMAGE
-    problems += ["image missing: %s (%s)" % (r.subject, r.detail) for r in gone]
+    problems += ["image %s: %s (%s)" % (r.state, r.subject, r.detail) for r in gone]
     gone = missing(contract_results)
     if gone and code == EXIT_OK:
         code = EXIT_CONTRACT

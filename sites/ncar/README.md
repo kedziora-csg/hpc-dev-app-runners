@@ -226,6 +226,12 @@ and exports `HPCRUN_SUBCLUSTER` before sourcing the profile, which describes
 that node type's geometry. Every result row records the sub-cluster beside the
 cluster. Derecho describes one node type and has no sub-clusters.
 
+Each node type also has its own app images: `znver4` builds on Genoa,
+`cascadelake` on Cascade Lake. `casper-hpcg` names whichever the experiment
+runs on, so the commands above need no change; `make casper-hpcg` in `sif/`
+builds both. `validate` and `submit` refuse an image built for the other node
+type (exit 5), reading its `hpcdev.target` label, or its name for an older one.
+
 The two schemas — [`hpcrun/schema/experiment.json`](../../hpcrun/schema/experiment.json)
 and [`hpcrun/schema/app.json`](../../hpcrun/schema/app.json) — are also what an editor
 uses for autocomplete, and what makes an experiment or a contract something you

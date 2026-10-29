@@ -64,7 +64,7 @@ conf_for () { # conf_for <experiment.yaml> -- the profile that file's cluster: n
 # has something to find.  An empty file is enough: nothing here opens one.
 export HPCRUN_IMAGE_DIR="${TMP}/img"
 mkdir -p "${HPCRUN_IMAGE_DIR}"
-for img in $(cd ../sif && make --no-print-directory echo-derecho-hpcg); do
+for img in $(cd ../sif && make --no-print-directory echo-derecho-hpcg echo-casper echo-casper-hpcg); do
     : > "${HPCRUN_IMAGE_DIR}/${img}"
 done
 
@@ -243,9 +243,21 @@ cp "${TMP}/images.mk.keep" ../sites/ncar/casper/images.mk
 want "derecho's base set is the six, mpich first" \
     "leap-oneapi-mpich.sif leap-gcc14-mpich.sif leap-nvhpc-mpich.sif leap-oneapi-openmpi.sif leap-gcc14-openmpi.sif leap-nvhpc-openmpi.sif" \
     "$(cd ../sif && make --no-print-directory echo-derecho)"
-want "casper's hpcg set is the openmpi half" \
-    "leap-oneapi-openmpi-hpcg-znver3.sif leap-gcc14-openmpi-hpcg-znver3.sif leap-nvhpc-openmpi-hpcg-znver3.sif" \
+# Casper's node types each state their own target, so `make casper-hpcg` builds
+# the openmpi half once for each -- and nothing for a cluster-wide target.
+want "casper's hpcg set is the openmpi half, for each node type's target" \
+    "leap-oneapi-openmpi-hpcg-znver4.sif leap-gcc14-openmpi-hpcg-znver4.sif leap-nvhpc-openmpi-hpcg-znver4.sif leap-oneapi-openmpi-hpcg-cascadelake.sif leap-gcc14-openmpi-hpcg-cascadelake.sif leap-nvhpc-openmpi-hpcg-cascadelake.sif" \
     "$(cd ../sif && make --no-print-directory echo-casper-hpcg)"
+want "one casper dispatch builds both targets, each once" \
+    "$(cd ../sif && make --no-print-directory echo-casper-hpcg | sed 's/\.sif//g')" \
+    "$(python3 ../apps/matrix.py casper --apps hpcg | python3 -c 'import json, sys
+print(" ".join(e["tag"] for e in json.load(sys.stdin)["include"]))')"
+want "a node type's set is its own target's images, under the cluster's name" \
+    "leap-oneapi-openmpi-hpcg-cascadelake.sif leap-gcc14-openmpi-hpcg-cascadelake.sif leap-nvhpc-openmpi-hpcg-cascadelake.sif" \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+print(" ".join(sitefile.image_sets(sitefile.load("casper"), "htc-cascadelake")["casper-hpcg"]))')"
 # The workflow builds from the same description, so what it publishes and what
 # `make` pulls are one list: same tags, the target in each, and each compiler's
 # own spelling of it.
@@ -262,8 +274,16 @@ want "two clusters spelling one target differently is refused" 1 "$(python3 -c '
 sys.path.insert(0, ".")
 from benchlib import sitefile
 a, b = sitefile.load("derecho"), sitefile.load("casper")
-b.data["images"] = dict(b.data["images"], march={"default": "-march=znver2"})
+b.data["subclusters"]["htc-genoa"]["images"] = {"target": "znver3",
+                                                "march": {"default": "-march=znver2"}}
 print(len(sitefile.target_conflicts([a, b])))')"
+want "two node types of one cluster spelling one target differently is refused" 1 "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+b = sitefile.load("casper")
+b.data["subclusters"]["htc-cascadelake"]["images"] = {"target": "znver4",
+                                                      "march": {"default": "-march=znver2"}}
+print(len(sitefile.target_conflicts([b])))')"
 
 want "the host reads the same set the Makefile builds" \
     "$(cd ../sif && make --no-print-directory echo-derecho-hpcg)" \
@@ -414,6 +434,26 @@ ${cluster_images%\}}, march: {default: -march=znver3}}"
 cluster_case "a march for a compiler the set does not build is refused" reject \
     "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
 ${cluster_images%\}}, target: znver3, march: {default: -march=znver3, nvhpc: -tp=zen3}}"
+# A sub-cluster may state its own target, replacing the cluster's for its node
+# type.  sub_images <a's images> <cluster images line>: two node types, a and b.
+sub_images () {
+    printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/;s/^node: .*$/default_subcluster: a\nsubclusters:\n  a: {node: {cores: 64, smt: 1}'"$1"'}\n  b: {node: {cores: 36, smt: 1}'"$2"'}/'
+    echo "$3"
+}
+own4=', images: {target: znver4, march: {default: -march=znver4}}'
+own_cl=', images: {target: cascadelake, march: {default: -march=cascadelake}}'
+cluster_case "a node type's own target beside the cluster's is accepted" ok \
+    "$(sub_images "${own4}" "" "${cluster_images%\}}, target: znver3, march: {default: -march=znver3}}")"
+cluster_case "every node type its own target, and none for the cluster, is accepted" ok \
+    "$(sub_images "${own4}" "${own_cl}" "${cluster_images}")"
+cluster_case "a cluster target every node type replaces is refused" reject \
+    "$(sub_images "${own4}" "${own_cl}" "${cluster_images%\}}, target: znver3, march: {default: -march=znver3}}")"
+cluster_case "a node type's march for a compiler the set does not build is refused" reject \
+    "$(sub_images ', images: {target: znver4, march: {default: -march=znver4, nvhpc: -tp=zen4}}' "${own_cl}" "${cluster_images}")"
+cluster_case "a node type's target without its march is refused" reject \
+    "$(sub_images ', images: {target: znver4}' "${own_cl}" "${cluster_images}")"
+cluster_case "a node type's target with no images: block to build is refused" reject \
+    "$(sub_images "${own4}" "${own_cl}" "")"
 cluster_case "an image set naming an MPI family mpi: omits is refused" reject \
     "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
 ${cluster_images/openmpi/mpich}"
@@ -528,7 +568,7 @@ casper_conf="$(echo ../sites/*/casper/cluster.sh)"
 casper_case='schema: 2
 cluster: casper
 defaults: {nodes: 1, exclusive: false, allow_undersubscribed: true}
-images: {list: [leap-gcc14-openmpi-hpcg-znver3.sif]}
+images: {list: [leap-gcc14-openmpi-hpcg-znver4.sif]}
 apps: [{name: hpcg}]
 placements: [{name: pureMPI, ranks_per_node: 8, threads: 1}]
 sweep: {matrix: [images, apps, placements], per_job: [placements]}'
@@ -555,6 +595,38 @@ subcluster: nosuch" > "${TMP}/sc.yaml"
 HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" >/dev/null 2>&1
 want "an unknown sub-cluster is refused" 1 "$?"
 
+# Each node type runs the images built for it.  A set follows the node type;
+# a listed image built for the other one is refused, by validate and submit
+# alike, with the code for an image that is not there to run.
+images_of () { # images_of <yaml> [validate args...] -- the jobs' images
+    printf '%s\n' "$1" > "${TMP}/sc.yaml"; shift
+    HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" --format json "$@" 2>/dev/null \
+        | python3 -c 'import json, sys
+print(" ".join(sorted({j["image"] for j in json.load(sys.stdin)["jobs"]})))'
+}
+casper_set="$(printf '%s\n' "${casper_case}" | sed 's/images: {list: \[[^]]*\]}/images: {set: casper-hpcg}/')"
+want "casper-hpcg on Genoa is the znver4 builds" \
+    "leap-gcc14-openmpi-hpcg-znver4.sif leap-nvhpc-openmpi-hpcg-znver4.sif leap-oneapi-openmpi-hpcg-znver4.sif" \
+    "$(images_of "${casper_set}")"
+want "casper-hpcg on Cascade Lake is the cascadelake builds" \
+    "leap-gcc14-openmpi-hpcg-cascadelake.sif leap-nvhpc-openmpi-hpcg-cascadelake.sif leap-oneapi-openmpi-hpcg-cascadelake.sif" \
+    "$(images_of "${casper_set}" --subcluster htc-cascadelake)"
+printf '%s\n' "${casper_case}" > "${TMP}/sc.yaml"
+HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" --subcluster htc-cascadelake >/dev/null 2>&1
+want "validate refuses Genoa's build on Cascade Lake (5)" 5 "$?"
+HPCRUN_SITE_CONF="${casper_conf}" ./submit "${TMP}/sc.yaml" --subcluster htc-cascadelake \
+    --dry-run --results-dir "${TMP}/scwrong" >/dev/null 2>&1
+want "submit refuses it too (5)" 5 "$?"
+HPCRUN_SITE_CONF="${casper_conf}" ./validate "${TMP}/sc.yaml" --subcluster htc-cascadelake \
+    --images "leap-gcc14-openmpi.sif" >/dev/null 2>&1
+want "a portable image runs on either node type" 0 "$?"
+want "an unlabelled image's target is read from its name" "znver4 cascadelake  " \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import checks
+print(" ".join(checks._target_in_name(n) for n in ("leap-gcc14-openmpi-hpcg-znver4.sif",
+      "leap-gcc14-mpich-heffte-cascadelake-pbase.sif", "leap-gcc14-openmpi.sif", "")))' 2>&1)"
+
 # Hardware cores are not schedulable CPUs: 64 ranks on a node that offers 62
 # would queue forever, so it is refused before it is submitted.
 printf '%s\n' "${casper_case}" | sed 's/, exclusive: false, allow_undersubscribed: true//;s/ranks_per_node: 8/ranks_per_node: 64/' \
@@ -569,6 +641,7 @@ want "a shared request above ncpus is refused too (4)" 4 "$?"
 printf '%s\n' "${casper_case}
 subcluster: htc-cascadelake" > "${TMP}/sc.yaml"
 HPCRUN_SITE_CONF="${casper_conf}" ./submit "${TMP}/sc.yaml" --dry-run \
+    --images leap-gcc14-openmpi-hpcg-cascadelake.sif \
     --results-dir "${TMP}/scjob" >/dev/null 2>&1
 pbs="$(echo "${TMP}"/scjob/*/job.pbs)"
 want "job.pbs asks for the sub-cluster's processor" 1 \

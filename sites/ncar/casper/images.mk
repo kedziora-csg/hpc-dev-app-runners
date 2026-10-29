@@ -12,15 +12,24 @@ casper_site := ncar
 casper_images := leap-oneapi-openmpi.sif \
     leap-gcc14-openmpi.sif \
     leap-nvhpc-openmpi.sif
-casper_blas_images := leap-oneapi-openmpi-blas-znver3.sif \
-    leap-gcc14-openmpi-blas-znver3.sif \
-    leap-nvhpc-openmpi-blas-znver3.sif
-casper_heffte_images := leap-oneapi-openmpi-heffte-znver3.sif \
-    leap-gcc14-openmpi-heffte-znver3.sif \
-    leap-nvhpc-openmpi-heffte-znver3.sif
-casper_hpcg_images := leap-oneapi-openmpi-hpcg-znver3.sif \
-    leap-gcc14-openmpi-hpcg-znver3.sif \
-    leap-nvhpc-openmpi-hpcg-znver3.sif
+casper_blas_images := leap-oneapi-openmpi-blas-znver4.sif \
+    leap-gcc14-openmpi-blas-znver4.sif \
+    leap-nvhpc-openmpi-blas-znver4.sif \
+    leap-oneapi-openmpi-blas-cascadelake.sif \
+    leap-gcc14-openmpi-blas-cascadelake.sif \
+    leap-nvhpc-openmpi-blas-cascadelake.sif
+casper_heffte_images := leap-oneapi-openmpi-heffte-znver4.sif \
+    leap-gcc14-openmpi-heffte-znver4.sif \
+    leap-nvhpc-openmpi-heffte-znver4.sif \
+    leap-oneapi-openmpi-heffte-cascadelake.sif \
+    leap-gcc14-openmpi-heffte-cascadelake.sif \
+    leap-nvhpc-openmpi-heffte-cascadelake.sif
+casper_hpcg_images := leap-oneapi-openmpi-hpcg-znver4.sif \
+    leap-gcc14-openmpi-hpcg-znver4.sif \
+    leap-nvhpc-openmpi-hpcg-znver4.sif \
+    leap-oneapi-openmpi-hpcg-cascadelake.sif \
+    leap-gcc14-openmpi-hpcg-cascadelake.sif \
+    leap-nvhpc-openmpi-hpcg-cascadelake.sif
 cluster_images += $(casper_images) $(casper_blas_images) $(casper_heffte_images) $(casper_hpcg_images)
 app_images += $(casper_blas_images) $(casper_heffte_images) $(casper_hpcg_images)
 
