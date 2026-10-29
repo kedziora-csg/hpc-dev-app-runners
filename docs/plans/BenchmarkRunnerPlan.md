@@ -1956,8 +1956,7 @@ compute-bound app the project adds, not with HPCG.
   Genoa the order follows the most ranks one job put in one 8-core CCD: 5
   (gcc14, 16.9), 7 (oneapi, 15.5), 8 (nvhpc, 13.3). Each job's repeats agree
   within about 1%, so the spread is where each job landed, not noise, and the
-  compiler is confounded with it. Comparable numbers need whole nodes
-  (`exclusive: true`, 62 ranks on Genoa, 34 on Cascade Lake).
+  compiler is confounded with it.
 
 ### Phase 4.7, proposed: lay the repository out by concern
 
