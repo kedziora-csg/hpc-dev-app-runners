@@ -130,9 +130,14 @@ class Cluster(object):
         return list(sets[name])
 
     def image_target(self):
-        """The target this node type's app images are built for; "" for none."""
+        """The target this node type's app images are built for: "" when they
+        are portable, None when the description states no images: at all and
+        so has nothing to say about what runs here."""
         from . import sitefile
-        return sitefile.image_target(self._description(), self.subcluster or None)[0]
+        sf = self._description()
+        if not sf.data.get("images"):
+            return None
+        return sitefile.image_target(sf, self.subcluster or None)[0]
 
     def _description(self):
         """The cluster's YAML, from the clone this profile points at."""

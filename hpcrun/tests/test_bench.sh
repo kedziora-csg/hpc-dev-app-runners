@@ -627,6 +627,46 @@ from benchlib import checks
 print(" ".join(checks._target_in_name(n) for n in ("leap-gcc14-openmpi-hpcg-znver4.sif",
       "leap-gcc14-mpich-heffte-cascadelake-pbase.sif", "leap-gcc14-openmpi.sif", "")))' 2>&1)"
 
+# The label decides when there is one, an empty one included; the name only
+# when there is none.  A node type of portable builds refuses a tuned image; a
+# description with no images: block refuses nothing.  _label is stubbed, so
+# no apptainer is needed: state <node type's target> <sif> [label].
+want "the target check: label over name, portable node types, no images: block" \
+    "ok wrong wrong ok ok ok" \
+    "$(python3 -c 'import os, sys, tempfile
+sys.path.insert(0, ".")
+from benchlib import checks
+d, labels = tempfile.mkdtemp(dir=sys.argv[1]), {}
+checks._label = lambda path, key: labels.get(os.path.basename(path))
+class Node(object):
+    name, subcluster = "testville", "b"
+    def __init__(self, want): self.want = want
+    def image_target(self): return self.want
+    def image_path(self, sif): return os.path.join(d, sif)
+def state(want, sif, label=None):
+    open(os.path.join(d, sif), "w").close()
+    labels.clear()
+    if label is not None:
+        labels[sif] = label
+    return checks.images(Node(want), [sif])[0].state
+print(state("znver3", "leap-gcc14-openmpi-heffte-pbase.sif", ""),
+      state("znver3", "leap-gcc14-openmpi-heffte-pbase.sif"),
+      state("", "leap-gcc14-openmpi-hpcg-znver4.sif", "znver4"),
+      state("", "leap-gcc14-openmpi-hpcg.sif", ""),
+      state(None, "leap-gcc14-openmpi-hpcg-znver4.sif", "znver4"),
+      state("znver4", "leap-gcc14-openmpi-hpcg-znver3.sif", "znver4"))' "${TMP}" 2>&1)"
+want "a node type without its own target is portable; no images: block is None" \
+    "'' None" \
+    "$(HPCRUN_SITE_CONF="${casper_conf}" python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import cluster, sitefile
+node, sf = cluster.load("casper"), sitefile.load("casper")
+node._description = lambda: sf
+del sf.data["subclusters"]["htc-genoa"]["images"]
+first = node.image_target()
+del sf.data["images"]
+print(repr(first), repr(node.image_target()))' 2>&1)"
+
 # Hardware cores are not schedulable CPUs: 64 ranks on a node that offers 62
 # would queue forever, so it is refused before it is submitted.
 printf '%s\n' "${casper_case}" | sed 's/, exclusive: false, allow_undersubscribed: true//;s/ranks_per_node: 8/ranks_per_node: 64/' \

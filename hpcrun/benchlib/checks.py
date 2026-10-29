@@ -68,6 +68,9 @@ def images(cluster, names):
     The target comes from the image's hpcdev.target label, and from its name
     for an image older than the labels.  A portable image -- a base image, or
     an app image built at the base's own flags -- names none and runs anywhere.
+    A tuned image runs only on a node type built for that target, which a node
+    type of portable builds is not.  A description with no images: block
+    states nothing to hold an image to, so a new cluster can try any image.
     """
     want = cluster.image_target()
     out = []
@@ -76,31 +79,39 @@ def images(cluster, names):
         if not os.path.isfile(path):
             out.append(Result(sif, "missing", "no such file: %s" % path))
             continue
-        built = _label(path, "hpcdev.target") or _target_in_name(sif)
-        if want and built and built != want:
+        # An empty label is an answer -- a portable build -- and the name is
+        # read only when there is no label to ask: a portable build with a
+        # tag suffix, leap-gcc14-openmpi-heffte-pbase, would otherwise be
+        # taken for one built for "pbase".
+        built = _label(path, "hpcdev.target")
+        if built is None:
+            built = _target_in_name(sif)
+        if want is not None and built and built != want:
             out.append(Result(sif, "wrong", "built for %s, but %s%s's app images "
                               "are %s" % (built, cluster.name,
                                           "/" + cluster.subcluster
-                                          if cluster.subcluster else "", want)))
+                                          if cluster.subcluster else "",
+                                          want or "portable")))
         else:
             out.append(Result(sif, "ok", path))
     return out
 
 
 def _label(path, key):
-    """One label of a .sif, or "" when there is no apptainer to ask."""
+    """One label of a .sif, possibly "", or None when it cannot be read: no
+    apptainer to ask, or an image older than the label."""
     if not have_apptainer():
-        return ""
+        return None
     try:
         text = subprocess.check_output(["apptainer", "inspect", "--labels", path],
                                        stderr=open(os.devnull, "w"))
     except (OSError, subprocess.CalledProcessError):
-        return ""
+        return None
     for line in text.decode("utf-8", "replace").splitlines():
         name, _, value = line.partition(":")
         if name.strip() == key:
             return value.strip()
-    return ""
+    return None
 
 
 def _target_in_name(sif):
