@@ -10,7 +10,11 @@
 #
 # Run it on both node types of the htc pool:
 #     ../submit casper-simd --account <PROJECT>                       # htc-genoa (Zen 4)
-#     ../submit casper-simd --account <PROJECT> --subcluster htc-cascadelake
+#     ../submit casper-simd --account <PROJECT> --subcluster htc-cascadelake \
+#         --images leap-gcc14-openmpi-heffte-cascadelake.sif
+#
+# Each node type runs its own build of the driver (phase 5b): the image
+# below is Genoa's, and validate refuses it on Cascade Lake.
 #
 # 256^3 rather than Derecho's 512^3: about 1 GB in all, which a shared job's
 # default memory share holds; the question here is AVX2 against AVX-512 on one
@@ -41,7 +45,7 @@ defaults:
   allow_undersubscribed: true
 
 images:
-  list: [leap-gcc14-openmpi-heffte-znver3.sif]
+  list: [leap-gcc14-openmpi-heffte-znver4.sif]
 
 apps:
   - {name: heffte, env: {HEFFTE_BACKEND: fftw, HEFFTE_N: 256}}

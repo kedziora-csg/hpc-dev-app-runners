@@ -88,7 +88,13 @@ Each of these has to come from a person:
 - **`images.target` and `march`** -- only if app images should be built for
   this machine's microarchitecture rather than at the base images' flags.
   Name it after the CPU (`icelake`, `sapphirerapids`), not the cluster. Spell
-  it per compiler: nvhpc takes `-tp=`, the others `-march=`.
+  it per compiler: nvhpc takes `-tp=`, the others `-march=`. Read nvhpc's
+  spelling from `nvc -help -tp` inside a base image rather than guessing it.
+  With sub-clusters, each node type may state its own
+  (`subclusters.<name>.images: {target, march}`), replacing the cluster's:
+  Casper's Genoa and Cascade Lake nodes get `znver4` and `cascadelake` builds.
+  A cluster target that every node type replaces is refused, because nothing
+  would be built for it.
 
 A value that every cluster of the site states identically belongs in
 `sites/<site>.yaml` instead. Lists and maps merge with the cluster's, and

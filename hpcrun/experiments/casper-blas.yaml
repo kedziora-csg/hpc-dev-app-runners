@@ -23,7 +23,11 @@
 # Derecho's is.
 #
 #     ../submit casper-blas --account <PROJECT>                       # htc-genoa (Zen 4)
-#     ../submit casper-blas --account <PROJECT> --subcluster htc-cascadelake
+#     ../submit casper-blas --account <PROJECT> --subcluster htc-cascadelake \
+#         --images leap-gcc14-openmpi-blas-cascadelake.sif
+#
+# Each node type runs its own build of the driver (phase 5b): the image
+# below is Genoa's, and validate refuses it on Cascade Lake.
 #
 # Shared nodes; see casper-simd.yaml for the noise caveat and why 16 x 1.
 # The kernel sets are `variants:`, not separate apps, so all of them run in
@@ -42,7 +46,7 @@ defaults:
   allow_undersubscribed: true
 
 images:
-  list: [leap-gcc14-openmpi-blas-znver3.sif]
+  list: [leap-gcc14-openmpi-blas-znver4.sif]
 
 # BLAS_M 4096 (128 MB per rank, still far past cache) rather than the 8192
 # default, so 16 ranks fit a shared job's default memory share.

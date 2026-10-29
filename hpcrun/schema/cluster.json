@@ -291,7 +291,7 @@
         "target": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9_]*$",
-          "description": "The microarchitecture the app images are built for, named after the microarchitecture and not the cluster (znver3, icelake): Casper's Genoa nodes run Derecho's Zen 3 builds. It becomes part of every app image's tag and .sif name -- leap-oneapi-mpich-hpcg-znver3 -- so one tag means one build. Omit it, with march, for app images built at the base image's own flags. Two clusters naming one target must spell its march identically; hpcrun/sitegen --check refuses otherwise."
+          "description": "The microarchitecture the app images are built for, named after the microarchitecture and not the cluster (znver3, cascadelake). It becomes part of every app image's tag and .sif name -- leap-oneapi-mpich-hpcg-znver3 -- so one tag means one build. A sub-cluster may state its own, which replaces this one for its node type; a cluster whose sub-clusters all do states none here. Omit it, with march, for app images built at the base image's own flags. Two clusters or sub-clusters naming one target must spell its march identically; hpcrun/sitegen --check refuses otherwise."
         },
         "march": {
           "type": "object",
@@ -431,7 +431,7 @@
         "^[a-z][a-z0-9_-]*$": {
           "type": "object",
           "additionalProperties": false,
-          "description": "One node type: a description of it, and its own node: block.",
+          "description": "One node type: a description of it, its own node: block, and optionally its own app target.",
           "properties": {
             "description": {
               "type": "string",
@@ -441,6 +441,37 @@
               "type": "boolean",
               "default": true,
               "description": "False means no job has yet run on this node type. hpcrun/validate says so, as it does for an unverified cluster."
+            },
+            "images": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "march"
+              ],
+              "description": "This node type's app target, replacing the cluster's images.target and images.march: Casper's Genoa nodes get znver4 builds and its Cascade Lake nodes cascadelake ones, from the same portable base. Only the target varies by node type; the OS, compilers, MPI families and apps follow the host's modules and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg) and resolves to the images of the sub-cluster an experiment runs on; hpcrun/validate refuses an image built for another target.",
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_]*$",
+                  "description": "The microarchitecture this node type's app images are built for, as for the cluster's images.target."
+                },
+                "march": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "default"
+                  ],
+                  "description": "How each compiler family spells target, as for the cluster's images.march; a family must be one the cluster's images.compilers builds.",
+                  "patternProperties": {
+                    "^(default|[a-z][a-z0-9]*)$": {
+                      "type": "string",
+                      "pattern": "^-[A-Za-z0-9=._,+-]+( -[A-Za-z0-9=._,+-]+)*$",
+                      "description": "The flags, as the compiler takes them."
+                    }
+                  }
+                }
+              }
             },
             "node": {
               "type": "object",

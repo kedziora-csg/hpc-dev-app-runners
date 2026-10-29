@@ -268,7 +268,7 @@ The images this cluster runs, stated as axes rather than as a list: every compil
 | [`march`](#clusterimagesmarch) | object |  | no other keys | How each compiler family spells target, passed to the app build as APP_MARCH_FLAGS. default covers every family not named; a family whose compiler spells it differently gets its own entry -- nvhpc takes -tp=zen3, and ignores -march= without a word. Required with target, and only with it. |
 | `mpi` | list of `openmpi` \| `mpich` \| `mpich3` | yes | at least 1 entry, no duplicates | Container MPI families. Each must be listed under mpi:, which is what says this cluster can host it -- why Casper's set has no mpich. |
 | `os` | string | yes | matches `/^[a-z][a-z0-9]*$/` | The container OS, the first word of every image name. The one closest to the host's own userspace -- leap for Derecho's SLE 15. |
-| `target` | string |  | matches `/^[a-z0-9][a-z0-9_]*$/` | The microarchitecture the app images are built for, named after the microarchitecture and not the cluster (znver3, icelake): Casper's Genoa nodes run Derecho's Zen 3 builds. It becomes part of every app image's tag and .sif name -- leap-oneapi-mpich-hpcg-znver3 -- so one tag means one build. Omit it, with march, for app images built at the base image's own flags. Two clusters naming one target must spell its march identically; hpcrun/sitegen --check refuses otherwise. |
+| `target` | string |  | matches `/^[a-z0-9][a-z0-9_]*$/` | The microarchitecture the app images are built for, named after the microarchitecture and not the cluster (znver3, cascadelake). It becomes part of every app image's tag and .sif name -- leap-oneapi-mpich-hpcg-znver3 -- so one tag means one build. A sub-cluster may state its own, which replaces this one for its node type; a cluster whose sub-clusters all do states none here. Omit it, with march, for app images built at the base image's own flags. Two clusters or sub-clusters naming one target must spell its march identically; hpcrun/sitegen --check refuses otherwise. |
 
 ##### `cluster.images.march`
 
@@ -385,17 +385,35 @@ Node types within this cluster. Casper has seven processor types and Derecho's G
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
-| [`<name>`](#clustersubclustersname) | object |  | key matches `/^[a-z][a-z0-9_-]*$/`, no other keys | One node type: a description of it, and its own node: block. |
+| [`<name>`](#clustersubclustersname) | object |  | key matches `/^[a-z][a-z0-9_-]*$/`, no other keys | One node type: a description of it, its own node: block, and optionally its own app target. |
 
 ##### `cluster.subclusters.<name>`
 
-One node type: a description of it, and its own node: block.
+One node type: a description of it, its own node: block, and optionally its own app target.
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `description` | string |  |  | What this node type is. |
+| [`images`](#clustersubclustersnameimages) | object |  | no other keys | This node type's app target, replacing the cluster's images.target and images.march: Casper's Genoa nodes get znver4 builds and its Cascade Lake nodes cascadelake ones, from the same portable base. Only the target varies by node type; the OS, compilers, MPI families and apps follow the host's modules and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg) and resolves to the images of the sub-cluster an experiment runs on; hpcrun/validate refuses an image built for another target. |
 | [`node`](#clustersubclustersnamenode) | object | yes | no other keys | What one compute node has. FALLBACKS, not measurements: the job probes lscpu and topology.json carries its answer. These are what can be known before there is a node to ask, which is the only moment an illegal ranks x threads is still cheap to reject. |
 | `verified` | boolean |  | default `true` | False means no job has yet run on this node type. hpcrun/validate says so, as it does for an unverified cluster. |
+
+###### `cluster.subclusters.<name>.images`
+
+This node type's app target, replacing the cluster's images.target and images.march: Casper's Genoa nodes get znver4 builds and its Cascade Lake nodes cascadelake ones, from the same portable base. Only the target varies by node type; the OS, compilers, MPI families and apps follow the host's modules and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg) and resolves to the images of the sub-cluster an experiment runs on; hpcrun/validate refuses an image built for another target.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| [`march`](#clustersubclustersnameimagesmarch) | object | yes | no other keys | How each compiler family spells target, as for the cluster's images.march; a family must be one the cluster's images.compilers builds. |
+| `target` | string | yes | matches `/^[a-z0-9][a-z0-9_]*$/` | The microarchitecture this node type's app images are built for, as for the cluster's images.target. |
+
+###### `cluster.subclusters.<name>.images.march`
+
+How each compiler family spells target, as for the cluster's images.march; a family must be one the cluster's images.compilers builds.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `<name>` | string |  | key matches `/^(default|[a-z][a-z0-9]*)$/`, matches `/^-[A-Za-z0-9=._,+-]+( -[A-Za-z0-9=._,+-]+)*$/` | The flags, as the compiler takes them. |
 
 ###### `cluster.subclusters.<name>.node`
 

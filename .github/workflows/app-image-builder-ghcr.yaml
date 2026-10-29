@@ -23,7 +23,12 @@ name: Build and Smoke-test App Images (GHCR)
 #
 # THE SMOKE TEST is apps/smoke.sh: the app contract's own hooks, driven by
 # hpcrun's app_contract.sh, at HPCRUN_SCALE=smoke.  The same path a cluster job
-# takes, in seconds, before anything is queued.
+# takes, in seconds, before anything is queued.  A build for an AVX-512 target
+# (znver4, cascadelake) is not RUN on a runner whose CPU lacks AVX-512 -- often
+# a Zen 3 -- and the job says so in a warning rather than failing with SIGILL.
+#
+# A cluster with sub-clusters gets every target its node types state, each
+# once: one dispatch for casper builds the znver4 and cascadelake images.
 #
 # NAMES: <apps_repo>-<arch>:<os>-<compiler>-<mpi>-<app>-<target>-{latest,<version>}.
 # The target is in the tag, and so in every .sif name, because one tag must
@@ -233,6 +238,11 @@ jobs:
             "${APP_IMAGE}" \
             /src/apps/smoke.sh "${APP}" 2 2 \
             2>&1 | tee "smoke-logs/${TAG}.log"
+          # A build for an AVX-512 target on a runner without it: built and its
+          # contract checked, but not run.  Said where the run's summary shows it.
+          if grep -q 'run skipped: host lacks' "smoke-logs/${TAG}.log"; then
+            echo "::warning title=${TAG}::smoke run skipped: this runner's CPU lacks the target's ISA; the first cluster job is its first run"
+          fi
 
       - name: Upload logs
         if: always()

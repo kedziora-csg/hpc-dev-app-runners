@@ -61,13 +61,13 @@ scheduler:
   queue: casper
   walltime_max: "24:00:00"
 
-# The openmpi half of Derecho's set, and nothing else: Casper's Genoa runs
-# Derecho's Zen 3 builds, and with no mpich family under mpi: below, an mpich
-# image is refused here rather than built for a cluster that cannot run it.
+# The openmpi half of Derecho's set, and nothing else: with no mpich family
+# under mpi: below, an mpich image is refused here rather than built for a
+# cluster that cannot run it.
 #
-# The same Zen 3 builds, so the same target and the same spelling: sitegen
-# --check refuses two clusters that name one target and spell it differently,
-# because the tag would then mean whichever was built last.
+# No target here: each node type below states its own, so Genoa gets znver4
+# builds and Cascade Lake cascadelake ones, from the same portable base images.
+# casper-hpcg names the images of whichever node type an experiment runs on.
 images:
   os: leap
   compilers: [oneapi, gcc14, nvhpc]
@@ -75,8 +75,6 @@ images:
   # heffte and blas: the seam study's probes, run here because these nodes
   # have AVX-512 and Derecho's do not.
   apps: [hpcg, heffte, blas]
-  target: znver3
-  march: {default: -march=znver3, nvhpc: -tp=zen3}
 
 modules:
   # Beyond the site bootstrap.  Casper is a GPU cluster and its jobs want the
@@ -107,6 +105,9 @@ default_subcluster: htc-genoa
 subclusters:
   htc-genoa:
     description: "High-throughput AMD EPYC 9554 (Genoa): 64 cores, one socket, SMT on"
+    # nvhpc 26.5, the base images', takes -tp=zen4 as well as znver4; zen4,
+    # because Derecho spells Zen 3 -tp=zen3.
+    images: {target: znver4, march: {default: -march=znver4, nvhpc: -tp=zen4}}
     # Measured on crhtc73 with hpcrun/lib/probe_topology.sh during the first
     # run, 2026-09-03, and run on by every Casper job since.
     node:
@@ -125,6 +126,8 @@ subclusters:
 
   htc-cascadelake:
     description: "High-throughput Intel Xeon Gold 6240 (Cascade Lake): 2 x 18 cores, SMT on"
+    # nvhpc's spelling from `nvc -help -tp` in the base image (nvhpc 26.5).
+    images: {target: cascadelake, march: {default: -march=cascadelake, nvhpc: -tp=cascadelake}}
     # Measured on crhtc53 with probe_topology.sh, 2026-09-29, and confirmed the
     # same day by the first HPCG job here (6083942, crhtc53 and crhtc62): the
     # job's own probe agreed with every value below.

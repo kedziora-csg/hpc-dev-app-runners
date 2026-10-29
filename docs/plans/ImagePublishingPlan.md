@@ -467,9 +467,9 @@ A user's packages do not move with it. So, at the move:
 - the factory's README, which names `kedziora-csg/demo_github_actions` as the
   runner's home.
 
-**Left of step 4:** phase 5b first (per-sub-cluster targets), then one
-app-image dispatch per cluster from the new repository and the acceptance
-runs.
+**Left of step 4:** one app-image dispatch per cluster from the new
+repository and the acceptance runs. Phase 5b (per-sub-cluster targets) is in
+place, 2026-10-29, so casper's dispatch builds `znver4` and `cascadelake`.
 
 This repository is then `apps/`, `sif/`, `hpcrun/` and `sites/`, one app-image
 workflow, and a `CLAUDE.md` about the runner. It depends on the factory only
