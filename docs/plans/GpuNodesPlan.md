@@ -403,9 +403,9 @@ module on the host.** Proposed 2026-10-30.
   (HPC-X's `nccl_rdma_sharp_plugin` and `nccl_spectrum-x_plugin`) are for
   InfiniBand and RoCE, not libfabric. Slingshot still needs aws-ofi-nccl (§6).
 - **The August `leap-nvhpc-mpich-cuda-26.08` image has no OSU.** `find
-  /container -name osu_latency` finds nothing, so its publish step did not add
-  it. The factory's `--published` check now requires OSU, so step 1's CI would
-  catch the same failure in a new nvhpc `-cuda` image.
+  /container -name osu_latency` finds nothing. Step 1 found why: OSU's CUDA
+  kernel does not compile under nvc++ 26.x, and the build script exited 0
+  anyway. Both are fixed there.
 
 ## 4. Steps
 
@@ -606,6 +606,52 @@ built.
    checks its errors, or is no longer used as a test.
 7. Merge, then publish the six `-cuda` images to `ghcr.io/ncar/hpcdev-x86_64`.
    That is a public, outward step, taken by decision and not by default.
+
+**Results, 2026-10-30.** Items 1-6 are on the factory branch `cuda-images`
+(commits `782055f` and `afe601e`).
+
+- **CI, `publish=false`.** All twelve images built and passed the contract
+  check:
+  - the six `-cuda` images, in run 41137691527, which took 88 minutes without
+    a build cache;
+  - the six CPU images, in run 41137694469, which took 22 minutes.
+  - Runner disk was enough for nvhpc with CUDA.
+- **Every `-cuda` image passes all of check 11:**
+  - `CUDA_HOME=/container/cuda/12.9`;
+  - the five libraries resolve through the linker cache outside `stubs/`;
+  - nvcc's default is sm_50 to sm_120, and `-arch=sm_90` alone gives sm_90;
+  - `report_gpus` runs and answers `CUDA driver is a stub library`, exit 2,
+    as a GPU-less runner should;
+  - `HEFFTE_ROOT` is `/container/heffte/2.4.1-cuda`.
+
+  Every CPU image passes `EXPECT_GPU=nogpu` and skips the GPU checks. Check 10
+  (`libheffte` in the linker cache, `lib64/`) passes in all twelve.
+- **CI's OSU test hid a failure.** In both nvhpc `-cuda` images OSU's
+  `util/kernel.cu` did not compile:
+  - OSU runs `nvcc -cuda`, then `$CXX` on the output, and nvc++ 26.x rejects
+    that output with a redeclaration in `_cplus_nvcc.h`;
+  - OSU's own remedy, `--nvcchost --no_preincludes`, is applied only when
+    `$CXX -V` says `pgc++`, and it fails too, as do the other flag
+    combinations tried, and g++ as nvcc's host compiler.
+
+  `build_osu-micro-benchmarks.sh` still exited 0, because nothing checked the
+  configure and make chain and its last line ends `|| true`. That is how the
+  August nvhpc image came to have no OSU.
+- **The fix**, in `afe601e`:
+  - nvhpc builds OSU `--enable-cuda=basic`, without the kernels. `D D`,
+    `-d cuda` and `-d managed` still work; only point-to-point managed buffers
+    (`MD`, `MH`) and the GPU compute in the overlap tests go. OSU's `app.yaml`
+    says so.
+  - The script exits 1 when the build, or the installed `osu_latency`, fails.
+
+  Run in the August nvhpc-mpich-cuda and gcc14-mpich-cuda images on the login
+  node, the script builds OSU and runs `osu_latency` in both (rc 0), and a
+  forced download failure exits 1. CI run 41148533187 rebuilt the `-cuda` set
+  with the fix in 13 minutes, from cache. All six pass the contract check
+  again, and OSU builds and runs `osu_latency` in each: nvhpc with
+  `--enable-cuda=basic`, the others with the kernels.
+- **`hello_world.cu`** (item 6) is used by no build step or check; check 11's
+  probes replace it.
 
 ### Step 2 -- the description
 
@@ -813,9 +859,7 @@ part of this phase's acceptance.
 - **The nvhpc pin moves the CPU nodes too** (D9). `nvhpc/26.1` instead of the
   default 25.9 changes the host Open MPI build and the Cray MPICH flavour
   that every nvhpc cell on Derecho loads.
-- **Runner disk for nvhpc with CUDA**, in step 1. If it does not fit, drop
-  nvhpc from the `-cuda` set, or have a sub-cluster narrow `compilers`, which
-  is one more key for D2.
+- ~~**Runner disk for nvhpc with CUDA.**~~ It fit, in step 1's CI.
 - **Image size.** The gcc14 CUDA `.sif` is 2.9 GB, against a CPU image's; that
   is fine on GLADE, but six of them per app set add up.
 - **oneAPI with CUDA.** nvcc uses the system gcc as its host compiler. It built
