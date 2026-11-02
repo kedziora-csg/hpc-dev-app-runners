@@ -231,9 +231,14 @@ capture_run_context "${RESULTS_DIR}" "${launcher}"
 # seen THROUGH the launcher, after the host libraries displace the container's.
 # If libmpi still resolves inside /container, every rank singleton-initialises
 # and the job is N serial programs that look like a running job.
+#
+# The MPI library itself, `libmpi.so.N => path`: not any line naming libmpi.
+# On a GPU node a preloaded libmpi_gtl_cuda.so.0 is listed first, from the
+# host, and would pass this check whichever libmpi.so.12 had loaded.
 ${launcher} ldd "${REPORT_EXE}" > ldd_report_placement_host.txt 2>&1
-if grep -i 'libmpi' ldd_report_placement_host.txt | grep -qv '/container/'; then
-    echo "host MPI  $(grep -i 'libmpi' ldd_report_placement_host.txt | head -1 | sed 's/^[[:space:]]*//')"
+host_mpi="$(grep -E 'libmpi\.so[.0-9]* =>' ldd_report_placement_host.txt | head -1 | sed 's/^[[:space:]]*//')"
+if [ -n "${host_mpi}" ] && [ "${host_mpi#*=> /container/}" = "${host_mpi}" ]; then
+    echo "host MPI  ${host_mpi}"
 else
     echo "*** still linking the container's MPI -- see ldd_report_placement_host.txt ***"
     sed 's/^/    /' ldd_report_placement_host.txt
