@@ -1,0 +1,59 @@
+# OSU between two A100s of one node: the first run on Derecho's GPU node type.
+#
+# The earlier work's first GPU test, through hpcrun: does a rank get the GPU on
+# its own NUMA domain, does a kernel run there, and does Cray MPICH move device
+# buffers through its ABI shim with the GTL library the launcher preloads?
+# Step 0 of docs/plans/GpuNodesPlan.md measured the same by hand (0.47 us host,
+# 15.9 us device, at 8 bytes).
+#
+#     ../validate derecho-osu-gpu
+#     ../submit   derecho-osu-gpu --account <PROJECT>
+schema: 2
+cluster: derecho
+subcluster: a100
+
+defaults:
+  nodes: 1
+  walltime: "00:20:00"
+  repeats: 3
+  scale: node
+
+images:
+  set: derecho          # on a100, the base set is the two nvhpc -cuda images
+
+# Host buffers with GPU support off, the cost of GTL alone; then device buffers,
+# which need MPICH_GPU_SUPPORT_ENABLED=1 under Cray MPICH -- without it a device
+# buffer crashes the rank.  The Open MPI image is the open question: whether the
+# host Open MPI is CUDA-aware is not yet known, and its device cells say.
+apps:
+  - name: osu
+    label: latency-host
+    env:
+      OSU_BENCHMARK: osu_latency
+      OSU_MSG_RANGE: "8:4194304"
+  - name: osu
+    label: latency-device
+    env:
+      OSU_BENCHMARK: osu_latency
+      OSU_MSG_RANGE: "8:4194304"
+      OSU_BUFFERS: "D D"
+      MPICH_GPU_SUPPORT_ENABLED: "1"
+  - name: osu
+    label: bw-device
+    env:
+      OSU_BENCHMARK: osu_bw
+      OSU_MSG_RANGE: "8:4194304"
+      OSU_BUFFERS: "D D"
+      MPICH_GPU_SUPPORT_ENABLED: "1"
+
+# Point-to-point needs exactly two ranks.  32 cores each is the whole node, so
+# rank 0 starts on NUMA 0 and rank 1 on NUMA 2, and each takes that domain's GPU.
+placements:
+  - {name: pair, ranks_per_node: 2, threads: 32}
+
+omp_variants:
+  - {name: percore, OMP_PROC_BIND: close, OMP_PLACES: cores}
+
+sweep:
+  matrix:  [images, apps, placements, omp_variants]
+  per_job: [placements, omp_variants]

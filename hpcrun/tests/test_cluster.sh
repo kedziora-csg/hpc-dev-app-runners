@@ -181,6 +181,135 @@ want "the fallback comes from the profile" "64 2 4 fallback:site-profile:testvil
 # the node cannot run.
 want "with no profile the fallback invents nothing" "1 1 1 fallback:none" "$(topo "true")"
 
+#-- a node type with NVIDIA GPUs -----------------------------------------------
+echo
+echo "GPU node type"
+# Cray's layout: GTL beside the ofi/ builds, not in either library directory.
+mkdir -p "${TMP}/fs/gtl/gtl/lib" "${TMP}/fs/gtl/ofi/gnu/12.3/lib-abi-mpich"
+: > "${TMP}/fs/gtl/gtl/lib/libmpi_gtl_cuda.so.0"
+gpu_run () { run "export HPCRUN_GPU_VENDOR=nvidia CRAY_MPICH_DIR='${TMP}/fs/gtl/ofi/gnu/12.3'
+                  $1"; }
+
+out="$(gpu_run "make_apptainer_launcher '${TMP}/g.sh' '${TMP}/fs/image.sif' mpich && cat '${TMP}/g.sh'")"
+echo "${out}" | grep -q -- '^    --nv \\$' \
+    && ok "--nv on a node type with NVIDIA GPUs" || bad "no --nv for NVIDIA GPUs" "${out}"
+echo "${out}" | grep -q "gpu_bind.sh' && gpu_bind$" \
+    && ok "each rank is bound to a GPU before the exec" || bad "no gpu_bind in the launcher" "${out}"
+echo "${out}" | grep -q "^export APPTAINERENV_LD_PRELOAD='${TMP}/fs/gtl/gtl/lib/libmpi_gtl_cuda.so.0'" \
+    && ok "Cray MPICH's GTL library is preloaded inside the container" \
+    || bad "no GTL preload" "${out}"
+echo "${out}" | grep -q 'MPICH_GPU_SUPPORT_ENABLED' \
+    && bad "GPU support was switched on for every app" "${out}" \
+    || ok "MPICH_GPU_SUPPORT_ENABLED is left to the app"
+bash -n "${TMP}/g.sh" && ok "the GPU launcher parses" || bad "the GPU launcher has a syntax error"
+
+out="$(run "make_apptainer_launcher '${TMP}/c.sh' '${TMP}/fs/image.sif' mpich && cat '${TMP}/c.sh'")"
+echo "${out}" | grep -qE -- '--nv|gpu_bind|LD_PRELOAD' \
+    && bad "a CPU node type got GPU settings" "${out}" \
+    || ok "a CPU node type gets none of them"
+
+out="$(gpu_run "make_apptainer_launcher '${TMP}/g2.sh' '${TMP}/fs/image.sif' openmpi")"
+case "${out}" in
+    *GTL*) bad "the GTL library was asked of the Open MPI recipe" "${out}" ;;
+    *)     ok "GTL belongs to the Cray MPICH recipe only" ;;
+esac
+
+out="$(run "export HPCRUN_GPU_VENDOR=nvidia
+            make_apptainer_launcher '${TMP}/g3.sh' '${TMP}/fs/image.sif' mpich")"
+want "a GPU node type whose Cray MPICH has no GTL library is refused" 1 "$?"
+
+# The variant's preload is kept, after GTL's: one list, never one written over
+# the other.  A stub apptainer shows what the container would be given.
+mkdir -p "${TMP}/stubrt"
+cat > "${TMP}/stubrt/apptainer" <<'RT'
+#!/bin/bash
+echo "PRELOAD=${APPTAINERENV_LD_PRELOAD:-} CVD=${CUDA_VISIBLE_DEVICES:-}"
+echo "ARGS=$*"
+RT
+chmod +x "${TMP}/stubrt/apptainer"
+out="$(PATH="${TMP}/stubrt:${PATH}" APPTAINERENV_LD_PRELOAD=/mkl.so HPCRUN_GPU_BIND=none \
+       "${TMP}/g.sh" true)"
+case "${out}" in
+    *"PRELOAD=${TMP}/fs/gtl/gtl/lib/libmpi_gtl_cuda.so.0:/mkl.so "*) ok "a variant's preload follows GTL's" ;;
+    *) bad "the preloads were not joined" "${out}" ;;
+esac
+
+# PALS_SPOOL_DIR holds the apinfo file PMI_Init reads.  Bound when no site bind
+# covers it; left alone when one does.
+out="$(PATH="${TMP}/stubrt:${PATH}" PALS_SPOOL_DIR="${TMP}/fs/bound/spool" "${TMP}/c.sh" true)"
+case "${out}" in
+    *"--bind ${TMP}/fs/bound/spool "*) bad "a spool directory already under a bind was bound again" "${out}" ;;
+    *) ok "a spool directory under a site bind is not bound again" ;;
+esac
+mkdir -p "${TMP}/spool"
+out="$(PATH="${TMP}/stubrt:${PATH}" PALS_SPOOL_DIR="${TMP}/spool" "${TMP}/c.sh" true)"
+case "${out}" in
+    *"--bind ${TMP}/spool "*) ok "a spool directory outside every bind is bound" ;;
+    *) bad "the PALS spool directory was not bound" "${out}" ;;
+esac
+
+#-- which GPU each rank gets ----------------------------------------------------
+echo
+echo "GPU binding"
+# A Derecho A100 node, as step 0 measured it: four GPUs whose NUMA domains run
+# in reverse of the cores', 16 cores a domain.
+G="${TMP}/gpunode"
+mkdir -p "${G}/proc/self"
+i=0
+for bus in 0000:03:00.0 0000:41:00.0 0000:82:00.0 0000:c1:00.0; do
+    mkdir -p "${G}/proc/driver/nvidia/gpus/${bus}" "${G}/sys/bus/pci/devices/${bus}"
+    printf 'Model: \t\t NVIDIA A100-SXM4-40GB\nGPU UUID: \t GPU-%d\nBus Location: \t %s\n' \
+        "${i}" "${bus}" > "${G}/proc/driver/nvidia/gpus/${bus}/information"
+    echo $(( 3 - i )) > "${G}/sys/bus/pci/devices/${bus}/numa_node"
+    i=$(( i + 1 ))
+done
+for cpu in 0 16 32 48 64; do
+    mkdir -p "${G}/sys/devices/system/cpu/cpu${cpu}/node$(( cpu / 16 % 4 ))"
+done
+bind () { # bind <first cpus> [VAR=value ...] -- the GPU chosen, and the log line
+    local cpus="$1"; shift
+    printf 'Cpus_allowed_list:\t%s\n' "${cpus}" > "${G}/proc/self/status"
+    env -u CUDA_VISIBLE_DEVICES HPCRUN_GPU_BIND_ROOT="${G}" PMI_RANK=0 PMI_LOCAL_RANK=1 \
+        HPCRUN_GPU_BIND_LOG=/dev/stdout "$@" \
+        bash -c ". '${HERE}/../lib/gpu_bind.sh'; gpu_bind; echo \"CVD=\${CUDA_VISIBLE_DEVICES:-}\""
+}
+want "a rank on NUMA 0 gets the GPU on NUMA 0, not GPU 0" "CVD=GPU-3" "$(bind 0-15 | tail -1)"
+want "a rank on NUMA 2 gets the GPU on NUMA 2"           "CVD=GPU-1" "$(bind 32-47 | tail -1)"
+want "a rank's first core decides, on an SMT sibling too" "CVD=GPU-3" "$(bind 64,65 | tail -1)"
+want "the job's own GPUs are the ones chosen from" "CVD=GPU-0" \
+     "$(bind 0-15 CUDA_VISIBLE_DEVICES=GPU-1,GPU-0 | tail -1)"
+want "another node's UUIDs fall back to this node's GPUs" "CVD=GPU-3" \
+     "$(bind 0-15 CUDA_VISIBLE_DEVICES=GPU-elsewhere | tail -1)"
+want "a list of indices is left as it is" "CVD=2,3" \
+     "$(bind 0-15 CUDA_VISIBLE_DEVICES=2,3 | tail -1)"
+want "HPCRUN_GPU_BIND=none leaves the job's list alone" "CVD=GPU-1,GPU-0" \
+     "$(bind 0-15 CUDA_VISIBLE_DEVICES=GPU-1,GPU-0 HPCRUN_GPU_BIND=none | tail -1)"
+want "with no GPU on its domain, local rank modulo the job's GPUs" "CVD=GPU-1" \
+     "$(bind 0-15 CUDA_VISIBLE_DEVICES=GPU-0,GPU-1 | tail -1)"
+case "$(bind 0-15 | head -1)" in
+    "host="*" rank=0 cpu=0 numa=0 gpu=GPU-3 bus=0000:c1:00.0 gpu_numa=0 how=numa") ok "each rank logs its GPU" ;;
+    *) bad "the binding log line is wrong" "$(bind 0-15 | head -1)" ;;
+esac
+
+# What the runner reads back.
+printf '%s\n' 'host=n1 rank=0 cpu=0 numa=0 gpu=GPU-3 bus=c1 gpu_numa=0 how=numa' \
+              'host=n1 rank=1 cpu=32 numa=2 gpu=GPU-1 bus=41 gpu_numa=2 how=numa' > "${TMP}/near.txt"
+printf '%s\n' 'host=n1 rank=0 cpu=0 numa=0 gpu=GPU-0 bus=03 gpu_numa=3 how=modulo' \
+              'host=n1 rank=1 cpu=32 numa=2 gpu=GPU-1 bus=41 gpu_numa=2 how=numa' > "${TMP}/far.txt"
+printf '%s\n' 'report_gpus: host=n1 rank=0 kernel=ok' 'report_gpus: host=n1 rank=1 kernel=no kernel image' > "${TMP}/rg.out"
+summ () { bash -c ". '${HERE}/../lib/gpu_bind.sh'; gpu_bind_summary $*
+                  echo \"\${GPU_RANKS} \${GPU_FAR} \${GPU_NO_KERNEL} | \${GPU_SUMMARY}\""; }
+want "two ranks, each on its own NUMA domain's GPU" \
+     "2 0 0 | 2 rank(s) on 2 GPU(s), each on its own NUMA domain" "$(summ "${TMP}/near.txt")"
+case "$(summ "${TMP}/far.txt")" in
+    "2 1 0 | "*"WARNING rank(s) 0 on a GPU of another NUMA domain"*) ok "a rank on a far GPU is named" ;;
+    *) bad "a far GPU was not reported" "$(summ "${TMP}/far.txt")" ;;
+esac
+case "$(summ "${TMP}/near.txt" "${TMP}/rg.out")" in
+    "2 0 1 | "*"kernel ran on 1/2") ok "a rank whose kernel did not run is counted" ;;
+    *) bad "report_gpus was not read" "$(summ "${TMP}/near.txt" "${TMP}/rg.out")" ;;
+esac
+
 echo
 echo "image identity"
 # An image says what it is in its labels, and the launcher asks them before the

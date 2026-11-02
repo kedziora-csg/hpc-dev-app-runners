@@ -60,6 +60,8 @@
 #     ldd_*_host.txt           linkage through the launcher, after the host
 #                              libraries displace the container's
 #     placement_<cell>.out     report_placement output, provenance header first
+#     gpu_bind_<cell>.txt      on a GPU node type: each rank's GPU and NUMA domain
+#     gpus_<cell>.out          and report_gpus from inside the container
 #     run_<cell>[_r<n>]/       the app's own cwd: inputs, app.out, metrics.kv
 #
 # Stdout carries only the narrative: each cell's geometry and placement verdict,
@@ -175,8 +177,9 @@ mkdir -p "${RESULTS_DIR}" \
 #                               for emit_provenance, capture_run_context, the
 #                               sub-second clock and the HPCRUN_VERBOSE helpers
 #   app_contract.sh             app.yaml + the prepare/launch/extract hooks
+#   gpu_bind.sh                 gpu_bind_summary: what GPU each rank got
 #-------------------------------------------------------------------------------
-for lib in make_apptainer_launcher.sh check_placement.sh check_arch.sh results.sh app_contract.sh; do
+for lib in make_apptainer_launcher.sh check_placement.sh check_arch.sh results.sh app_contract.sh gpu_bind.sh; do
     . "${HPCRUN_ROOT}/lib/${lib}" \
         || { echo "cannot source ${HPCRUN_ROOT}/lib/${lib}" >&2; exit 1; }
 done
@@ -243,6 +246,19 @@ vshow ldd_report_placement_host.txt "ldd ${REPORT_EXE}"
 # guessed at.
 img_digest="$(sif_digest "${container_img}")"
 [ -n "${img_digest}" ] && echo "digest    ${img_digest}"
+
+# A node type with GPUs.  The launcher gives each rank one (lib/gpu_bind.sh);
+# report_gpus, which a -cuda image carries by the factory's contract, says from
+# inside the container whether a kernel then runs there.  An image without it
+# -- a CPU image on a GPU node -- is still bound, and only the host side of the
+# binding is checked.
+gpu_report="" gpu_driver="" img_cuda=""
+if [ "${HPCRUN_GPUS_PER_NODE:-0}" -gt 0 ] 2>/dev/null; then
+    gpu_driver="$(sed -n 's/^NVRM version:.*  \([0-9][0-9.]*\)  .*/\1/p' /proc/driver/nvidia/version 2>/dev/null)"
+    img_cuda="$(${launcher} printenv CUDA_VERSION 2>/dev/null | tail -1)"
+    ${launcher} test -x /container/bin/report_gpus 2>/dev/null && gpu_report=/container/bin/report_gpus
+    echo "gpus      ${HPCRUN_GPUS_PER_NODE} x ${HPCRUN_GPU_MODEL:-${HPCRUN_GPU_VENDOR}} a node  (driver ${gpu_driver:-unknown}, image CUDA ${img_cuda:-none}${gpu_report:+, report_gpus})"
+fi
 
 #-------------------------------------------------------------------------------
 # 5. The cells.
@@ -376,6 +392,9 @@ emit_provenance run.meta \
     app_args     "${APP_ARGS:-none}" \
     app_scale    "${HPCRUN_SCALE}" \
     target_arch  "${HPCRUN_TARGET_ARCH:-unset}" \
+    gpus         "${HPCRUN_GPUS_PER_NODE:+${HPCRUN_GPUS_PER_NODE} x ${HPCRUN_GPU_MODEL:-${HPCRUN_GPU_VENDOR}}}" \
+    gpu_driver   "${gpu_driver}" \
+    image_cuda   "${img_cuda}" \
     arch_verdict "${ARCH_VERDICT:-unchecked}" \
     repeats      "${HPCRUN_REPEATS}" \
     launcher     "${launcher}" \
@@ -562,11 +581,36 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
         launcher       "${launcher}" \
         mpiexec        "mpiexec -n ${nranks} ${bound_flags} ${launcher} ${REPORT_EXE}"
 
-    mpiexec -n ${nranks} ${bound_flags} \
+    # On a GPU node type each rank also logs the GPU the launcher gave it.
+    gpu_log=""
+    if [ -n "${HPCRUN_GPUS_PER_NODE:-}" ]; then
+        gpu_log="${RESULTS_DIR}/gpu_bind_${name}.txt"
+        : > "${gpu_log}"
+    fi
+    HPCRUN_GPU_BIND_LOG="${gpu_log}" mpiexec -n ${nranks} ${bound_flags} \
         ${launcher} ${REPORT_EXE} >> "${out}" 2>&1
 
     placement_summary "${out}"
     place="$(placement_verdict "${out}")"
+
+    GPU_FAR=0 GPU_NO_KERNEL=0
+    if [ -n "${gpu_log}" ]; then
+        [ -n "${gpu_report}" ] && mpiexec -n ${nranks} ${bound_flags} \
+            ${launcher} ${gpu_report} > "gpus_${name}.out" 2>&1
+        gpu_bind_summary "${gpu_log}" "${gpu_report:+gpus_${name}.out}"
+        echo "    gpus: ${GPU_SUMMARY}"
+        # A rank whose GPU runs no kernel would measure nothing, under the
+        # name of a GPU run.  Refused like a geometry the app declines.
+        if [ "${GPU_NO_KERNEL}" -gt 0 ] && [ -n "${APP}" ]; then
+            echo "    skipped: no kernel ran on ${GPU_NO_KERNEL} rank(s) -- see gpus_${name}.out"
+            record_common "${name}" "${ppn}" "${nthreads}" "${omp_name}"
+            result_set  placement.verdict "${place}"
+            result_set  skipped true
+            result_str  skip_reason "report_gpus: no kernel ran on ${GPU_NO_KERNEL} of ${GPU_RANKS} rank(s)"
+            result_emit results.jsonl
+            continue
+        fi
+    fi
 
     [ -n "${APP}" ] || { warm=true; continue; }
 
@@ -645,6 +689,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
         result_set  placement.omp.OMP_PROC_BIND "${OMP_PROC_BIND:-}"
         result_set  placement.omp.OMP_PLACES    "${OMP_PLACES:-}"
         for fired in $(placement_rules_fired "${out}"); do result_rule "${fired}"; done
+        [ "${GPU_FAR}" -gt 0 ] && result_rule gpu_far
         result_set  repeat "${repeat}"
         result_set  repeats "${HPCRUN_REPEATS}"
         result_set  wall_s "${wall}"

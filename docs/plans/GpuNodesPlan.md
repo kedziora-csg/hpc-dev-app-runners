@@ -751,6 +751,57 @@ built.
 - Tests: the off-cluster suite covers all of these with fixtures, as
   `test_bench.sh` already does for `pbsnodes` output with `ngpus`.
 
+**Part 1 done, 2026-11-02: the launch path, enough for OSU on `a100`.**
+- **`make_apptainer_launcher.sh`** on a node type whose `node.gpus.vendor` is
+  `nvidia`:
+  - adds `--nv`;
+  - sources `lib/gpu_bind.sh` before the exec, so each rank gets one GPU;
+  - in the `cray-mpich-abi` recipe, preloads GTL through
+    `APPTAINERENV_LD_PRELOAD`, ahead of a variant's preload rather than over
+    it, and refuses to start without the library.
+  - `MPICH_GPU_SUPPORT_ENABLED` stays the app's or the experiment's to set.
+- **On every node type, the launcher binds `PALS_SPOOL_DIR`** at run time,
+  unless a site bind already covers it.
+- **`lib/gpu_bind.sh`** is D5 as written:
+  - the GPU on the NUMA domain of the rank's first core, chosen from the job's
+    `CUDA_VISIBLE_DEVICES` UUIDs;
+  - read from `/proc/driver/nvidia/gpus/*/information` and `/sys`, a few
+    small files per rank instead of a call to `nvidia-smi`;
+  - a UUID that is not on this node is dropped, because PALS gives every node
+    the first node's list, and a node left with none uses all of its own GPUs;
+  - a list of bare indices is left alone;
+  - `HPCRUN_GPU_BIND=none` turns the binding off. It is an environment
+    variable for now: a variant's `env:` may not set `HPCRUN_*`, so the
+    experiment's `gpu_bind: none` waits.
+  - Tried on the login node's two A100s: a rank on CPU 24 (NUMA 3) got
+    03:00 (NUMA 3), and `report_gpus` in `leap-nvhpc-mpich-cuda` ran its
+    kernel there with GTL preloaded.
+- **`runner.sh`** on a GPU node type:
+  - each cell's placement run logs every rank's GPU to `gpu_bind_<cell>.txt`;
+  - `report_gpus`, part of the factory's contract for `-cuda` images, then runs
+    once per rank into `gpus_<cell>.out`;
+  - one line reports the ranks, their GPUs, whether each is NUMA-near, and on
+    how many ranks a kernel ran;
+  - a cell where a kernel did not run on some rank is skipped with its reason;
+  - a far GPU adds the rule `gpu_far` to the row;
+  - `run.meta` gains `gpus`, `gpu_driver` (from `/proc/driver/nvidia/version`)
+    and `image_cuda` (the image's `CUDA_VERSION`).
+- **`experiments/derecho-osu-gpu.yaml`**: OSU on `a100`, two ranks of 32 cores
+  each, on the two nvhpc `-cuda` images: `osu_latency` with host buffers, then
+  `osu_latency` and `osu_bw` with `D D` and `MPICH_GPU_SUPPORT_ENABLED=1`. It
+  makes 6 one-node jobs. This is D7's first acceptance test, through hpcrun.
+- **Tests:** `test_cluster.sh` gains 25: the launcher on a GPU node type and a
+  CPU one, the joined preload, the spool bind, and the binding on a fixture of a
+  Derecho A100 node, with its reversed NUMA order.
+- **Still to do in step 3:**
+  - `probe_topology.sh`'s GPU and memory keys;
+  - the geometry ABI;
+  - `requires.gpu` and `gpu_aware_mpi` (D6, D7);
+  - `host_software` (D8);
+  - `MPICH_OFI_NIC_POLICY=GPU`, which needs a per-node-type `env`;
+  - the `smoke.sh` skip;
+  - the `nvhpc/26.1` pin.
+
 ### Step 4 -- the apps
 
 Two apps per benchmark, one per node type, with figures of the same names, so
