@@ -673,9 +673,49 @@ built.
   - `make derecho-stream` expects both sets;
   - the existing suite is unchanged.
 
+**Done, 2026-11-02**, with these differences from the list above:
+- **Derecho is `cpu` (the default) and `a100`.**
+  - `cpu` states no `images:` of its own.
+  - `a100` states `gpu: {runtime: cuda, target: sm80, arch: -arch=sm_80}`,
+    `compilers: [nvhpc]` and `apps: []`, and takes the cluster's znver3 target.
+  - Its node is as measured in step 0, and PBS offers it 64 CPUs and 498864mb
+    (`pbsnodes deg0066`).
+  - So `derecho` on `a100` is `leap-nvhpc-{mpich,openmpi}-cuda.sif`, `cpu` is
+    unchanged, and `make derecho` builds all eight. It pulls the `-cuda` pair
+    only once those are published.
+- **No apps were added to either list.** `stream`, `hpl`, `nvstream` and
+  `nvhpl` do not exist yet. Listing them would give `make` sets with no images,
+  and the app workflow, by default, jobs that fail. Each is added with its
+  contract in step 4. The `a100` naming is tested on a copy of the description
+  instead: `leap-nvhpc-mpich-cuda-nvstream-znver3-sm80` from
+  `leap-nvhpc-mpich-cuda`, built with `-tp=zen3` and `-arch=sm_80`.
+- **Taken from step 3: the GPU request.** `node.gpus` reaches `cluster.sh`
+  (`HPCRUN_GPUS_PER_NODE`, `_VENDOR`, `_MODEL`), and the job's select chunk
+  ends `:ngpus=4`. Without it an `a100` experiment would have landed on a CPU
+  node described as an A100 one. `validate` shows the GPUs on its node line.
+- **Left for later:**
+  - the `nvhpc/26.1` pin (D9), because it moves the CPU nodes' nvhpc cells,
+    and goes in with the run that checks them;
+  - `host_software` (D8), in step 3 as planned.
+- **Open for step 4: how the description knows an app is contract-only (D3).**
+  `nvstream` and `nvhpl` compile nothing, so they should carry no target. A
+  name is made from the description alone today. Either the app says so in
+  `apps/<app>/` and sitegen reads it, or the description's `apps:` entry does.
+- **Schema.** `gpu` is a sub-cluster key only, and `node.gpus` is allowed in
+  both `node:` blocks.
+- **Checks.**
+  - **`sitegen --check`** refuses:
+    - a `cuda` node type whose node has no NVIDIA GPUs;
+    - a GPU target without its arch, or a sub-cluster target without its march;
+    - a sub-cluster compiler with no host module;
+    - one GPU target spelled two ways.
+  - **Tests:** `test_bench.sh` has 204 tests; it gains 9, and four are
+    reworked: the three that took Derecho to be one node type now use a
+    one-node-type copy of it, and its base set has two more images.
+
 ### Step 3 -- the run path (generic; no app named)
 
-- `jobfile.py`: the GPU request from `node.gpus.count`.
+- ~~`jobfile.py`: the GPU request from `node.gpus.count`.~~ Done in step 2.
 - `make_apptainer_launcher.sh`:
   - `--nv`;
   - the per-rank device of D5. It is chosen in a wrapper on the host side of

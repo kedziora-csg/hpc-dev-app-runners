@@ -40,6 +40,7 @@ EXPORTED = ("HPCRUN_SITE", "HPCRUN_CLUSTER", "HPCRUN_ROOT", "HPCRUN_IMAGE_DIR",
             "HPCRUN_WALLTIME_MAX", "HPCRUN_CORES_PER_NODE", "HPCRUN_SMT",
             "HPCRUN_TARGET_ARCH", "HPCRUN_TOPOLOGY_MODE", "HPCRUN_NODE_SELECT",
             "HPCRUN_PLACE", "HPCRUN_NCPUS",
+            "HPCRUN_GPUS_PER_NODE", "HPCRUN_GPU_VENDOR", "HPCRUN_GPU_MODEL",
             "HPCRUN_SUBCLUSTER", "HPCRUN_SUBCLUSTERS", "HPCRUN_SUBCLUSTER_VERIFIED",
             "HPCRUN_HOST_LIBRARIES")
 
@@ -71,6 +72,10 @@ class Cluster(object):
         self.topology_mode = values.get("HPCRUN_TOPOLOGY_MODE") or "probe"
         self.node_select = values.get("HPCRUN_NODE_SELECT") or ""
         self.place = values.get("HPCRUN_PLACE") or ""
+        # 0 for a node type without GPUs.
+        self.gpus_per_node = _int(values.get("HPCRUN_GPUS_PER_NODE")) or 0
+        self.gpu_vendor = values.get("HPCRUN_GPU_VENDOR") or ""
+        self.gpu_model = values.get("HPCRUN_GPU_MODEL") or ""
 
         # The node type within the cluster, when it has more than one.  Empty
         # for a cluster of one node type, whose profile states no sub-clusters.

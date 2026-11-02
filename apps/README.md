@@ -48,12 +48,15 @@ builds exactly that list, and `make derecho-hpcg` in `sif/` pulls exactly that
 list. The target is in every app image's tag and `.sif` name --
 `leap-oneapi-mpich-hpcg-znver3` -- because one tag must mean one build.
 
-A cluster of several node types can give each its own target: an entry of
-`subclusters:` may carry `images: {target, march}`, which replaces the
-cluster's for that node type. Casper's do, so `apps/matrix.py casper` lists
-every app image twice, `-znver4` for its Genoa nodes and `-cascadelake` for its
-Cascade Lake ones, and one dispatch builds both. Only targets some node type
-uses are built.
+A cluster of several node types can give each its own images: an entry of
+`subclusters:` may carry `images:` with any of `target` and `march`, `gpu`,
+`compilers` and `apps`, each replacing the cluster's for that node type.
+Casper's state a target, so `apps/matrix.py casper` lists every app image
+twice, `-znver4` for its Genoa nodes and `-cascadelake` for its Cascade Lake
+ones, and one dispatch builds both. Derecho's `a100` states a GPU, so its app
+images are built on the `-cuda` bases and named for both targets --
+`leap-nvhpc-mpich-cuda-<app>-znver3-sm80` -- with the GPU's flags passed beside
+the CPU's. Only what some node type uses is built.
 
 **The smoke test on a runner without the target's ISA.** A GitHub-hosted
 runner is often a Zen 3, with no AVX-512. When the app binary needs AVX-512 and

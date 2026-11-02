@@ -14,7 +14,9 @@ derecho_images := leap-oneapi-mpich.sif \
     leap-nvhpc-mpich.sif \
     leap-oneapi-openmpi.sif \
     leap-gcc14-openmpi.sif \
-    leap-nvhpc-openmpi.sif
+    leap-nvhpc-openmpi.sif \
+    leap-nvhpc-mpich-cuda.sif \
+    leap-nvhpc-openmpi-cuda.sif
 derecho_blas_images := leap-oneapi-mpich-blas-znver3.sif \
     leap-gcc14-mpich-blas-znver3.sif \
     leap-nvhpc-mpich-blas-znver3.sif \

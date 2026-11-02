@@ -224,7 +224,12 @@ def write(exp, job, results_dir, template_path, account, profile=None):
         # rather than passed as a separate -l, because a resource that chooses
         # a node belongs to the chunk being described: `-l cpu_type=...` on its
         # own is a job-wide resource and does not mean the same thing.
-        "NODE_SELECT": (":" + exp.cluster.node_select) if exp.cluster.node_select else "",
+        # A GPU node type's GPUs go in the same chunk: every node of the job
+        # gets them, and asking for them is what puts the job on such a node.
+        "NODE_SELECT": "".join(":" + clause for clause in (
+            exp.cluster.node_select,
+            "ngpus=%d" % exp.cluster.gpus_per_node if exp.cluster.gpus_per_node else "")
+            if clause),
         # A whole directive line, or nothing at all.  Its own -l because place is
         # job-wide: PBS reads it as how to spread the chunks and who else may
         # share them, which is not something a chunk can say about itself.

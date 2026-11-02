@@ -96,7 +96,10 @@ def describe(exp, jobs, pre):
     print("node        %d cores, SMT %d%s%s   [%s]"
           % (exp.cluster.cores_per_node, exp.cluster.smt,
              (", %d schedulable" % exp.cluster.ncpus
-              if exp.cluster.ncpus != exp.cluster.cores_per_node else ""),
+              if exp.cluster.ncpus != exp.cluster.cores_per_node else "")
+             + (", %d x %s GPUs" % (exp.cluster.gpus_per_node,
+                                    exp.cluster.gpu_model or exp.cluster.gpu_vendor)
+                if exp.cluster.gpus_per_node else ""),
              (", select %s" % exp.cluster.node_select if exp.cluster.node_select
               else ", NO PROCESSOR SELECTOR")
              + (", place %s" % exp.cluster.place if exp.cluster.place else ""),
@@ -153,7 +156,8 @@ def as_json(exp, jobs, pre):
         "cluster": exp.cluster.name,
         "subcluster": exp.cluster.subcluster or None,
         "node": {"cores_per_node": exp.cluster.cores_per_node, "smt": exp.cluster.smt,
-                 "ncpus": exp.cluster.ncpus, "source": exp.cluster.node_source},
+                 "ncpus": exp.cluster.ncpus, "gpus": exp.cluster.gpus_per_node,
+                 "source": exp.cluster.node_source},
         "jobs": [{"key": j.key, "image": j.image,
                   "app": j.app.get("label") or j.app["name"],
                   "nodes": j.nodes, "walltime": j.walltime, "repeats": j.repeats,

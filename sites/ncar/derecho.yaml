@@ -19,7 +19,7 @@
 schema: 1
 site: ncar
 cluster: derecho
-description: "NCAR Derecho: 2 x AMD EPYC 7763 (Milan) per CPU node, SMT on, HPE Cray EX with Slingshot 11"
+description: "NCAR Derecho: HPE Cray EX with Slingshot 11; AMD EPYC 7763 (Milan) CPU nodes and NVIDIA A100 GPU nodes"
 verified: true
 
 scheduler:
@@ -65,23 +65,65 @@ modules:
     mpich: [openmpi]
     mpich3: [openmpi]
 
-# Fallbacks, not measurements.  The job probes lscpu on the compute node and
-# topology.json carries that answer; these are only what can be known before
-# there is a node to ask, which is when an illegal ranks x threads is still
-# cheap to reject.
-node:
-  cores: 128
-  smt: 2
-  sockets: 2
-  smt_stride: 128         # block layout: sibling of CPU c is c + 128
-  cores_per_l3: 8         # one Milan CCD, 32 MB
-  cores_per_numa: 16      # NPS4: 8 NUMA domains across 128 cores
-  target_arch: x86-64-v3  # Zen 3: AVX2, no AVX-512
-  topology: probe
-  # Appended to the select chunk: `mem` is a per-chunk resource like ncpus, so
-  # it goes here rather than being a key of its own.  Required by the queues
-  # that do not hand out whole nodes by default; harmless on the ones that do.
-  select: mem=230GB
+# Two node types.  The CPU nodes are the default, so an experiment that names
+# no sub-cluster runs where every Derecho experiment ran before the GPU nodes
+# were described.
+#
+# The node: blocks are fallbacks, not measurements.  The job probes lscpu on the
+# compute node and topology.json carries that answer; these are only what can
+# be known before there is a node to ask, which is when an illegal ranks x
+# threads is still cheap to reject.
+default_subcluster: cpu
+
+subclusters:
+  cpu:
+    description: "2 x AMD EPYC 7763 (Milan), 128 cores, SMT on"
+    # No images: of its own -- the cluster's set, built for znver3.
+    node:
+      cores: 128
+      smt: 2
+      sockets: 2
+      smt_stride: 128         # block layout: sibling of CPU c is c + 128
+      cores_per_l3: 8         # one Milan CCD, 32 MB
+      cores_per_numa: 16      # NPS4: 8 NUMA domains across 128 cores
+      target_arch: x86-64-v3  # Zen 3: AVX2, no AVX-512
+      topology: probe
+      # Appended to the select chunk: `mem` is a per-chunk resource like ncpus,
+      # so it goes here rather than being a key of its own.  Required by the
+      # queues that do not hand out whole nodes by default; harmless on the ones
+      # that do.
+      select: mem=230GB
+
+  a100:
+    description: "1 x AMD EPYC 7763 (Milan), 64 cores, 4 x NVIDIA A100-SXM4-40GB"
+    verified: false
+    # The CPU is the CPU nodes' Milan, so the cluster's znver3 target stands.
+    # The images are the factory's -cuda builds, nvhpc only: OpenACC and CUDA
+    # Fortran build only with it, and NVIDIA's own benchmarks do not care which
+    # compiler the image has (GpuNodesPlan.md, D9).  sm80 is the A100.  No
+    # apps yet: nvstream and nvhpl come with their contracts, and until then the
+    # node type runs the base set -- OSU, with device buffers.
+    images:
+      gpu: {runtime: cuda, target: sm80, arch: -arch=sm_80}
+      compilers: [nvhpc]
+      apps: []
+    # Measured on deg0051 (job 8018411, 2026-10-30) with lscpu, numactl and
+    # nvidia-smi, and pbsnodes deg0066 for what PBS offers.
+    node:
+      cores: 64
+      smt: 2
+      sockets: 1
+      smt_stride: 64          # block layout: node0 is CPUs 0-15 and 64-79
+      cores_per_l3: 8
+      cores_per_numa: 16      # NPS4: 4 NUMA domains, about 126 GB each
+      target_arch: x86-64-v3
+      topology: probe
+      # PBS offers 498864mb; the GPUs (ngpus=4) are asked for from gpus: below,
+      # and are what steers a job onto these nodes.
+      select: mem=480GB
+      # Each GPU's NUMA domain runs in reverse of the cores': 03:00 is on
+      # domain 3, C1:00 on domain 0.  Measured, and read per job from sysfs.
+      gpus: {count: 4, vendor: nvidia, model: a100_40gb}
 
 container:
   # Added to the site's /glade and /local_scratch.  All four are Cray: this is

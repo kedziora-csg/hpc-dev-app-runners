@@ -74,8 +74,9 @@ def main():
 
     if args.table:
         for e in entries:
-            print("%-40s from %-24s %s" % (e["tag"], e["base_tag"],
-                                           e["march"] or "(base image's flags)"))
+            print("%-40s from %-24s %s%s" % (e["tag"], e["base_tag"],
+                                             e["march"] or "(base image's flags)",
+                                             " " + e["gpu_arch"] if e["gpu_arch"] else ""))
         return 0
     json.dump({"include": entries}, sys.stdout, separators=(",", ":"))
     sys.stdout.write("\n")
