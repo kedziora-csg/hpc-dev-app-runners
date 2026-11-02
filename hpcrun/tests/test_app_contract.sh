@@ -167,6 +167,11 @@ mkdir -p "${fake}" && : > "${fake}/osu_allreduce" && chmod +x "${fake}/osu_allre
 argv="$(OSU_ROOT="${TMP}/osu-tree" OSU_BENCHMARK=osu_allreduce OSU_MSG_RANGE=8:4096 app_argv)"
 want "osu: launch names the requested benchmark and message range" \
      "${fake}/osu_allreduce -m 8:4096" "${argv}"
+# OSU_BUFFERS goes after the options, in OSU's own spelling, for device buffers.
+argv="$(OSU_ROOT="${TMP}/osu-tree" OSU_BENCHMARK=osu_allreduce OSU_MSG_RANGE=8:4096 \
+        OSU_BUFFERS="-d cuda" app_argv)"
+want "osu: launch appends OSU_BUFFERS for device buffers" \
+     "${fake}/osu_allreduce -m 8:4096 -d cuda" "${argv}"
 
 cat > "${run}/app.out" <<'OSUOUT'
 # OSU MPI Alltoall Latency Test v7.5

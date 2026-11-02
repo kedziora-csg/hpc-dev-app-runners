@@ -26,6 +26,11 @@ notes: |
   Which benchmark runs is OSU_BENCHMARK -- any executable name under the
   collective/ or pt2pt/ trees, default osu_alltoall.  Message range is
   OSU_MSG_RANGE, default 4:1048576.  OSU_ROOT relocates the whole tree.
+  OSU_BUFFERS places the buffers, in OSU's own spelling after its options:
+  "D D" device to device, "-d managed" for a collective; empty is host memory.
+  Device buffers need a CUDA image (tagged -cuda).  In an nvhpc one OSU is
+  built without its CUDA kernels, so point-to-point managed buffers (MD, MH)
+  are refused there.
 
   latency_us is reported at the LARGEST message size in the sweep, which is
   where fabric bandwidth dominates and where the container-versus-host MPI

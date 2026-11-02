@@ -8,6 +8,11 @@
 #-------------------------------------------------------------------------------
 bench="${OSU_BENCHMARK:-osu_alltoall}"
 range="${OSU_MSG_RANGE:-4:1048576}"
+# Where the buffers live, as OSU spells it after its options: "D D" for device
+# to device, "-d managed" for a collective on managed memory.  Empty means host
+# memory.  Device buffers need an image built with CUDA and, under Cray MPICH,
+# MPICH_GPU_SUPPORT_ENABLED=1, which is the runner's to set.
+buffers="${OSU_BUFFERS:-}"
 
 # OSU_ROOT so a tree installed somewhere other than the image default still
 # works without editing this file -- and so the hook can be exercised off-cluster.
@@ -15,7 +20,7 @@ root="${OSU_ROOT:-/container/osu-micro-benchmarks/@OMB_VERSION@}"
 base="${root}/libexec/osu-micro-benchmarks/mpi"
 for sub in collective pt2pt one-sided startup; do
     if [ -x "${base}/${sub}/${bench}" ]; then
-        echo "${base}/${sub}/${bench} -m ${range}"
+        echo "${base}/${sub}/${bench} -m ${range}${buffers:+ ${buffers}}"
         exit 0
     fi
 done
