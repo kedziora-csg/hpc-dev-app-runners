@@ -160,7 +160,7 @@ esac
 # Bound only where the directory exists: apptainer treats a missing bind
 # SOURCE as fatal, so an unconditional bind of a filesystem this machine
 # may lack turns 'that mount is absent' into 'the job will not start'.
-[ -n "${HPCRUN_BINDS_IF_PRESENT+set}" ] || HPCRUN_BINDS_IF_PRESENT='/usr/lpp/mmfs'
+[ -n "${HPCRUN_BINDS_IF_PRESENT+set}" ] || HPCRUN_BINDS_IF_PRESENT='/usr/lpp/mmfs /opt/xpmem'
 # host:container pairs, for a directory that must NOT land on top of the
 # container's own tree.
 [ -n "${HPCRUN_BIND_MAP+set}" ] || HPCRUN_BIND_MAP='/usr/lib64:/host_lib64'
@@ -242,9 +242,20 @@ bench_site_mpi_root () {
 # family.  Where a workaround specific to this machine goes.
 bench_site_mpi_env () {
     case "$1" in
-        mpich   ) echo 'MPICH_SMP_SINGLE_COPY_MODE=NONE MPICH_VERSION_DISPLAY=1' ;;
-        mpich3  ) echo 'MPICH_SMP_SINGLE_COPY_MODE=NONE MPICH_VERSION_DISPLAY=1' ;;
+        mpich   ) echo 'MPICH_VERSION_DISPLAY=1' ;;
+        mpich3  ) echo 'MPICH_VERSION_DISPLAY=1' ;;
         openmpi ) echo 'OMPI_MCA_btl_vader_single_copy_mechanism=none UCX_POSIX_USE_PROC_LINK=n' ;;
+        *       ) echo '' ;;
+    esac
+}
+
+# Host libraries the host MPI needs and an image's app is not linked
+# with, preloaded inside the container for every image of this
+# family.  Literal text: a ${NAME} is expanded by the launcher.
+bench_site_mpi_preload () {
+    case "$1" in
+        mpich   ) echo '/opt/xpmem/lib64/libxpmem.so.0' ;;
+        mpich3  ) echo '/opt/xpmem/lib64/libxpmem.so.0' ;;
         *       ) echo '' ;;
     esac
 }

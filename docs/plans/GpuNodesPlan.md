@@ -537,7 +537,8 @@ built.
     likely cause is `MPICH_SMP_SINGLE_COPY_MODE=NONE`, which the Derecho
     description sets because cross-process memory access does not work in the
     container namespace. That is an open question for measurement against a
-    native run, not a blocker.
+    native run, not a blocker. (Answered in step 3, "Single copy": `NONE`
+    turns off GPU IPC, and XPMEM works with `libxpmem` preloaded.)
   - OSU 7.5 prints `could not identify the local rank` for device buffers,
     because it does not read `PMI_LOCAL_RANK`. That is harmless: each rank sees
     one GPU.
@@ -793,12 +794,71 @@ built.
 - **Tests:** `test_cluster.sh` gains 25: the launcher on a GPU node type and a
   CPU one, the joined preload, the spool bind, and the binding on a fixture of a
   Derecho A100 node, with its reversed NUMA order.
+
+**Single copy, 2026-11-02: XPMEM in place of `NONE`, on both node types.**
+- **What `derecho-osu-gpu` showed.** Every job passed, with each rank on its
+  NUMA-near GPU. But Cray MPICH moved device buffers at 6.5 GB/s between two
+  A100s, where the host Open MPI moved them at 84 GB/s. Cray's `intro_mpi(3)`
+  says `MPICH_SMP_SINGLE_COPY_MODE=NONE`, which Derecho's description set, also
+  turns off GPU IPC.
+- **Job 8052051 (`a100_single_copy.pbs`)** tried `NONE`, `XPMEM`, `CMA` and the
+  variable unset:
+  - without `NONE`, device buffers reached 88 GB/s;
+  - but host buffers over 8 KiB aborted the rank: MPICH fell back to CMA, and
+    the container refuses `process_vm_readv` ("Operation not permitted");
+  - XPMEM was never used. MPICH said "XPMEM symbols are not visible to Cray
+    MPICH": they are weak, Cray's compiler wrappers link `libxpmem` into a
+    native app, and an app built in an image has no such link.
+- **Jobs 8052660 (`a100`) and 8052661 (`cpu`), `xpmem_check.pbs`**, with the
+  host's `libxpmem` preloaded:
+  - XPMEM worked between ranks in separate containers on both node types;
+  - OSU's `-c` data check passed at every size, point to point and alltoall;
+  - with the variable unset, MPICH chose XPMEM itself;
+  - against `NONE`:
+
+    | Node | Test | `NONE` | XPMEM |
+    |---|---|---|---|
+    | cpu | latency across sockets, 4 MiB | 1103 us | 122 us |
+    | cpu | bandwidth across sockets, 4 MiB | 3.7 GB/s | 35 GB/s |
+    | cpu | alltoall, 128 ranks, 64 KiB | 23.2 ms | 9.7 ms |
+    | a100 | latency, host buffers, 4 MiB | 737 us | 120 us |
+    | a100 | bandwidth, device buffers, 4 MiB | 6.5 GB/s | 88 GB/s |
+    | a100 | alltoall, 4 ranks, device buffers, 1 MiB | 1100 us | 92 us |
+
+  - small messages did not change: single copy starts at 8 KiB on host buffers
+    and GPU IPC at 1 KiB, so device latency at 8 bytes stays near 16 us;
+  - compute nodes have `libxpmem` only at `/opt/xpmem/lib64`. Cray's
+    `/opt/cray/xpmem` is on the login nodes alone, so the first run of the
+    job (8052251, 8052263) found no library.
+- **The change:**
+  - a new key in the cluster schema, `mpi.<family>.preload`: host libraries the
+    host MPI needs and an image's app is not linked with. sitegen emits it as
+    `bench_site_mpi_preload`, and refuses a path that no bind puts inside the
+    container;
+  - the launcher preloads it for every image of the family, ahead of GTL's
+    and a variant's, and refuses to start if the file is missing;
+  - Derecho's `mpich` and `mpich3` drop `MPICH_SMP_SINGLE_COPY_MODE=NONE`,
+    preload `/opt/xpmem/lib64/libxpmem.so.0`, and bind `/opt/xpmem` where it
+    exists;
+  - on the login node, a singleton through the new launcher reports
+    `MPICH_SMP_SINGLE_COPY_MODE = XPMEM`;
+  - 8 more tests (5 in `test_cluster.sh`, 3 in `test_bench.sh`).
+- **MPICH results on Derecho from before 2026-11-02 were measured with two
+  copies.** Anything communication-heavy measures differently from now on, so
+  old and new results are not directly comparable. Each results directory
+  keeps its launcher, which records the setting.
+- **To confirm through hpcrun:** `derecho-osu-gpu` and `derecho-osu` again.
+- **Open MPI** has single copy turned off the same way
+  (`OMPI_MCA_btl_vader_single_copy_mechanism=none`) and was not tested. Its
+  1.97 us host latency, against Cray MPICH's 0.5 us, may come from that.
 - **Still to do in step 3:**
   - `probe_topology.sh`'s GPU and memory keys;
   - the geometry ABI;
   - `requires.gpu` and `gpu_aware_mpi` (D6, D7);
   - `host_software` (D8);
-  - `MPICH_OFI_NIC_POLICY=GPU`, which needs a per-node-type `env`;
+  - `MPICH_OFI_NIC_POLICY=GPU`, which needs a per-node-type `env`. That is the
+    only thing left for it, now that single copy is the same on both node
+    types; it matters once a job spans nodes;
   - the `smoke.sh` skip;
   - the `nvhpc/26.1` pin.
 
@@ -925,10 +985,10 @@ part of this phase's acceptance.
 
 - ~~**GPU-node geometry.**~~ Measured in step 0: NPS4, block SMT, and the GPUs'
   NUMA domains in reverse of PCI order.
-- **Intra-node device-to-device latency** (16 us, step 0) looks staged through
-  the host. Compare it with the same OSU run natively on the host, and with
-  `MPICH_SMP_SINGLE_COPY_MODE` left unset, before reading GPU communication
-  figures from the container.
+- ~~**Intra-node device-to-device latency**~~ (16 us, step 0). It was
+  `MPICH_SMP_SINGLE_COPY_MODE=NONE`, which turns off GPU IPC: with XPMEM, 88
+  GB/s between two A100s (step 3, "Single copy"). The 16 us at 8 bytes stands.
+  It is below the GPU IPC threshold.
 - **Across nodes** nothing GPU-related has been run. The two-node OSU run that
   the earlier work did is part of step 5.
 - **HPL-NVIDIA across nodes needs NCCL to reach Slingshot.**

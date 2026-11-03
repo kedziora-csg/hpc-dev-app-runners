@@ -237,6 +237,15 @@ bench_site_mpi_env () {
     esac
 }
 
+# Host libraries the host MPI needs and an image's app is not linked
+# with, preloaded inside the container for every image of this
+# family.  Literal text: a ${NAME} is expanded by the launcher.
+bench_site_mpi_preload () {
+    case "$1" in
+        *       ) echo '' ;;
+    esac
+}
+
 #-- host libraries an experiment may preload -----------------------------
 # By name, from a variant's host_library:.  The runner preloads the files
 # inside the container (LD_PRELOAD) for that variant's cells and sets the

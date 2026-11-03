@@ -388,6 +388,15 @@
                 }
               }
             },
+            "preload": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^(/|\\$\\{)[A-Za-z0-9_./${}+-]*$"
+              },
+              "description": "Host shared objects the host MPI needs and an app built in an image is not linked with, preloaded inside the container (LD_PRELOAD) for every image of this family, ahead of anything the recipe or a variant preloads. Derecho's libxpmem: Cray's compiler wrappers link it into a native app, and without it Cray MPICH cannot use XPMEM. Absolute paths under a directory container.binds or binds_if_present binds; ${NAME} is allowed for a variable the environment sets. The launcher refuses a family whose file is not there."
+            },
             "notes": {
               "type": "string",
               "description": "Free text. What was checked, and what would make it stop being true."

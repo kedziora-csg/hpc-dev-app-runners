@@ -570,6 +570,15 @@ host_libraries:
 cluster_case "a host library with a relative preload is refused" reject "${cluster_base}
 host_libraries:
   mkl: {preload: [lib/libmkl_rt.so.2]}"
+# A preloaded file the container cannot see would be skipped with a warning.
+with_preload () { printf '%s\n' "${cluster_base}" | sed "/^  openmpi:/s|}\$|, preload: [$1]}|"; }
+cluster_case "an MPI preload under a bind is accepted" ok \
+    "$(with_preload '/glade/lib/libxpmem.so.0, "${XPMEM}/libxpmem.so.0"')"
+cluster_case "an MPI preload under no bind is refused" reject \
+    "$(with_preload /opt/xpmem/lib64/libxpmem.so.0)"
+cluster_case "an MPI preload under a bind-if-present is accepted" ok \
+    "$(with_preload /opt/xpmem/lib64/libxpmem.so.0 \
+       | sed 's|binds: \[/glade\]|binds: [/glade], binds_if_present: [/opt/xpmem]|')"
 cluster_case "a value carrying a quote is refused, not quoted" reject \
     "${cluster_base%$'\n'*}
   openmpi: {launcher: openmpi, overlay: host-openmpi, env: {X: \"a'\\\"b\"}}"

@@ -437,6 +437,31 @@ make_apptainer_launcher () {
             ;;
     esac
 
+    # Host libraries the host MPI needs and an app built in an image is not
+    # linked with: the description's mpi.<family>.preload.  Derecho's libxpmem
+    # is one -- Cray's wrappers link it into a native app, and Cray MPICH's
+    # XPMEM symbols are weak, so without it single copy falls back to CMA,
+    # which the container refuses.  Checked here, because LD_PRELOAD of a
+    # missing file is a warning and the run goes on without it.
+    local entry var mpi_preload=""
+    if command -v bench_site_mpi_preload >/dev/null 2>&1; then
+        for entry in $(bench_site_mpi_preload "${family}"); do
+            case "${entry}" in
+                '${'*'}'*)
+                    var="${entry#\$\{}"; var="${var%%\}*}"
+                    entry="${!var:-}${entry#*\}}" ;;
+            esac
+            [ -f "${entry}" ] || {
+                echo "make_apptainer_launcher: mpi.${family}.preload names ${entry},"
+                echo "  which does not exist.  Update the cluster's YAML and run"
+                echo "  hpcrun/sitegen --write."
+                return 1
+            }
+            mpi_preload="${mpi_preload:+${mpi_preload}:}${entry}"
+        done
+    fi
+    mpi_preload="${mpi_preload}${gtl:+${mpi_preload:+:}${gtl}}"
+
     # The overlay's own directory first, then the site's, then whatever the bind
     # map renamed -- that last one has no host directory to test for, so it is
     # appended after _join_libpath rather than through it.
@@ -484,13 +509,13 @@ esac"
 # One GPU a rank, the one on its own NUMA domain.
 . '${_LAUNCHER_HERE}/gpu_bind.sh' && gpu_bind"
     fi
-    if [ -n "${gtl}" ]; then
+    if [ -n "${mpi_preload}" ]; then
         # Inside the container only, ahead of whatever a variant preloads:
         # one list, never one written over the other.
         preload_var="$(printf '%s' "${HPCRUN_CONTAINER_RUNTIME}" | tr '[:lower:]' '[:upper:]')ENV_LD_PRELOAD"
         _LAUNCHER_PRE="${_LAUNCHER_PRE}
-# Cray MPICH's GPU transport, inside the container, ahead of a variant's preload.
-export ${preload_var}='${gtl}'\"\${${preload_var}:+:\${${preload_var}}}\""
+# The host MPI's own libraries, inside the container, ahead of a variant's preload.
+export ${preload_var}='${mpi_preload}'\"\${${preload_var}:+:\${${preload_var}}}\""
     fi
 
     vecho "Making launcher for ${img} (family=${family} overlay=${overlay}) in dir $(pwd)"

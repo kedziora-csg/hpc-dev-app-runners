@@ -130,6 +130,10 @@ container:
   # what an HPE Cray EX has and an ordinary cluster does not.
   binds: [/run, /var/run, /opt/cray, /etc/cray]
 
+  # The compute nodes' libxpmem, which mpi.mpich.preload names.  Login nodes
+  # also have Cray's own under /opt/cray/xpmem, which compute nodes do not.
+  binds_if_present: [/opt/xpmem]
+
   # In this order, after whatever the MPI overlay prepends.  A * entry is a glob
   # and takes its newest match, because these directories carry a version number
   # that changes under us at every system update.  ${NCAR_ROOT_LIBFABRIC} is what
@@ -151,22 +155,32 @@ mpi:
     launcher: pals
     overlay: cray-mpich-abi
     env:
-      MPICH_SMP_SINGLE_COPY_MODE: NONE
       MPICH_VERSION_DISPLAY: 1
+    preload: [/opt/xpmem/lib64/libxpmem.so.0]
     notes: |
       Verified 2026-09-04: libmpi.so.12 resolves under lib-abi-mpich for all
-      three compilers.  MPICH_SMP_SINGLE_COPY_MODE=NONE because XPMEM/CMA
-      single-copy needs ptrace visibility across ranks that the container
-      namespace does not have.  MPICH_VERSION_DISPLAY=1 so the job log states
-      which MPI actually initialised, which is the fastest way to catch the shim
-      not taking effect.
+      three compilers.  MPICH_VERSION_DISPLAY=1 so the job log states which MPI
+      actually initialised, which is the fastest way to catch the shim not
+      taking effect.
+
+      Single copy is XPMEM, Cray's own choice, with libxpmem preloaded: an app
+      built in an image is not linked with it the way Cray's wrappers link a
+      native one, and Cray MPICH's XPMEM symbols are weak, so without it MPICH
+      says "XPMEM symbols are not visible" and falls back to CMA.  CMA is
+      refused between containers (process_vm_readv: Operation not permitted)
+      and aborts the rank on the first host message over 8 KiB.  Measured
+      2026-11-02, jobs 8052660 (a100) and 8052661 (cpu), OSU with -c passing at
+      every size: against MPICH_SMP_SINGLE_COPY_MODE=NONE, which was set here
+      before, 4 MiB host messages 9 times faster across sockets (1103 -> 122
+      us), and on a100 GPU IPC back -- 6.5 -> 88 GB/s between two A100s.
+      Results before that date were measured with two copies.
 
   mpich3:
     launcher: pals
     overlay: cray-mpich-abi
     env:
-      MPICH_SMP_SINGLE_COPY_MODE: NONE
       MPICH_VERSION_DISPLAY: 1
+    preload: [/opt/xpmem/lib64/libxpmem.so.0]
 
   openmpi:
     launcher: openmpi

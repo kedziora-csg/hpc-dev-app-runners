@@ -23,8 +23,9 @@ images:
 
 # Host buffers with GPU support off, the cost of GTL alone; then device buffers,
 # which need MPICH_GPU_SUPPORT_ENABLED=1 under Cray MPICH -- without it a device
-# buffer crashes the rank.  The Open MPI image is the open question: whether the
-# host Open MPI is CUDA-aware is not yet known, and its device cells say.
+# buffer crashes the rank.  The host Open MPI is CUDA-aware (84 GB/s, the first
+# run).  Cray MPICH reached 6.5 GB/s until single copy became XPMEM; 88 GB/s
+# since (GpuNodesPlan.md, step 3, "Single copy").
 apps:
   - name: osu
     label: latency-host

@@ -464,6 +464,20 @@ def cross_checks(data):
 
     binds = (data.get("container") or {}).get("binds") or []
     bind_map = (data.get("container") or {}).get("bind_map") or {}
+
+    # A preloaded file the container cannot see is a warning from the loader,
+    # not an error, and the run goes on without it.  A ${NAME} entry is checked
+    # by the launcher, which is where NAME has a value.
+    present = binds + ((data.get("container") or {}).get("binds_if_present") or [])
+    for family, spec in sorted(mpi.items()):
+        for path in spec.get("preload") or []:
+            if path.startswith("${"):
+                continue
+            if not any(path.startswith(b.rstrip("/") + "/") for b in present):
+                out.append(
+                    "mpi.%s.preload names %s, which no container.binds or "
+                    "binds_if_present entry puts inside the container"
+                    % (family, path))
     for host_path in sorted(bind_map):
         if host_path in binds:
             out.append(
@@ -826,6 +840,13 @@ def render(sf, source_rel=None):
                  FAMILIES,
                  comment="NAME=VALUE, space separated, set inside the container for this\n"
                          "family.  Where a workaround specific to this machine goes.")
+    out.append("")
+    out += _case("bench_site_mpi_preload",
+                 dict((f, list(s["preload"])) for f, s in mpi.items() if s.get("preload")),
+                 FAMILIES,
+                 comment="Host libraries the host MPI needs and an image's app is not linked\n"
+                         "with, preloaded inside the container for every image of this\n"
+                         "family.  Literal text: a ${NAME} is expanded by the launcher.")
     out.append("")
 
     hostlibs = d.get("host_libraries") or {}
