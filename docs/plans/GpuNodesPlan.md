@@ -847,7 +847,37 @@ built.
   copies.** Anything communication-heavy measures differently from now on, so
   old and new results are not directly comparable. Each results directory
   keeps its launcher, which records the setting.
-- **To confirm through hpcrun:** `derecho-osu-gpu` and `derecho-osu` again.
+- **Confirmed through hpcrun, 2026-11-04**, at `c4e92ff`:
+  - `derecho-osu-gpu`, all 6 jobs finished, every rank on its NUMA-near GPU;
+    no output has an XPMEM warning or an error:
+
+    | Image | Test | 8 B | 1 MiB | 4 MiB |
+    |---|---|---|---|---|
+    | mpich | bandwidth, device buffers | 0.96 MB/s | 72 GB/s | 88 GB/s |
+    | mpich | latency, device buffers | 15.9 us | 22 us | 56 us |
+    | mpich | latency, host buffers | 0.51 us | 40 us | 154 us |
+    | openmpi | bandwidth, device buffers | 1.1 MB/s | 63 GB/s | 84 GB/s |
+    | openmpi | latency, host buffers | 2.5 us | 194 us | 758 us |
+
+    The run wrote over the 2026-11-02 results in `derecho-osu-gpu/`; their
+    6.5 GB/s is recorded above.
+  - `derecho-osu` (2 nodes, 256 ranks, median of 3), against the October run
+    (`runs/znver3-2026-10-22/osu`). The three images agree to within a few
+    per cent; gcc14's:
+
+    | Test | 16 KiB | 64 KiB | 1 MiB |
+    |---|---|---|---|
+    | mpich allreduce | 77 -> 57 us | 432 -> 140 us | 2764 -> 1107 us |
+    | mpich alltoall | 18.4 -> 13.0 ms | 72.8 -> 56.1 ms | 1117 -> 932 ms |
+
+    Allreduce is 2.5 to 3 times faster from 64 KiB. Alltoall gains less,
+    1.2 to 1.4 times, because across two nodes most of its traffic is on the
+    network, where single copy does not apply. Small messages and Open MPI's
+    allreduce are unchanged.
+  - The three Open MPI `osu_alltoall` jobs hit their 20-minute walltime, as in
+    October. That is the site's `openmpi/5.0.9` falling back to TCP
+    (`ImagePublishingPlan.md`, step 4), not this change: about 450 ms an
+    alltoall at 1 KiB, the size both runs stopped at.
 - **Open MPI** has single copy turned off the same way
   (`OMPI_MCA_btl_vader_single_copy_mechanism=none`) and was not tested. Its
   1.97 us host latency, against Cray MPICH's 0.5 us, may come from that.
