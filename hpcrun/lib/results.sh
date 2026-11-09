@@ -25,9 +25,15 @@
 #     top level     site cluster subcluster job_id nodes repeat wall_s exit
 #                   valid warm   (subcluster is null for a one-node-type cluster)
 #     image.        sif digest os compiler mpi target
-#     app.          name version scale app_dir_override
+#     app.          name version scale app_dir_override binary binary_sha256
+#                   (binary: the executable this cell's argv starts, which a launch
+#                   hook may choose; run.meta hashes the contract's `binary` only)
 #     placement.    name ranks_per_node threads mpiexec_flags verdict
 #     placement.omp.<VAR>
+#     geometry.     ranks cores_per_node cores_per_l3 cores_per_numa mem_per_node_mb
+#                   gpus_per_node gpus_per_rank gpu_mem_mb -- what the app's hooks
+#                   were told (app_export_geometry), so a row can be grouped by
+#                   the hardware it had without its job's topology.json
 #     variant.      name, env.<NAME>  -- the experiment's `variants:` entry
 #     metrics.<name>          -- via result_metric / result_metrics_from_file
 #     placement.rules[]       -- via result_rule
@@ -57,9 +63,11 @@ _RES_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${_RES_HERE}/provenance.sh" || return 1 2>/dev/null || exit 1
 
 _R_TOP="" _R_IMAGE="" _R_APP="" _R_PLACE="" _R_OMP="" _R_METRICS="" _R_RULES=""
+_R_GEOM=""
 
 result_reset () {
     _R_TOP="" _R_IMAGE="" _R_APP="" _R_PLACE="" _R_OMP="" _R_METRICS="" _R_RULES=""
+    _R_GEOM=""
     _R_VARIANT="" _R_VARENV=""
 }
 
@@ -96,6 +104,7 @@ _result_add () {
         variant.env.*)   sect=VARENV;  key="${field#variant.env.}" ;;
         variant.*)       sect=VARIANT; key="${field#variant.}" ;;
         placement.*)     sect=PLACE;   key="${field#placement.}" ;;
+        geometry.*)      sect=GEOM;    key="${field#geometry.}" ;;
         metrics.*)       sect=METRICS; key="${field#metrics.}" ;;
         *)               sect=TOP;     key="${field}" ;;
     esac
@@ -105,6 +114,7 @@ _result_add () {
         IMAGE)   _R_IMAGE="${_R_IMAGE:+${_R_IMAGE},}\"${key}\":${rendered}" ;;
         APP)     _R_APP="${_R_APP:+${_R_APP},}\"${key}\":${rendered}" ;;
         PLACE)   _R_PLACE="${_R_PLACE:+${_R_PLACE},}\"${key}\":${rendered}" ;;
+        GEOM)    _R_GEOM="${_R_GEOM:+${_R_GEOM},}\"${key}\":${rendered}" ;;
         OMP)     _R_OMP="${_R_OMP:+${_R_OMP},}\"${key}\":${rendered}" ;;
         VARIANT) _R_VARIANT="${_R_VARIANT:+${_R_VARIANT},}\"${key}\":${rendered}" ;;
         VARENV)  _R_VARENV="${_R_VARENV:+${_R_VARENV},}\"${key}\":${rendered}" ;;
@@ -166,6 +176,8 @@ result_emit () {
         place="${place:+${place},}\"rules\":[${_R_RULES}]"
         rec="${rec},\"placement\":{${place}}"
     fi
+
+    [ -n "${_R_GEOM}" ] && rec="${rec},\"geometry\":{${_R_GEOM}}"
 
     if [ -n "${_R_VARIANT}${_R_VARENV}" ]; then
         place="${_R_VARIANT}"

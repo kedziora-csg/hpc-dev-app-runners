@@ -886,8 +886,12 @@ built.
   keys, the geometry ABI, `requires.gpu` and `gpu_aware_mpi`, `host_software`,
   `MPICH_OFI_NIC_POLICY=GPU`, the `smoke.sh` skip, and the `nvhpc/26.1` pin.
 
-**Part 2 done, 2026-11-09: what an app requires, and what it is told.** All
-off-cluster; nothing here has run in a job yet.
+**Part 2 done, 2026-11-09: what an app requires, and what it is told.**
+Confirmed in jobs the same day: `derecho-osu-gpu` on a100 (jobs 8127891-96,
+all 18 runs comparable; 88.0 GB/s Cray MPICH and 84.1 GB/s Open MPI device to
+device, as before) and two `derecho-osu` cells of the gcc14 MPICH image on cpu
+(8128274-75, within 0.4% and 6.6% of the 2026-11-04 runs). The probe reported
+491520 MiB on a100 and 235520 MiB on cpu, the jobs' cgroup limits.
 - **`probe_topology.sh`** writes five more keys to `topology.json`:
   - `mem_per_node_mb`: MemTotal, or the job's cgroup limit when that is
     smaller (cgroup v1 or v2);
@@ -943,6 +947,23 @@ off-cluster; nothing here has run in a job yet.
   Derecho, rather than the newest one the comment promises. This was already
   so in the 2026-11-04 launchers. It belongs with the MPI settings study.
 - **Tests:** `test_cluster.sh` 56 -> 73; `test_bench.sh` 210 -> 222.
+- **After those jobs:**
+  - each `results.jsonl` record gains a `geometry` block, the values its app
+    was told (ranks, cores per node, L3 and NUMA domain, memory, GPUs per node
+    and per rank, GPU memory). They were set per run and recorded nowhere, and
+    a row could be grouped by hardware only through its job's `topology.json`;
+  - `binary_sha256` in `run.meta` hashes the contract's `binary`, which a
+    launch hook may not run: OSU's names `osu_alltoall` and runs `osu_bw`. Each
+    record now carries `app.binary` and `app.binary_sha256` for the executable
+    its argv starts, and `run.meta` names the binary it hashed;
+  - `collect --best` failed on two cells that tie (every OSU cell has one
+    `msg_bytes`) by comparing the rows themselves. Confirmed in jobs
+    8128909-11.
+- **For the factory:** OSU's `extract` calls the second column of the last
+  line `latency_us` whatever the benchmark, so an `osu_bw` cell records MB/s
+  as a latency and `collect` ranks it lower-is-better. The metric should be
+  named for what the benchmark reports. The contract is the factory's; copy
+  the fixture again when it changes.
 - **Still to do in step 3:**
   - Derecho's `host_software:` entries, once the site install (D8) has a home
     on GLADE outside scratch;

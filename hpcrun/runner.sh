@@ -371,7 +371,9 @@ if [ -n "${APP}" ]; then
         exit 1
     fi
     # What actually ran, when the image digest alone cannot say: a binary from
-    # host software is not in the image at all.
+    # host software is not in the image at all.  This is the contract's
+    # `binary`; each cell hashes the one its argv starts, which a launch hook
+    # may have changed, into its record.
     app_sha256="$(${launcher} sha256sum "${APP_BINARY}" 2>/dev/null | awk 'NR == 1 { print $1 }')"
 
     # The contract's declared binary.  What actually runs may differ -- a launch
@@ -418,6 +420,7 @@ emit_provenance run.meta \
     gpu_driver   "${gpu_driver}" \
     image_cuda   "${img_cuda}" \
     host_software "${host_software}" \
+    binary       "${APP_BINARY:-}" \
     binary_sha256 "${app_sha256:-}" \
     gpu_aware_mpi "${HPCRUN_REQUIRES_GPU_AWARE_MPI:-false}" \
     arch_verdict "${ARCH_VERDICT:-unchecked}" \
@@ -493,6 +496,19 @@ record_common () {
             result_str "variant.env.${kv%%=*}" "${kv#*=}"
         done
     fi
+}
+
+# record_geometry -- what app_export_geometry told the app's hooks, into the
+# record.  Only after that call: before it, these name the previous cell.
+record_geometry () {
+    result_set  geometry.ranks           "${HPCRUN_RANKS:-}"
+    result_set  geometry.cores_per_node  "${HPCRUN_CORES_PER_NODE:-}"
+    result_set  geometry.cores_per_l3    "${HPCRUN_CORES_PER_L3:-}"
+    result_set  geometry.cores_per_numa  "${HPCRUN_CORES_PER_NUMA:-}"
+    result_set  geometry.mem_per_node_mb "${HPCRUN_MEM_PER_NODE_MB:-}"
+    result_set  geometry.gpus_per_node   "${HPCRUN_GPUS_PER_NODE:-0}"
+    result_set  geometry.gpus_per_rank   "${HPCRUN_GPUS_PER_RANK:-0}"
+    result_set  geometry.gpu_mem_mb      "${HPCRUN_GPU_MEM_MB:-}"
 }
 
 # variant_apply <cell index> -- unset the previous cell's variant settings,
@@ -664,6 +680,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
             skip="$(tail -3 "${rundir}/prepare.log" 2>/dev/null | tr '\n' ' ')"
             echo "    skipped: ${app_name} declined this geometry${skip:+ -- ${skip}}"
             record_common "${name}" "${ppn}" "${nthreads}" "${omp_name}"
+            record_geometry
             result_set  placement.verdict "${place}"
             result_set  repeat "${repeat}"
             result_set  skipped true
@@ -674,9 +691,25 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
 
         argv="$(app_argv)"
         # Append the resolved command to this cell's placement report, so the
-        # .out says what ran rather than what the contract defaults to.
-        [ "${repeat}" -eq 1 ] && \
+        # .out says what ran rather than what the contract defaults to.  And
+        # the executable it starts, with its hash: a launch hook may pick
+        # another than the contract's `binary` (OSU runs osu_bw or osu_latency
+        # where the contract names osu_alltoall), and run.meta hashes only
+        # that one.  An argv that does not start with an absolute path -- a
+        # command found on PATH -- is recorded without a hash.
+        if [ "${repeat}" -eq 1 ]; then
             printf '# %-16s %s\n' app_argv "${argv} ${APP_ARGS}" >> "${out}"
+            cell_binary="${argv%% *}" cell_sha256=""
+            if [ "${cell_binary}" = "${APP_BINARY}" ]; then
+                cell_sha256="${app_sha256:-}"
+            else
+                case "${cell_binary}" in
+                    /*) cell_sha256="$(${launcher} sha256sum "${cell_binary}" 2>/dev/null \
+                                       | awk 'NR == 1 { print $1 }')" ;;
+                esac
+            fi
+            printf '# %-16s %s\n' app_sha256 "${cell_sha256:-unknown}" >> "${out}"
+        fi
 
         cd "${rundir}" || exit 1
 
@@ -710,6 +743,9 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
         # every completed run and loses only the one that was going.
         #-----------------------------------------------------------------------
         record_common "${name}" "${ppn}" "${nthreads}" "${omp_name}"
+        record_geometry
+        result_str  app.binary               "${cell_binary}"
+        result_set  app.binary_sha256        "${cell_sha256}"
         result_str  placement.mpiexec_flags  "${bound_flags}"
         result_set  placement.verdict        "${place}"
         result_set  placement.omp.OMP_PROC_BIND "${OMP_PROC_BIND:-}"
