@@ -14,10 +14,13 @@
 # for a problem that small.
 #
 # Passes when the run exits 0, extract prints the app's primary_fom, and the app
-# does not judge its own result invalid.  Nothing here names an app.  An app
-# binary needing AVX-512 on a host without it is not run, and says
-# "run skipped: host lacks the target's ISA"; it exits 0, since that is the
-# host's limit and not the image's fault.
+# does not judge its own result invalid.  Nothing here names an app.  Three
+# things a host may lack are its limit and not the image's fault, so the run is
+# skipped, said so, and exits 0, after the contract is resolved and its prepare
+# and launch hooks have run:
+#     run skipped: host has no GPU                 requires.gpu, and no GPU here
+#     run skipped: host software ... not here      requires.host_software
+#     run skipped: host lacks the target's ISA     an AVX-512 build, say
 #-------------------------------------------------------------------------------
 set -u
 app="${1:?usage: smoke.sh <app> [ranks] [threads]}"
@@ -50,6 +53,40 @@ app_prepare "${run}" || { cat "${run}/prepare.log" 2>/dev/null; fail "prepare de
 
 argv="$(app_argv)"
 [ -n "${argv}" ] || fail "neither launch nor binary gave an argv"
+
+# What the contract requires of the host.  The requires: block is nested, which
+# the job never reads (app_contract.sh); this is a test tool, and the two keys
+# it needs are a scalar and a list of names.
+requires () {
+    awk -v key="$1" '
+        /^requires:/ { inside = 1; next }
+        inside && /^[^[:space:]#]/ { inside = 0 }
+        !inside { next }
+        list && /^[[:space:]]+-[[:space:]]/ { sub(/^[[:space:]]+-[[:space:]]*/, ""); sub(/[[:space:]]+#.*/, ""); printf "%s ", $0; next }
+        { list = 0 }
+        $1 == key ":" {
+            sub(/^[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]+#.*/, "")
+            if ($0 == "") { list = 1; next }
+            gsub(/[][,"\047]/, " "); printf "%s ", $0
+        }' "${out}/app.yaml" | tr -s ' ' | sed 's/^ //; s/ $//'
+}
+need_gpu="$(requires gpu)"
+need_sw="$(requires host_software)"
+if [ -n "${need_gpu}" ]; then
+    if [ -x /container/bin/report_gpus ] && /container/bin/report_gpus > "${out}/gpus.txt" 2>&1; then
+        grep -m1 -i 'device\|gpu' "${out}/gpus.txt" | sed 's/^/gpu       /'
+    else
+        echo "smoke: ${app}: run skipped: host has no GPU (requires.gpu: ${need_gpu})"
+        rm -rf "${out}"
+        exit 0
+    fi
+fi
+if [ -n "${need_sw}" ] && [ -n "${APP_BINARY:-}" ] && [ ! -x "${APP_BINARY}" ]; then
+    echo "smoke: ${app}: run skipped: host software ${need_sw} is not here" \
+         "(${APP_BINARY} comes from the site's install, never the image)"
+    rm -rf "${out}"
+    exit 0
+fi
 
 # An image built for a node type's target (znver4, cascadelake) can need AVX-512
 # that the host running this -- a CI runner, often a Zen 3 -- lacks.  The run

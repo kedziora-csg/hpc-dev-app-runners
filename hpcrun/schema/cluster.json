@@ -454,6 +454,53 @@
         }
       }
     },
+    "host_software": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Software this cluster installs on the host for a container to use, by name: an app's requires.host_software names it, and the launcher binds it into the container for that app's jobs. For software that may not travel in an image -- NVIDIA's HPC-Benchmarks, whose license forbids redistribution -- and for libraries the site maintains, such as the NCCL of its nvhpc module. Declared here, once, because the paths are this machine's; the app names only what it needs. A job's run.meta records each one's name, version and path, and the sha256 of the app's binary, because the image digest no longer says what ran.",
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "description": "One install.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "What it is, which version, and where it came from."
+            },
+            "version": {
+              "type": "string",
+              "description": "Recorded in run.meta with the path."
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(/|\\$\\{)[A-Za-z0-9_./${}+-]*$",
+              "description": "The directory on the host. ${mpi} is the image's MPI family (mpich, mpich3, openmpi), for software built once per MPI ABI; any other ${NAME} is a variable the environment sets, expanded once the host modules are loaded, as mpi.<family>.root is. hpcrun/validate and the launcher refuse a job whose directory is not there."
+            },
+            "mount": {
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9_./+-]*$",
+              "description": "Where it appears inside the container. Omitted, at its own path -- which a container.binds entry may already cover."
+            },
+            "lib_dirs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.+-][A-Za-z0-9_./+-]*$"
+              },
+              "description": "Directories under it, relative, put on LD_LIBRARY_PATH inside the container after the MPI overlay's own and before container.lib_dirs."
+            },
+            "notes": {
+              "type": "string",
+              "description": "Free text: what was checked, and what would make it stop being true."
+            }
+          }
+        }
+      }
+    },
     "cluster": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_-]*$",

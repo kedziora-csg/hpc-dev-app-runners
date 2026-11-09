@@ -176,6 +176,9 @@ Ramble's noun, on purpose. Every key that extract may print, plus wall_s which t
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
+| `gpu` | `cuda` |  |  | The GPU runtime the app needs. hpcrun/validate and hpcrun/submit refuse it on a node type without such GPUs, and apps/smoke.sh resolves the contract and runs prepare and launch, then skips the run, on a host with none. |
+| `gpu_aware_mpi` | boolean |  |  | The app passes device buffers to MPI. On a node type with NVIDIA GPUs and Cray MPICH the launcher then sets MPICH_GPU_SUPPORT_ENABLED=1, unless a variant sets it first. Off by default because it costs host-buffer messages about 6.5 us each (GpuNodesPlan.md, step 0). Requires gpu. |
+| `host_software` | list of string |  |  | Host software, by name from the cluster description's host_software:, that the app runs from -- a binary whose license keeps it out of any image, or a library the site maintains. The launcher binds each into the container for this app's jobs; hpcrun/validate and hpcrun/submit refuse a cluster that lacks one, or whose path does not exist for the image's MPI family. |
 | `min_ranks` | integer |  | at least 1 |  |
 | `mpi` | boolean |  |  |  |
 | `openmp` | boolean |  |  | false means a thread sweep measures nothing for this app -- rank count is the axis that matters. |
@@ -199,6 +202,7 @@ What one cluster provides, stated once and split across two files. sites/<site>.
 | `default_subcluster` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | The sub-cluster used when an experiment names none. Required once subclusters: exists, and must be one of its keys: which node type a job lands on is a decision, so it is written down rather than taken from whichever entry comes first. |
 | `description` | string |  |  | What this machine is, for whoever reads a results directory a year from now. Copied into the generated block as a comment. |
 | [`host_libraries`](#clusterhost_libraries) | object |  | no other keys | Libraries this cluster provides on the host that an experiment may put in place of the container's own, by name -- the way mpi: puts the host's MPI in. A variant names one with host_library:, and the runner preloads it inside the container for that variant's cells and sets its env. Declared here, once, because the paths are this machine's and change when it is updated; an experiment names only the library. Nothing is added to the image. |
+| [`host_software`](#clusterhost_software) | object |  | no other keys | Software this cluster installs on the host for a container to use, by name: an app's requires.host_software names it, and the launcher binds it into the container for that app's jobs. For software that may not travel in an image -- NVIDIA's HPC-Benchmarks, whose license forbids redistribution -- and for libraries the site maintains, such as the NCCL of its nvhpc module. Declared here, once, because the paths are this machine's; the app names only what it needs. A job's run.meta records each one's name, version and path, and the sha256 of the app's binary, because the image digest no longer says what ran. |
 | [`images`](#clusterimages) | object |  | no other keys | The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.set names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced. |
 | [`modules`](#clustermodules) | object |  | no other keys | The module environment, which is the one thing every job here must do identically and the thing that was copied into five PBS scripts before this file existed. |
 | [`mpi`](#clustermpi) | object |  | no other keys | One entry per container MPI family this site can host. A family absent here is one this machine cannot run, which the runner reports as such rather than attempting and failing inside the container. |
@@ -256,6 +260,27 @@ Set inside the container with the library -- MKL_THREADING_LAYER, for one. A var
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `<name>` | string, integer or boolean |  | key matches `/^[A-Za-z_][A-Za-z0-9_]*$/` | The value, exported as it is written. |
+
+#### `cluster.host_software`
+
+Software this cluster installs on the host for a container to use, by name: an app's requires.host_software names it, and the launcher binds it into the container for that app's jobs. For software that may not travel in an image -- NVIDIA's HPC-Benchmarks, whose license forbids redistribution -- and for libraries the site maintains, such as the NCCL of its nvhpc module. Declared here, once, because the paths are this machine's; the app names only what it needs. A job's run.meta records each one's name, version and path, and the sha256 of the app's binary, because the image digest no longer says what ran.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| [`<name>`](#clusterhost_softwarename) | object |  | key matches `/^[a-z][a-z0-9_]*$/`, no other keys | One install. |
+
+##### `cluster.host_software.<name>`
+
+One install.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `description` | string |  |  | What it is, which version, and where it came from. |
+| `lib_dirs` | list of string |  |  | Directories under it, relative, put on LD_LIBRARY_PATH inside the container after the MPI overlay's own and before container.lib_dirs. |
+| `mount` | string |  | matches `/^/[A-Za-z0-9_./+-]*$/` | Where it appears inside the container. Omitted, at its own path -- which a container.binds entry may already cover. |
+| `notes` | string |  |  | Free text: what was checked, and what would make it stop being true. |
+| `path` | string | yes | matches `/^(/|\$\{)[A-Za-z0-9_./${}+-]*$/` | The directory on the host. ${mpi} is the image's MPI family (mpich, mpich3, openmpi), for software built once per MPI ABI; any other ${NAME} is a variable the environment sets, expanded once the host modules are loaded, as mpi.<family>.root is. hpcrun/validate and the launcher refuse a job whose directory is not there. |
+| `version` | string |  |  | Recorded in run.meta with the path. |
 
 #### `cluster.images`
 

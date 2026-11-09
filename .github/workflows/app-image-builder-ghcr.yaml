@@ -191,6 +191,7 @@ jobs:
             BASE_IMAGE=${{ steps.image.outputs.base_image }}
             APP=${{ matrix.app }}
             APP_MARCH_FLAGS=${{ matrix.march }}
+            APP_GPU_ARCH_FLAGS=${{ matrix.gpu_arch }}
             MAKE_J_PROCS=4
           labels: |
             org.opencontainers.image.base.name=${{ steps.image.outputs.base_image }}
@@ -204,6 +205,9 @@ jobs:
             hpcdev.mpi=${{ matrix.mpi }}
             hpcdev.target=${{ matrix.target }}
             hpcdev.march=${{ matrix.march }}
+            hpcdev.gpu=${{ matrix.gpu }}
+            hpcdev.gpu_target=${{ matrix.gpu_target }}
+            hpcdev.gpu_arch=${{ matrix.gpu_arch }}
 
       # Commands go to the image's ENTRYPOINT as plain words, with no
       # `bash -lc` of our own.  The base images' entrypoint is
@@ -242,6 +246,14 @@ jobs:
           # contract checked, but not run.  Said where the run's summary shows it.
           if grep -q 'run skipped: host lacks' "smoke-logs/${TAG}.log"; then
             echo "::warning title=${TAG}::smoke run skipped: this runner's CPU lacks the target's ISA; the first cluster job is its first run"
+          fi
+          # A GPU app on a runner without a GPU, or one that runs the site's
+          # install of a program no image carries: likewise.
+          if grep -q 'run skipped: host has no GPU' "smoke-logs/${TAG}.log"; then
+            echo "::warning title=${TAG}::smoke run skipped: this runner has no GPU; the first cluster job is its first run"
+          fi
+          if grep -q 'run skipped: host software' "smoke-logs/${TAG}.log"; then
+            echo "::warning title=${TAG}::smoke run skipped: the app runs host software the site installs; the first cluster job is its first run"
           fi
 
       - name: Upload logs

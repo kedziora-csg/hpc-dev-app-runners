@@ -18,7 +18,13 @@
 #   $LMOD_FAMILY_MPI.  Pass it explicitly when the image name is uninformative.
 #
 # Sets (and exports) LAUNCHER_MPI_FAMILY and LAUNCHER_COMPILER_FAMILY to what it
-# actually used, so the caller can load the matching host modules.
+# actually used, so the caller can load the matching host modules, and
+# LAUNCHER_HOST_SOFTWARE to the host software it bound, as name=host_path.
+#
+# Two settings come from the app's contract, through job.env, because the
+# launcher is made before the contract is read and the job reads no YAML:
+#     HPCRUN_REQUIRES_HOST_SOFTWARE   names from the cluster's host_software:
+#     HPCRUN_REQUIRES_GPU_AWARE_MPI   true: the app passes device buffers
 #
 # Also provides two helpers the PBS scripts use to stay family-agnostic:
 #     load_host_modules <compiler_family> <mpi_family>
@@ -159,6 +165,33 @@ _launcher_site_binds () {
         [ -d "${pair%%:*}" ] && out="${out}${out:+ }--bind ${pair}"
     done
     echo "${out}"
+}
+
+# host_software_resolve <name> <mpi family> -- the install's directory on the
+# host: ${mpi} is the family, and any other ${NAME} is what the environment says
+# now that the host modules are loaded.  Prints why and returns 1 when the
+# cluster does not declare it or the directory is not there.
+host_software_resolve () {
+    local name="$1" family="$2" spec var
+    command -v bench_site_host_software_path >/dev/null 2>&1 \
+        && spec="$(bench_site_host_software_path "${name}")"
+    [ -n "${spec:-}" ] || {
+        echo "host software '${name}': cluster ${HPCRUN_CLUSTER} declares no host_software.${name}" >&2
+        return 1; }
+    spec="${spec//\$\{mpi\}/${family}}"
+    while :; do
+        case "${spec}" in
+            *'${'*'}'*)
+                var="${spec#*\$\{}"; var="${var%%\}*}"
+                spec="${spec//\$\{${var}\}/${!var:-}}" ;;
+            *) break ;;
+        esac
+    done
+    [ -d "${spec}" ] || {
+        echo "host software '${name}': ${spec} does not exist" >&2
+        echo "  (host_software.${name}.path in the cluster's YAML, for MPI family ${family})" >&2
+        return 1; }
+    echo "${spec}"
 }
 
 # Append one continuation line to the argument block being built.  A string
@@ -462,10 +495,41 @@ make_apptainer_launcher () {
     fi
     mpi_preload="${mpi_preload}${gtl:+${mpi_preload:+:}${gtl}}"
 
-    # The overlay's own directory first, then the site's, then whatever the bind
-    # map renamed -- that last one has no host directory to test for, so it is
-    # appended after _join_libpath rather than through it.
-    ld_path="$(_join_libpath ${head_dirs} $(_launcher_site_libdirs))"
+    # Host software the app requires (its contract's requires.host_software,
+    # which submit wrote into job.env): bound at its mount, or at its own path
+    # when a site bind does not already cover it, with its lib_dirs, under the
+    # mount, on the library path.  LAUNCHER_HOST_SOFTWARE says what was bound,
+    # for run.meta.
+    local name hs_host hs_mount hs_covered hs_libs="" sub d
+    LAUNCHER_HOST_SOFTWARE=""
+    for name in ${HPCRUN_REQUIRES_HOST_SOFTWARE:-}; do
+        hs_host="$(host_software_resolve "${name}" "${family}")" || return 1
+        hs_mount="$(bench_site_host_software_mount "${name}" 2>/dev/null)"
+        if [ -n "${hs_mount}" ]; then
+            binds="${binds} --bind ${hs_host}:${hs_mount}"
+        else
+            hs_mount="${hs_host}" hs_covered=false
+            for d in ${HPCRUN_BINDS} ${HPCRUN_BINDS_IF_PRESENT}; do
+                case "${d}" in *:*) continue ;; esac
+                case "${hs_host}/" in "${d%/}/"*) hs_covered=true; break ;; esac
+            done
+            [ "${hs_covered}" = true ] || binds="${binds} --bind ${hs_host}"
+        fi
+        for sub in $(bench_site_host_software_lib_dirs "${name}" 2>/dev/null); do
+            [ -d "${hs_host}/${sub}" ] && hs_libs="${hs_libs:+${hs_libs}:}${hs_mount}/${sub}"
+        done
+        LAUNCHER_HOST_SOFTWARE="${LAUNCHER_HOST_SOFTWARE:+${LAUNCHER_HOST_SOFTWARE} }${name}=${hs_host}"
+    done
+    export LAUNCHER_HOST_SOFTWARE
+
+    # The overlay's own directory first, then the host software's, then the
+    # site's, then whatever the bind map renamed.  The last two kinds name
+    # directories inside the container, with no host directory to test, so
+    # they are joined around _join_libpath rather than through it.
+    ld_path="$(_join_libpath ${head_dirs})"
+    [ -n "${hs_libs}" ] && ld_path="${ld_path:+${ld_path}:}${hs_libs}"
+    d="$(_join_libpath $(_launcher_site_libdirs))"
+    [ -n "${d}" ] && ld_path="${ld_path:+${ld_path}:}${d}"
     local pair kv
     for pair in ${HPCRUN_BIND_MAP}; do
         [ -d "${pair%%:*}" ] && ld_path="${ld_path}${ld_path:+:}${pair#*:}"
@@ -509,6 +573,20 @@ esac"
 # One GPU a rank, the one on its own NUMA domain.
 . '${_LAUNCHER_HERE}/gpu_bind.sh' && gpu_bind"
     fi
+    # An app that passes device buffers to MPI (requires.gpu_aware_mpi) gets
+    # Cray MPICH's GPU support, which GTL above makes possible -- unless a
+    # variant set the variable first, which is how an experiment forces it
+    # either way.  Not for every app: it costs host buffers 6.5 us a message.
+    if [ "${HPCRUN_REQUIRES_GPU_AWARE_MPI:-false}" = true ]; then
+        if [ -n "${gtl}" ]; then
+            _LAUNCHER_PRE="${_LAUNCHER_PRE}
+# The app passes device buffers to MPI (requires.gpu_aware_mpi).
+export MPICH_GPU_SUPPORT_ENABLED=\"\${MPICH_GPU_SUPPORT_ENABLED:-1}\""
+        else
+            echo "make_apptainer_launcher: WARNING the app passes device buffers to MPI,"
+            echo "  and the ${overlay} recipe has no GPU transport to turn on here"
+        fi
+    fi
     if [ -n "${mpi_preload}" ]; then
         # Inside the container only, ahead of whatever a variant preloads:
         # one list, never one written over the other.
@@ -523,7 +601,8 @@ export ${preload_var}='${mpi_preload}'\"\${${preload_var}:+:\${${preload_var}}}\
     cat <<EOF > "${outfile}" && chmod +x "${outfile}"
 #!/bin/bash
 # generated by make_apptainer_launcher.sh
-#   site=${HPCRUN_SITE}  cluster=${HPCRUN_CLUSTER}  family=${family}  overlay=${overlay}${HPCRUN_GPU_VENDOR:+  gpus=${HPCRUN_GPU_VENDOR}}
+#   site=${HPCRUN_SITE}  cluster=${HPCRUN_CLUSTER}  family=${family}  overlay=${overlay}${HPCRUN_GPU_VENDOR:+  gpus=${HPCRUN_GPU_VENDOR}}${LAUNCHER_HOST_SOFTWARE:+
+#   host software: ${LAUNCHER_HOST_SOFTWARE}}
 ${_LAUNCHER_PRE}
 \$(which ${HPCRUN_CONTAINER_RUNTIME}) --quiet exec \\
 ${_LAUNCHER_ARGS}

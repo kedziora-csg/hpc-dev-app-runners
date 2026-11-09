@@ -107,6 +107,18 @@ done
     && ok "every app.yaml satisfies hpcrun/schema/app.json" \
     || bad "an app.yaml fails hpcrun/schema/app.json" "$(./validate --app tests/fixtures/app.d/*/app.yaml ../apps/*/app.d/app.yaml 2>&1)"
 
+# A GPU app's requirements, and the one rule between them a schema cannot state.
+printf 'app: g\nbinary: /x\nrequires: {gpu: cuda, gpu_aware_mpi: true, host_software: [bench]}\n' \
+    > "${TMP}/gpu_app.yaml"
+./validate --app "${TMP}/gpu_app.yaml" >/dev/null 2>&1
+want "an app may require a GPU, GPU-aware MPI and host software" 0 "$?"
+printf 'app: g\nbinary: /x\nrequires: {gpu_aware_mpi: true}\n' > "${TMP}/gpu_app.yaml"
+./validate --app "${TMP}/gpu_app.yaml" >/dev/null 2>&1
+want "GPU-aware MPI without a GPU is config-invalid (3)" 3 "$?"
+printf 'app: g\nbinary: /x\nrequires: {gpu: rocm}\n' > "${TMP}/gpu_app.yaml"
+./validate --app "${TMP}/gpu_app.yaml" >/dev/null 2>&1
+want "a GPU runtime nothing supports is config-invalid (3)" 3 "$?"
+
 #-- the reference is generated, so it cannot be stale or incomplete quietly -----
 echo
 echo "schema reference"
@@ -583,6 +595,36 @@ cluster_case "a value carrying a quote is refused, not quoted" reject \
     "${cluster_base%$'\n'*}
   openmpi: {launcher: openmpi, overlay: host-openmpi, env: {X: \"a'\\\"b\"}}"
 
+# Host software: a directory, bound at a mount, with library directories under it.
+cluster_case "host software with \${mpi}, a mount and lib_dirs is accepted" ok "${cluster_base}
+host_software:
+  bench: {version: \"1.0\", path: \"/glade/nv/bench_\${mpi}/cuda12\", mount: /opt/bench, lib_dirs: [lib]}
+  comm: {path: \"\${NVROOT}/comm_libs\", lib_dirs: [nccl/lib, nvshmem/lib]}"
+cluster_case "host software with a relative path is refused" reject "${cluster_base}
+host_software:
+  bench: {path: nv/bench}"
+cluster_case "host software lib_dirs that climb out of it are refused" reject "${cluster_base}
+host_software:
+  bench: {path: /glade/nv, lib_dirs: [../lib]}"
+cluster_case "host software mounted on the container's own tree is refused" reject "${cluster_base}
+host_software:
+  bench: {path: /glade/nv, mount: /usr}"
+out="$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+sf = sitefile.load("derecho")
+sf.data["host_software"] = {
+    "bench": {"version": "1.0", "path": "/glade/nv/bench_${mpi}", "mount": "/opt/bench",
+              "lib_dirs": ["lib"]},
+    "comm": {"path": "${NVROOT}/comm", "lib_dirs": ["nccl/lib", "nvshmem/lib"]}}
+text = sitefile.render(sf)
+for word in ("HPCRUN_HOST_SOFTWARE=", "bench   ) echo \x27/glade/nv/bench_${mpi}\x27",
+             "comm    ) echo \x27${NVROOT}/comm\x27", "bench   ) echo \x27/opt/bench\x27",
+             "comm    ) echo \x27nccl/lib nvshmem/lib\x27", "bench   ) echo \x271.0\x27",
+             "export HPCRUN_HOST_SOFTWARE"):
+    print("ok" if word in text else "missing: " + word)' 2>&1 | sort -u | tr '\n' ' ')"
+want "sitegen writes host software into the profile, \${NAME} left literal" "ok " "${out}"
+
 #-- exit codes are the interface -----------------------------------------------
 echo
 echo "exit codes"
@@ -713,11 +755,13 @@ want "the target check: label over name, portable node types, no images: block" 
 sys.path.insert(0, ".")
 from benchlib import checks
 d, labels = tempfile.mkdtemp(dir=sys.argv[1]), {}
-checks._label = lambda path, key: labels.get(os.path.basename(path))
+checks._label = lambda path, key: (labels.get(os.path.basename(path))
+                                   if key == "hpcdev.target" else None)
 class Node(object):
-    name, subcluster = "testville", "b"
+    name, subcluster, gpu_vendor = "testville", "b", ""
     def __init__(self, want): self.want = want
     def image_target(self): return self.want
+    def gpu_target(self): return "", ""
     def image_path(self, sif): return os.path.join(d, sif)
 def state(want, sif, label=None):
     open(os.path.join(d, sif), "w").close()
@@ -731,6 +775,90 @@ print(state("znver3", "leap-gcc14-openmpi-heffte-pbase.sif", ""),
       state("", "leap-gcc14-openmpi-hpcg.sif", ""),
       state(None, "leap-gcc14-openmpi-hpcg-znver4.sif", "znver4"),
       state("znver4", "leap-gcc14-openmpi-hpcg-znver3.sif", "znver4"))' "${TMP}" 2>&1)"
+# A GPU image needs the node type's GPUs, and its device code the node type's
+# GPU target: the hpcdev.gpu label, else the cuda word of the name, and the
+# hpcdev.gpu_target label.  A GPU node type may run a CPU image.
+want "the GPU check: a cuda image on a CPU node type, a target of another GPU" \
+    "wrong ok wrong ok ok" \
+    "$(python3 -c 'import os, sys, tempfile
+sys.path.insert(0, ".")
+from benchlib import checks
+d, labels = tempfile.mkdtemp(dir=sys.argv[1]), {}
+checks._label = lambda path, key: labels.get(key)
+class Node(object):
+    name, subcluster = "testville", "g"
+    def __init__(self, vendor, gpu): self.gpu_vendor, self.gpu = vendor, gpu
+    def image_target(self): return "znver3"
+    def gpu_target(self): return ("cuda", self.gpu) if self.gpu else ("", "")
+    def image_path(self, sif): return os.path.join(d, sif)
+def state(vendor, node_gpu, sif, **label):
+    open(os.path.join(d, sif), "w").close()
+    labels.clear()
+    labels.update(("hpcdev." + k, v) for k, v in label.items())
+    return checks.images(Node(vendor, node_gpu), [sif])[0].state
+print(state("", "", "leap-nvhpc-mpich-cuda.sif"),
+      state("nvidia", "sm80", "leap-nvhpc-mpich-cuda.sif"),
+      state("nvidia", "sm80", "leap-nvhpc-mpich-cuda-nvstream-znver3-sm90.sif",
+            gpu="cuda", gpu_target="sm90", target="znver3"),
+      state("nvidia", "sm80", "leap-nvhpc-mpich-cuda-nvstream-znver3-sm80.sif",
+            gpu="cuda", gpu_target="sm80", target="znver3"),
+      state("nvidia", "sm80", "leap-gcc14-mpich-hpcg-znver3.sif", target="znver3"))' "${TMP}" 2>&1)"
+want "the target in a name skips the GPU runtime word" "znver3 '' cuda ''" \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import checks
+print(checks._target_in_name("leap-nvhpc-mpich-cuda-nvstream-znver3-sm80.sif"),
+      repr(checks._target_in_name("leap-nvhpc-mpich-cuda.sif")),
+      checks._gpu_in_name("leap-nvhpc-mpich-cuda.sif"),
+      repr(checks._gpu_in_name("leap-gcc14-mpich-hpcg-znver3.sif")))' 2>&1)"
+# What an app's contract requires of the node type: a GPU, and the cluster's
+# install of host software, at the path the image's MPI family selects.  A path
+# a module's variable names is the launcher's to check.
+want "requirements: a GPU app's node type; host software declared, present, per MPI" \
+    "wrong ok | missing ok unchecked missing unchecked | cuda" \
+    "$(python3 -c 'import os, sys, tempfile
+sys.path.insert(0, ".")
+from benchlib import checks
+d = tempfile.mkdtemp(dir=sys.argv[1])
+os.makedirs(os.path.join(d, "bench_mpich"))
+reqs = {"gpuapp": {"gpu": "cuda"}, "swapp": {"host_software": ["bench", "comm"]},
+        "nosw": {"host_software": ["absent"]}}
+checks.app_requires = lambda cluster, sif, app: reqs[app]
+checks._label = lambda path, key: None
+class Desc(object):
+    data = {"host_software": {"bench": {"path": d + "/bench_${mpi}"},
+                              "comm": {"path": "${NVROOT}/comm"}}}
+class Node(object):
+    name, subcluster, gpus_per_node, gpu_model = "testville", "g", 4, "a100"
+    host_software = ["bench", "comm"]
+    def __init__(self, vendor): self.gpu_vendor = vendor
+    def image_path(self, sif): return os.path.join(d, sif)
+    def _description(self): return Desc()
+def states(vendor, pairs):
+    return " ".join(r.state for r in checks.requirements(Node(vendor), pairs)[0])
+print(states("", [("leap-nvhpc-mpich-cuda.sif", "gpuapp")]),
+      states("nvidia", [("leap-nvhpc-mpich-cuda.sif", "gpuapp")]), "|",
+      states("nvidia", [("leap-nvhpc-openmpi-cuda.sif", "swapp"),
+                        ("leap-nvhpc-mpich-cuda.sif", "nosw"),
+                        ("leap-nvhpc-mpich-cuda.sif", "swapp")]), "|",
+      checks.requirements(Node("nvidia"), [("x.sif", "gpuapp")])[1][("x.sif", "gpuapp")]["gpu"])' "${TMP}" 2>&1)"
+# An app's requires: reach the job, which reads no YAML, through job.env.
+want "job.env carries the requires: block" \
+    "HPCRUN_REQUIRES_GPU='cuda' HPCRUN_REQUIRES_GPU_AWARE_MPI='true' HPCRUN_REQUIRES_HOST_SOFTWARE='bench comm'" \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import jobfile
+class C(object):
+    bench_root, name = "/r", "t"
+    def image_path(self, sif): return "/i/" + sif
+class E(object):
+    name, path, cluster, defaults = "e", "/e.yaml", C(), {"allow_undersubscribed": False}
+class J(object):
+    key, image, app, scale, target_seconds = "k", "x.sif", {"name": "a"}, "node", 60
+    nodes, repeats, cells = 1, 1, []
+    requires = {"gpu": "cuda", "gpu_aware_mpi": True, "host_software": ["bench", "comm"]}
+print(" ".join(l for l in jobfile.job_env(E(), J(), "/res").splitlines()
+               if l.startswith("HPCRUN_REQUIRES_")))' 2>&1)"
 want "a node type without its own target is portable; no images: block is None" \
     "'' None" \
     "$(HPCRUN_SITE_CONF="${casper_conf}" python3 -c 'import sys

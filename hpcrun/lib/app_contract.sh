@@ -144,6 +144,24 @@ app_export_geometry () {
     export HPCRUN_CORES_PER_NUMA="${TOPO_CORES_PER_NUMA}"
     export HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-}"
 
+    # Memory and GPUs, for an app that sizes its problem from them.  Probed;
+    # empty when the probe could not say, and an app that needs one declines.
+    export HPCRUN_MEM_PER_NODE_MB="${TOPO_MEM_PER_NODE_MB:-}"
+    local gpus="${TOPO_GPUS:-${HPCRUN_GPUS_PER_NODE:-0}}"
+    export HPCRUN_GPUS_PER_NODE="${gpus:-0}"
+    # What one rank sees: the one GPU lib/gpu_bind.sh gave it, or every GPU of
+    # the node when the binding is off.
+    if [ "${HPCRUN_GPUS_PER_NODE}" -gt 0 ] 2>/dev/null; then
+        if [ "${HPCRUN_GPU_BIND:-numa}" = none ]; then
+            export HPCRUN_GPUS_PER_RANK="${HPCRUN_GPUS_PER_NODE}"
+        else
+            export HPCRUN_GPUS_PER_RANK=1
+        fi
+    else
+        export HPCRUN_GPUS_PER_RANK=0
+    fi
+    export HPCRUN_GPU_MEM_MB="${TOPO_GPU_MEM_MB:-}"
+
     # Images built before the HPCRUN_ rename carry hooks that read BENCH_*.
     # Delete this once every image in use was built from the renamed hooks.
     local v

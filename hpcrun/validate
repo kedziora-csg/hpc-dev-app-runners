@@ -134,7 +134,8 @@ def describe(exp, jobs, pre):
     print()
 
     for title, results in (("images", pre.images),
-                           ("app contracts", pre.contracts)):
+                           ("app contracts", pre.contracts),
+                           ("app requirements", pre.requirements)):
         if not results:
             continue
         print("%s:" % title)
@@ -170,6 +171,8 @@ def as_json(exp, jobs, pre):
                    for r in pre.images],
         "contracts": [{"subject": r.subject, "state": r.state, "detail": r.detail}
                       for r in pre.contracts],
+        "requirements": [{"subject": r.subject, "state": r.state, "detail": r.detail}
+                         for r in pre.requirements],
         "problems": pre.problems,
         "exit": {"code": pre.code, "name": EXIT_NAMES.get(pre.code, "error")},
     }
@@ -183,7 +186,7 @@ def validate_apps_only(paths, want_json):
         except (yamlish.YamlError, OSError) as exc:
             problems.append("%s: %s" % (path, exc))
             continue
-        for problem in schema_mod.validate(data, "app"):
+        for problem in checks.contract_problems(data):
             problems.append("%s: %s" % (path, problem))
     if want_json:
         json.dump({"apps": paths, "problems": problems,

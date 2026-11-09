@@ -202,6 +202,18 @@ load_host_modules "${comp_family}" "${mpi_family}" || exit 1
 launcher="${RESULTS_DIR}/apptainer-launch-${HPCRUN_CLUSTER}-${mpi_family}.sh"
 make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" || exit 1
 
+# Host software the app requires, which the launcher bound: name, version and
+# the directory it came from, for run.meta.  With it, the image digest no longer
+# says everything that ran, so the binary's sha256 is recorded below too.
+host_software=""
+for _hs in ${LAUNCHER_HOST_SOFTWARE:-}; do
+    _ver="$(bench_site_host_software_version "${_hs%%=*}" 2>/dev/null)"
+    host_software="${host_software:+${host_software}; }${_hs%%=*} ${_ver:-unversioned} ${_hs#*=}"
+    echo "host sw   ${_hs%%=*} ${_ver:-unversioned}: ${_hs#*=}"
+done
+[ "${HPCRUN_REQUIRES_GPU_AWARE_MPI:-false}" = true ] && \
+    echo "gpu mpi   the app passes device buffers to MPI (requires.gpu_aware_mpi)"
+
 REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
 
 cd "${RESULTS_DIR}" || { echo "cannot use RESULTS_DIR=${RESULTS_DIR}"; exit 1; }
@@ -353,9 +365,14 @@ if [ -n "${APP}" ]; then
     if ! ${launcher} test -x "${APP_BINARY}" 2>/dev/null; then
         echo "app       ${app_name}: ${APP_BINARY} is not executable in this image"
         echo "          build or pull an image that carries it (cd sif && make ${HPCRUN_CLUSTER}-${app_name}),"
-        echo "          or point HPCRUN_APP_DIR at a contract on a bound filesystem"
+        echo "          or point HPCRUN_APP_DIR at a contract on a bound filesystem."
+        echo "          An app that runs host software (requires.host_software) gets it"
+        echo "          bound only through hpcrun/submit, which reads that from the image."
         exit 1
     fi
+    # What actually ran, when the image digest alone cannot say: a binary from
+    # host software is not in the image at all.
+    app_sha256="$(${launcher} sha256sum "${APP_BINARY}" 2>/dev/null | awk 'NR == 1 { print $1 }')"
 
     # The contract's declared binary.  What actually runs may differ -- a launch
     # hook can pick a different executable and add flags -- so this is labelled
@@ -400,6 +417,9 @@ emit_provenance run.meta \
     gpus         "${HPCRUN_GPUS_PER_NODE:+${HPCRUN_GPUS_PER_NODE} x ${HPCRUN_GPU_MODEL:-${HPCRUN_GPU_VENDOR}}}" \
     gpu_driver   "${gpu_driver}" \
     image_cuda   "${img_cuda}" \
+    host_software "${host_software}" \
+    binary_sha256 "${app_sha256:-}" \
+    gpu_aware_mpi "${HPCRUN_REQUIRES_GPU_AWARE_MPI:-false}" \
     arch_verdict "${ARCH_VERDICT:-unchecked}" \
     repeats      "${HPCRUN_REPEATS}" \
     launcher     "${launcher}" \
@@ -588,7 +608,8 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
 
     # On a GPU node type each rank also logs the GPU the launcher gave it.
     gpu_log=""
-    if [ -n "${HPCRUN_GPUS_PER_NODE:-}" ]; then
+    # -gt 0, not -n: app_export_geometry states 0 on a node without GPUs.
+    if [ "${HPCRUN_GPUS_PER_NODE:-0}" -gt 0 ] 2>/dev/null; then
         gpu_log="${RESULTS_DIR}/gpu_bind_${name}.txt"
         : > "${gpu_log}"
     fi

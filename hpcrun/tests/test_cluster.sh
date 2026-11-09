@@ -181,6 +181,46 @@ want "the fallback comes from the profile" "64 2 4 fallback:site-profile:testvil
 # the node cannot run.
 want "with no profile the fallback invents nothing" "1 1 1 fallback:none" "$(topo "true")"
 
+#-- memory and GPUs, for an app that sizes its problem ---------------------------
+echo
+echo "topology probe: memory and GPUs"
+# A Derecho A100 node's /proc and /sys, with a cgroup limit below MemTotal, and
+# an nvidia-smi that answers for the first GPU.
+P="${TMP}/probe"
+mkdir -p "${P}/proc/self" "${P}/sys/fs/cgroup/memory/pbs_jobs.service/jobid/1.desched1"
+printf 'MemTotal:       527608240 kB\n' > "${P}/proc/meminfo"
+printf '12:memory:/pbs_jobs.service/jobid/1.desched1\n0::/x\n' > "${P}/proc/self/cgroup"
+echo 515396075520 > "${P}/sys/fs/cgroup/memory/pbs_jobs.service/jobid/1.desched1/memory.limit_in_bytes"
+for spec in 0000:03:00.0:3 0000:41:00.0:2 0000:81:00.0:1 0000:c1:00.0:0; do
+    bus="${spec%:*}"
+    mkdir -p "${P}/proc/driver/nvidia/gpus/${bus}" "${P}/sys/bus/pci/devices/${bus}"
+    printf 'Model: \t\t NVIDIA A100-SXM4-40GB\nBus Location: \t %s\n' "${bus}" \
+        > "${P}/proc/driver/nvidia/gpus/${bus}/information"
+    echo "${spec##*:}" > "${P}/sys/bus/pci/devices/${bus}/numa_node"
+done
+printf '#!/bin/sh\nprintf "40960\\n40960\\n"\n' > "${TMP}/smi"; chmod +x "${TMP}/smi"
+probe () { HPCRUN_PROBE_ROOT="$1" HPCRUN_PROBE_NVIDIA_SMI="${TMP}/smi" bash -c "
+    . '${HERE}/../lib/probe_topology.sh'
+    echo \"\$(_probe_mem_mb) \$(_probe_gpus)\""; }
+want "memory is the cgroup's limit, and the GPUs with their NUMA domains" \
+     "491520 4 NVIDIA_A100-SXM4-40GB 40960 3,2,1,0" "$(probe "${P}")"
+echo 9223372036854771712 > "${P}/sys/fs/cgroup/memory/pbs_jobs.service/jobid/1.desched1/memory.limit_in_bytes"
+want "an unlimited cgroup leaves MemTotal" "515242 4" "$(probe "${P}" | cut -d' ' -f1,2)"
+mkdir -p "${TMP}/cpuonly/proc"; cp "${P}/proc/meminfo" "${TMP}/cpuonly/proc/"
+want "a node without GPUs says none" "515242 0 - 0 -" "$(probe "${TMP}/cpuonly")"
+# The geometry the hooks are handed.  One GPU a rank while the runner binds;
+# every GPU with the binding off; none on a CPU node.
+geom () { bash -c "
+    . '${HERE}/../lib/probe_topology.sh'; . '${HERE}/../lib/app_contract.sh'
+    $1
+    app_export_geometry /r numa 1 4 4 16
+    echo \"\${HPCRUN_MEM_PER_NODE_MB:-} \${HPCRUN_GPUS_PER_NODE} \${HPCRUN_GPUS_PER_RANK} \${HPCRUN_GPU_MEM_MB:-}\""; }
+want "the hooks get memory, GPUs a node, GPUs a rank and GPU memory" "491520 4 1 40960" \
+     "$(geom 'TOPO_MEM_PER_NODE_MB=491520 TOPO_GPUS=4 TOPO_GPU_MEM_MB=40960')"
+want "with the binding off a rank sees every GPU" "4 4" \
+     "$(geom 'TOPO_GPUS=4 HPCRUN_GPU_BIND=none' | cut -d' ' -f2,3)"
+want "a CPU node: no GPUs, and unknowns are empty" " 0 0 " "$(geom 'TOPO_GPUS=0')"
+
 #-- a node type with NVIDIA GPUs -----------------------------------------------
 echo
 echo "GPU node type"
@@ -288,6 +328,64 @@ out="$(run "${mpi_preload}
             export XPMEM_TEST='${TMP}/fs/absent'
             make_apptainer_launcher '${TMP}/xm.sh' '${TMP}/fs/image.sif' mpich")"
 want "a family whose preload is missing is refused" 1 "$?"
+
+#-- host software an app requires, and GPU-aware MPI ----------------------------
+echo
+echo "host software"
+# One install per MPI family, as NVIDIA ships its benchmarks, under a ${VAR} to
+# show the expansion, and bound at a mount; and one under a site bind, at its
+# own path, with library directories.
+mkdir -p "${TMP}/fs/nv/bench_mpich/lib" "${TMP}/fs/bound/comm/nccl/lib" "${TMP}/fs/bound/comm/nvshmem/lib"
+host_sw="bench_site_host_software_path () { case \"\$1\" in
+                 bench) echo '\${NV_TEST}/bench_\${mpi}' ;;
+                 comm)  echo '${TMP}/fs/bound/comm' ;; *) echo '' ;; esac; }
+         bench_site_host_software_mount () { case \"\$1\" in bench) echo '/opt/bench' ;; *) echo '' ;; esac; }
+         bench_site_host_software_lib_dirs () { case \"\$1\" in
+                 bench) echo 'lib' ;; comm) echo 'nccl/lib nvshmem/lib absent/lib' ;; *) echo '' ;; esac; }
+         export NV_TEST='${TMP}/fs/nv'"
+out="$(run "${host_sw}
+            HPCRUN_REQUIRES_HOST_SOFTWARE='bench comm'
+            make_apptainer_launcher '${TMP}/h.sh' '${TMP}/fs/image.sif' mpich && cat '${TMP}/h.sh'
+            echo \"HS=\${LAUNCHER_HOST_SOFTWARE}\"")"
+echo "${out}" | grep -q -- "--bind ${TMP}/fs/nv/bench_mpich:/opt/bench" \
+    && ok "an install is bound at its mount, \${mpi} and \${VAR} expanded" \
+    || bad "the install was not bound at its mount" "${out}"
+echo "${out}" | grep -q -- "--bind ${TMP}/fs/bound/comm" \
+    && bad "an install under a site bind was bound again" "${out}" \
+    || ok "an install under a site bind is not bound again"
+echo "${out}" | grep -q -- "LD_LIBRARY_PATH=${TMP}/fs/cray/lib-abi-mpich:/opt/bench/lib:${TMP}/fs/bound/comm/nccl/lib:${TMP}/fs/bound/comm/nvshmem/lib:${TMP}/fs/libs" \
+    && ok "its lib_dirs follow the MPI's and precede the site's; an absent one is dropped" \
+    || bad "the library path is not overlay, host software, site" "${out}"
+want "the launcher says what it bound" "HS=bench=${TMP}/fs/nv/bench_mpich comm=${TMP}/fs/bound/comm" \
+     "$(echo "${out}" | grep '^HS=')"
+bash -n "${TMP}/h.sh" && ok "the launcher with host software parses" || bad "syntax error with host software"
+out="$(run "${host_sw}
+            export NV_TEST='${TMP}/fs/elsewhere' HPCRUN_REQUIRES_HOST_SOFTWARE='bench'
+            make_apptainer_launcher '${TMP}/h2.sh' '${TMP}/fs/image.sif' mpich" 2>&1)"
+want "an install whose directory is not there is refused" 1 "$?"
+case "${out}" in *"elsewhere/bench_mpich does not exist"*) ok "and the refusal names the path" ;;
+                 *) bad "the refusal does not name the path" "${out}" ;; esac
+out="$(run "HPCRUN_REQUIRES_HOST_SOFTWARE='bench'
+            make_apptainer_launcher '${TMP}/h3.sh' '${TMP}/fs/image.sif' mpich" 2>&1)"
+want "host software the cluster does not declare is refused" 1 "$?"
+
+echo
+echo "GPU-aware MPI"
+out="$(gpu_run "HPCRUN_REQUIRES_GPU_AWARE_MPI=true
+                make_apptainer_launcher '${TMP}/ga.sh' '${TMP}/fs/image.sif' mpich && cat '${TMP}/ga.sh'")"
+echo "${out}" | grep -q '^export MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED:-1}"$' \
+    && ok "an app that passes device buffers gets Cray MPICH's GPU support" \
+    || bad "no MPICH_GPU_SUPPORT_ENABLED for a gpu_aware_mpi app" "${out}"
+out="$(PATH="${TMP}/stubrt:${PATH}" HPCRUN_GPU_BIND=none MPICH_GPU_SUPPORT_ENABLED=0 \
+       bash -c ". '${TMP}/ga.sh' true >/dev/null; echo \"M=\${MPICH_GPU_SUPPORT_ENABLED}\"")"
+want "a variant's own setting wins" "M=0" "${out}"
+out="$(run "HPCRUN_REQUIRES_GPU_AWARE_MPI=true
+            make_apptainer_launcher '${TMP}/gc.sh' '${TMP}/fs/image.sif' mpich && cat '${TMP}/gc.sh'")"
+case "${out}" in
+    *"export MPICH_GPU_SUPPORT_ENABLED"*) bad "a CPU node type got GPU support switched on" "${out}" ;;
+    *"WARNING"*"device buffers"*)         ok "a CPU node type warns and leaves it off" ;;
+    *)                                    bad "no warning on a CPU node type" "${out}" ;;
+esac
 
 #-- which GPU each rank gets ----------------------------------------------------
 echo

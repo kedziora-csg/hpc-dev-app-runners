@@ -384,6 +384,19 @@ def cross_checks(data):
                 out.append("host_libraries.%s.env.%s holds a space, which the "
                            "generated NAME=VALUE list cannot carry" % (name, key))
 
+    # Host software is bound at a mount inside the container, and its lib_dirs
+    # are relative to that, so neither may climb out of it.
+    for name, spec in sorted((data.get("host_software") or {}).items()):
+        for sub in spec.get("lib_dirs") or []:
+            if ".." in sub.split("/"):
+                out.append("host_software.%s.lib_dirs entry %s climbs out of the "
+                           "install" % (name, sub))
+        mount = spec.get("mount")
+        if mount is not None and mount.rstrip("/") in ("", "/container", "/usr",
+                                                       "/opt", "/etc"):
+            out.append("host_software.%s.mount %s would land on top of the "
+                       "container's own tree; mount it below that" % (name, mount))
+
     images = data.get("images") or {}
     if ("target" in images) != ("march" in images):
         out.append(
@@ -866,6 +879,28 @@ def render(sf, source_rel=None):
                           for n in names), names)
         out.append("")
 
+    software = d.get("host_software") or {}
+    if software:
+        names = sorted(software)
+        out.append("#-- host software an app may require " + "-" * 37)
+        out.append("# By name, from an app's requires.host_software.  The launcher binds the")
+        out.append("# path at the mount (or at itself) and puts lib_dirs, under the mount, on")
+        out.append("# LD_LIBRARY_PATH.  Literal text: ${mpi} is the image's MPI family and")
+        out.append("# any other ${NAME} is expanded by the launcher, after the host modules.")
+        out.append(_assert("HPCRUN_HOST_SOFTWARE", " ".join(names), "host_software"))
+        out += _case("bench_site_host_software_path",
+                     dict((n, software[n]["path"]) for n in names), names)
+        out += _case("bench_site_host_software_mount",
+                     dict((n, software[n]["mount"]) for n in names
+                          if software[n].get("mount")), names)
+        out += _case("bench_site_host_software_lib_dirs",
+                     dict((n, list(software[n]["lib_dirs"])) for n in names
+                          if software[n].get("lib_dirs")), names)
+        out += _case("bench_site_host_software_version",
+                     dict((n, software[n]["version"]) for n in names
+                          if software[n].get("version")), names)
+        out.append("")
+
     out.append("#-- the module environment every job starts from " + "-" * 26)
     out.append("# Order is the content, so this is a list rather than one command.")
     out.append("# Silenced because Lmod narrates every step; a failure still comes back")
@@ -888,6 +923,8 @@ def render(sf, source_rel=None):
         out.append("export HPCRUN_SUBCLUSTERS HPCRUN_SUBCLUSTER HPCRUN_SUBCLUSTER_VERIFIED")
     if d.get("host_libraries"):
         out.append("export HPCRUN_HOST_LIBRARIES")
+    if d.get("host_software"):
+        out.append("export HPCRUN_HOST_SOFTWARE")
     # With sub-clusters, a key any entry states is exported; `export` of a
     # name an arm has unset marks it without giving it a value.
     nodes = [e["node"] for e in sf.subclusters.values()] or [node]

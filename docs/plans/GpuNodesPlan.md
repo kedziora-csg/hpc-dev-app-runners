@@ -1,6 +1,7 @@
 # Plan: GPU node types, starting with Derecho's A100 nodes (phase 5c)
 
-Status: **proposed 2026-10-30; nothing implemented.** Step 0 ran the same day
+Status: **proposed 2026-10-30. Steps 1 and 2 done, step 3 mostly done
+(2026-11-09); steps 4 and 5 not started.** Step 0 ran the same day
 on `deg0051` (job 8018411), and its results are under step 0 below. The CUDA
 path works from inside the image. Each rank's GPU must be chosen by NUMA
 domain, not by local rank. GPU-aware Cray MPICH works through the ABI shim,
@@ -881,16 +882,74 @@ built.
 - **Open MPI** has single copy turned off the same way
   (`OMPI_MCA_btl_vader_single_copy_mechanism=none`) and was not tested. Its
   1.97 us host latency, against Cray MPICH's 0.5 us, may come from that.
+- **Still to do in step 3**, as of 2026-11-04: the probe's GPU and memory
+  keys, the geometry ABI, `requires.gpu` and `gpu_aware_mpi`, `host_software`,
+  `MPICH_OFI_NIC_POLICY=GPU`, the `smoke.sh` skip, and the `nvhpc/26.1` pin.
+
+**Part 2 done, 2026-11-09: what an app requires, and what it is told.** All
+off-cluster; nothing here has run in a job yet.
+- **`probe_topology.sh`** writes five more keys to `topology.json`:
+  - `mem_per_node_mb`: MemTotal, or the job's cgroup limit when that is
+    smaller (cgroup v1 or v2);
+  - `gpus`, `gpu_model` and `gpu_numa`, from `/proc/driver/nvidia` and
+    `/sys`, as `gpu_bind.sh` reads them;
+  - `gpu_mem_mb`, from one `nvidia-smi` call a job.
+- **The geometry ABI** (`APP_CONTRACT.md`) gains `HPCRUN_MEM_PER_NODE_MB`,
+  `HPCRUN_GPUS_PER_NODE` (0 on a CPU node), `HPCRUN_GPUS_PER_RANK` (1 while
+  the runner binds, every GPU with `HPCRUN_GPU_BIND=none`) and
+  `HPCRUN_GPU_MEM_MB`.
+- **`requires:` in `app.yaml`** gains `gpu: cuda`, `gpu_aware_mpi` and
+  `host_software: [names]`. `gpu_aware_mpi` without `gpu` is refused.
+- **The job reads no YAML, so submit carries `requires:` to it.** `submit`
+  reads the contract out of the image (the checkout's copy without apptainer)
+  and writes `HPCRUN_REQUIRES_GPU`, `_GPU_AWARE_MPI` and `_HOST_SOFTWARE` into
+  `job.env`. A job qsub'd by hand gets none of them, and the runner says so
+  when the app's binary is not there.
+- **`validate` and `submit` refuse, with exit 5:**
+  - a GPU app on a node type without its GPUs;
+  - a `-cuda` image on a node type without NVIDIA GPUs (its `hpcdev.gpu`
+    label, else the `cuda` word of its name);
+  - device code built for another GPU (`hpcdev.gpu_target` against the node
+    type's `gpu.target`);
+  - host software the cluster does not declare, or whose directory is missing
+    for the image's MPI family. A path through a module's `${VAR}` is reported
+    `unchecked`, and the launcher checks it in the job.
+- **`host_software:` in the cluster description** (D8): `path` (`${mpi}` is the
+  image's MPI family), optional `mount`, `lib_dirs` and `version`. sitegen
+  writes it into `cluster.sh`. The launcher:
+  - binds each install the app requires at its mount, or at its own path when
+    no site bind covers it;
+  - puts its `lib_dirs` on `LD_LIBRARY_PATH` after the MPI overlay's and before
+    the site's;
+  - refuses to start when the directory is not there.
+- **`run.meta`** gains `host_software` (name, version, host path),
+  `binary_sha256` (always: the image digest no longer says what ran) and
+  `gpu_aware_mpi`.
+- **GPU-aware MPI** (D7): for an app with `gpu_aware_mpi`, the Cray MPICH launcher
+  exports `MPICH_GPU_SUPPORT_ENABLED=1` unless a variant set it first. On a node
+  type without GTL it warns and leaves it off; the host Open MPI is unchanged.
+- **`apps/smoke.sh`** resolves the contract and runs `prepare` and `launch`,
+  then skips the run with `run skipped: host has no GPU` when `report_gpus`
+  fails, or `run skipped: host software ... is not here` when the binary is
+  missing. The app workflow turns each into a warning. It also stamps
+  `hpcdev.gpu`, `hpcdev.gpu_target` and `hpcdev.gpu_arch`, and passes
+  `APP_GPU_ARCH_FLAGS` (the node type's `gpu.arch`) to `build.sh`.
+- **Fixed on the way:** `checks.host_contract` looked for `scripts/app.d/`,
+  from before the layout of addendum 4.7, so `validate` had checked no
+  checkout contract since.
+- **Seen, not changed:** a `*` entry of `container.lib_dirs` is expanded by
+  the shell before `_launcher_expand_dir` sees it. So every match goes on
+  `LD_LIBRARY_PATH`, three `pals` and three `libfabric` directories on
+  Derecho, rather than the newest one the comment promises. This was already
+  so in the 2026-11-04 launchers. It belongs with the MPI settings study.
+- **Tests:** `test_cluster.sh` 56 -> 73; `test_bench.sh` 210 -> 222.
 - **Still to do in step 3:**
-  - `probe_topology.sh`'s GPU and memory keys;
-  - the geometry ABI;
-  - `requires.gpu` and `gpu_aware_mpi` (D6, D7);
-  - `host_software` (D8);
-  - `MPICH_OFI_NIC_POLICY=GPU`, which needs a per-node-type `env`. That is the
-    only thing left for it, now that single copy is the same on both node
-    types; it matters once a job spans nodes;
-  - the `smoke.sh` skip;
-  - the `nvhpc/26.1` pin.
+  - Derecho's `host_software:` entries, once the site install (D8) has a home
+    on GLADE outside scratch;
+  - `MPICH_OFI_NIC_POLICY=GPU`, which needs a per-node-type `env`. It matters
+    only once a job spans nodes, and it touches the MPI settings study;
+  - the `nvhpc/26.1` pin, for the same reason and because it moves the CPU
+    nodes' nvhpc cells.
 
 ### Step 4 -- the apps
 
