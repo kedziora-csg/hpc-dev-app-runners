@@ -148,6 +148,7 @@ What an application must declare so the runner can drive it without knowing whic
 | --- | --- | --- | --- | --- |
 | `app` | string | yes | matches `/^[a-z0-9][a-z0-9_-]*$/` | The name the runner is asked for. Must match the app.d directory. |
 | `binary` | string |  |  | Absolute path inside the image. Required unless there is a launch hook, which may pick a different executable and add flags. |
+| `built_with_march` | string |  |  | Not written by hand: an app's build.sh appends the -march= (or -tp=) flags it compiled with to the installed copy, so the image's contract says what tuning its binary has. |
 | [`figures_of_merit`](#appfigures_of_merit) | object |  | no other keys | Ramble's noun, on purpose. Every key that extract may print, plus wall_s which the runner always provides. |
 | `notes` | string |  |  | Free text for whoever reads a results directory a year from now: what the numbers mean, and what would make them not mean it. |
 | `primary_fom` | string |  |  | Which figure of merit decides a comparison. Must name a key in figures_of_merit. Read host-side by hpcrun/collect, from the app.yaml copied into the results directory. |
@@ -176,6 +177,9 @@ Ramble's noun, on purpose. Every key that extract may print, plus wall_s which t
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
+| `gpu` | `cuda` |  |  | The GPU runtime the app needs. hpcrun/validate and hpcrun/submit refuse it on a node type without such GPUs, and apps/smoke.sh resolves the contract and runs prepare and launch, then skips the run, on a host with none. |
+| `gpu_aware_mpi` | boolean |  |  | The app passes device buffers to MPI. On a node type with NVIDIA GPUs and Cray MPICH the launcher then sets MPICH_GPU_SUPPORT_ENABLED=1, unless a variant sets it first. Off by default because it costs host-buffer messages about 6.5 us each (GpuNodesPlan.md, step 0). Requires gpu. |
+| `host_software` | list of string |  |  | Host software, by name from the cluster description's host_software:, that the app runs from -- a binary whose license keeps it out of any image, or a library the site maintains. The launcher binds each into the container for this app's jobs; hpcrun/validate and hpcrun/submit refuse a cluster that lacks one, or whose path does not exist for the image's MPI family. |
 | `min_ranks` | integer |  | at least 1 |  |
 | `mpi` | boolean |  |  |  |
 | `openmp` | boolean |  |  | false means a thread sweep measures nothing for this app -- rank count is the axis that matters. |
@@ -199,6 +203,7 @@ What one cluster provides, stated once and split across two files. sites/<site>.
 | `default_subcluster` | string |  | matches `/^[a-z][a-z0-9_-]*$/` | The sub-cluster used when an experiment names none. Required once subclusters: exists, and must be one of its keys: which node type a job lands on is a decision, so it is written down rather than taken from whichever entry comes first. |
 | `description` | string |  |  | What this machine is, for whoever reads a results directory a year from now. Copied into the generated block as a comment. |
 | [`host_libraries`](#clusterhost_libraries) | object |  | no other keys | Libraries this cluster provides on the host that an experiment may put in place of the container's own, by name -- the way mpi: puts the host's MPI in. A variant names one with host_library:, and the runner preloads it inside the container for that variant's cells and sets its env. Declared here, once, because the paths are this machine's and change when it is updated; an experiment names only the library. Nothing is added to the image. |
+| [`host_software`](#clusterhost_software) | object |  | no other keys | Software this cluster installs on the host for a container to use, by name: an app's requires.host_software names it, and the launcher binds it into the container for that app's jobs. For software that may not travel in an image -- NVIDIA's HPC-Benchmarks, whose license forbids redistribution -- and for libraries the site maintains, such as the NCCL of its nvhpc module. Declared here, once, because the paths are this machine's; the app names only what it needs. A job's run.meta records each one's name, version and path, and the sha256 of the app's binary, because the image digest no longer says what ran. |
 | [`images`](#clusterimages) | object |  | no other keys | The images this cluster runs, stated as axes rather than as a list: every compiler crossed with every MPI family, on one OS. hpcrun/sitegen turns it into sites/<site>/<cluster>/images.mk, which sif/Makefile includes, so `make <cluster>` builds the base set and `make <cluster>-<app>` each app set; an experiment's images.set names the same sets. A cluster file only: a site file carrying it is refused, because two clusters of one site rarely want the same images and a list inherited from the site would be concatenated, not replaced. |
 | [`modules`](#clustermodules) | object |  | no other keys | The module environment, which is the one thing every job here must do identically and the thing that was copied into five PBS scripts before this file existed. |
 | [`mpi`](#clustermpi) | object |  | no other keys | One entry per container MPI family this site can host. A family absent here is one this machine cannot run, which the runner reports as such rather than attempting and failing inside the container. |
@@ -256,6 +261,27 @@ Set inside the container with the library -- MKL_THREADING_LAYER, for one. A var
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `<name>` | string, integer or boolean |  | key matches `/^[A-Za-z_][A-Za-z0-9_]*$/` | The value, exported as it is written. |
+
+#### `cluster.host_software`
+
+Software this cluster installs on the host for a container to use, by name: an app's requires.host_software names it, and the launcher binds it into the container for that app's jobs. For software that may not travel in an image -- NVIDIA's HPC-Benchmarks, whose license forbids redistribution -- and for libraries the site maintains, such as the NCCL of its nvhpc module. Declared here, once, because the paths are this machine's; the app names only what it needs. A job's run.meta records each one's name, version and path, and the sha256 of the app's binary, because the image digest no longer says what ran.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| [`<name>`](#clusterhost_softwarename) | object |  | key matches `/^[a-z][a-z0-9_]*$/`, no other keys | One install. |
+
+##### `cluster.host_software.<name>`
+
+One install.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `description` | string |  |  | What it is, which version, and where it came from. |
+| `lib_dirs` | list of string |  |  | Directories under it, relative, put on LD_LIBRARY_PATH inside the container after the MPI overlay's own and before container.lib_dirs. |
+| `mount` | string |  | matches `/^/[A-Za-z0-9_./+-]*$/` | Where it appears inside the container. Omitted, at its own path -- which a container.binds entry may already cover. |
+| `notes` | string |  |  | Free text: what was checked, and what would make it stop being true. |
+| `path` | string | yes | matches `/^(/|\$\{)[A-Za-z0-9_./${}+-]*$/` | The directory on the host. ${mpi} is the image's MPI family (mpich, mpich3, openmpi), for software built once per MPI ABI; any other ${NAME} is a variable the environment sets, expanded once the host modules are loaded, as mpi.<family>.root is. hpcrun/validate and the launcher refuse a job whose directory is not there. |
+| `version` | string |  |  | Recorded in run.meta with the path. |
 
 #### `cluster.images`
 
@@ -331,6 +357,7 @@ How this site hosts one container MPI family: which mpiexec dialect places its r
 | `launcher` | `pals` \| `openmpi` \| `srun` | yes |  | Which mpiexec dialect emits this family's placement flags. PALS spells procs-per-node -ppn N and binding --cpu-bind core -d D; Open MPI spells the same two things -N N and --map-by ppr:P:node:pe=D --bind-to core. |
 | `notes` | string |  |  | Free text. What was checked, and what would make it stop being true. |
 | `overlay` | `cray-mpich-abi` \| `host-openmpi` \| `none` | yes |  | Which recipe in hpcrun/lib/make_apptainer_launcher.sh swaps the host MPI in. A NAME, not a description: the recipe body encodes reasoning -- which of Cray's two library directories carries the MPICH ABI, why OPAL_PREFIX must be pinned -- and reasoning does not belong in a data file. |
+| `preload` | list of string |  | at least 1 entry | Host shared objects the host MPI needs and an app built in an image is not linked with, preloaded inside the container (LD_PRELOAD) for every image of this family, ahead of anything the recipe or a variant preloads. Derecho's libxpmem: Cray's compiler wrappers link it into a native app, and without it Cray MPICH cannot use XPMEM. Absolute paths under a directory container.binds or binds_if_present binds; ${NAME} is allowed for a variable the environment sets. The launcher refuses a family whose file is not there. |
 | `root` | string |  | matches `/^[A-Za-z0-9_./${}-]+$/` | Where the host MPI is installed, for an overlay that binds the whole tree -- host-openmpi, which also pins OPAL_PREFIX to it. Usually `${NAME}` for a variable the MPI module sets, single-quoted in the YAML like a lib_dirs entry, and expanded only once that module is loaded. Required by host-openmpi. |
 
 ###### `cluster.mpi.<name>.env`
@@ -350,6 +377,7 @@ What one compute node has. FALLBACKS, not measurements: the job probes lscpu and
 | `cores` | integer |  | at least 1 | Physical cores per node. |
 | `cores_per_l3` | integer |  | at least 1 | Cores sharing one last-level cache -- a CCD on AMD. Never inferred from a placement report: a run that does not fill a node touches only part of each CCD and would under-count, then declare the result optimal. |
 | `cores_per_numa` | integer |  | at least 1 | Cores in one NUMA domain. On a machine with NPS4 this is a quarter of a socket, not the whole one. |
+| [`gpus`](#clusternodegpus) | object |  | no other keys | The GPUs on one node, stated once. hpcrun/submit asks for them in the select chunk (ngpus= on PBS Pro), which is also what steers a job onto this node type rather than onto a node without them. A node type that states none has no GPUs. |
 | `ncpus` | integer |  | at least 1 | CPUs per node the scheduler will actually hand out -- PBS's resources_available.ncpus -- which can be fewer than the hardware has: Casper's high-throughput Genoa nodes have 64 cores and offer 62, its Cascade Lake nodes 36 and offer 34. The geometry check still reasons in hardware cores; this is what a request may ask for. An exclusive job asks for exactly this many, and hpcrun/validate refuses a cell that needs more, because a request no node can satisfy does not fail -- it queues forever. Omit it where the two are equal. |
 | `select` | string |  | matches `/^[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+(:[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+)*$/` | Scheduler resource clauses that ask for THIS node type, appended to the select directive -- on Casper, cpu_type=genoa. Without it a description says what the hardware is but not how to obtain it, which is worse than saying nothing because it looks authoritative: the first Casper run named no processor and landed on a node type the file did not describe. Use only resources that steer node CHOICE. A node's queue-eligibility tag is not one of them: on a system with a routing queue, selecting on it fights the router rather than directing it. |
 | `smt` | integer |  | at least 1 | Hardware threads per physical core. |
@@ -357,6 +385,16 @@ What one compute node has. FALLBACKS, not measurements: the job probes lscpu and
 | `sockets` | integer |  | at least 1 | Populated sockets per node. Used to derive cores per socket, which is the granularity a rank should not straddle. |
 | `target_arch` | string |  | matches `/^[a-z0-9][a-z0-9._-]*$/` | The instruction set this hardware actually runs, in the spelling report_cpu_features prints. Checked against the app binary once at job start, which turns a SIGILL on every rank three hours into a queue into one line before the first cell. Deliberately a check and not an input: the image was built in CI long before this file was read, so a site can only refuse to measure an image, never change it. |
 | `topology` | `probe` \| `declared` |  | default `"probe"` | probe means lscpu on the compute node is the authority and the values above are only a last resort. declared means trust them, which is for a machine where lscpu is not available or not truthful. |
+
+##### `cluster.node.gpus`
+
+The GPUs on one node, stated once. hpcrun/submit asks for them in the select chunk (ngpus= on PBS Pro), which is also what steers a job onto this node type rather than onto a node without them. A node type that states none has no GPUs.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `count` | integer | yes | at least 1 | GPUs per node. |
+| `model` | string |  | matches `/^[a-z0-9][a-z0-9_]*$/` | The GPU, for a person and for run.meta's comparison with what the job found: a100_40gb. Not used to choose anything. |
+| `vendor` | `nvidia` \| `amd` | yes |  | Whose GPUs: what decides how a container is given them, and which GPU runtime an image needs (cuda: nvidia). |
 
 #### `cluster.paths`
 
@@ -385,31 +423,44 @@ Node types within this cluster. Casper has seven processor types and Derecho's G
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
-| [`<name>`](#clustersubclustersname) | object |  | key matches `/^[a-z][a-z0-9_-]*$/`, no other keys | One node type: a description of it, its own node: block, and optionally its own app target. |
+| [`<name>`](#clustersubclustersname) | object |  | key matches `/^[a-z][a-z0-9_-]*$/`, no other keys | One node type: a description of it, its own node: block, and optionally its own images: keys. |
 
 ##### `cluster.subclusters.<name>`
 
-One node type: a description of it, its own node: block, and optionally its own app target.
+One node type: a description of it, its own node: block, and optionally its own images: keys.
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
 | `description` | string |  |  | What this node type is. |
-| [`images`](#clustersubclustersnameimages) | object |  | no other keys | This node type's app target, replacing the cluster's images.target and images.march: Casper's Genoa nodes get znver4 builds and its Cascade Lake nodes cascadelake ones, from the same portable base. Only the target varies by node type; the OS, compilers, MPI families and apps follow the host's modules and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg) and resolves to the images of the sub-cluster an experiment runs on; hpcrun/validate refuses an image built for another target. |
+| [`images`](#clustersubclustersnameimages) | object |  | no other keys | This node type's images: keys, each replacing the cluster's for this node type alone, key by key; a key it does not state is the cluster's. Casper's Genoa nodes state only their target, znver4, and its Cascade Lake nodes cascadelake, from the same portable base. Derecho's a100 states its GPU, one compiler and its own apps, and takes the cluster's Milan target. The OS and the MPI families follow the host's modules, which are the same on every node type, and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg, derecho) and resolves to the images of the sub-cluster an experiment runs on; a node type that does not run an app has no set for it, and hpcrun/validate refuses an image built for another target. |
 | [`node`](#clustersubclustersnamenode) | object | yes | no other keys | What one compute node has. FALLBACKS, not measurements: the job probes lscpu and topology.json carries its answer. These are what can be known before there is a node to ask, which is the only moment an illegal ranks x threads is still cheap to reject. |
 | `verified` | boolean |  | default `true` | False means no job has yet run on this node type. hpcrun/validate says so, as it does for an unverified cluster. |
 
 ###### `cluster.subclusters.<name>.images`
 
-This node type's app target, replacing the cluster's images.target and images.march: Casper's Genoa nodes get znver4 builds and its Cascade Lake nodes cascadelake ones, from the same portable base. Only the target varies by node type; the OS, compilers, MPI families and apps follow the host's modules and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg) and resolves to the images of the sub-cluster an experiment runs on; hpcrun/validate refuses an image built for another target.
+This node type's images: keys, each replacing the cluster's for this node type alone, key by key; a key it does not state is the cluster's. Casper's Genoa nodes state only their target, znver4, and its Cascade Lake nodes cascadelake, from the same portable base. Derecho's a100 states its GPU, one compiler and its own apps, and takes the cluster's Milan target. The OS and the MPI families follow the host's modules, which are the same on every node type, and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg, derecho) and resolves to the images of the sub-cluster an experiment runs on; a node type that does not run an app has no set for it, and hpcrun/validate refuses an image built for another target.
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
-| [`march`](#clustersubclustersnameimagesmarch) | object | yes | no other keys | How each compiler family spells target, as for the cluster's images.march; a family must be one the cluster's images.compilers builds. |
-| `target` | string | yes | matches `/^[a-z0-9][a-z0-9_]*$/` | The microarchitecture this node type's app images are built for, as for the cluster's images.target. |
+| `apps` | list of string |  | no duplicates | This node type's apps, replacing the cluster's images.apps: an app that needs a GPU has no business on a CPU node, and HPCG on a GPU node measures the wrong thing. [] is a node type that runs the base set only. |
+| `compilers` | list of string |  | at least 1 entry, no duplicates | This node type's container compiler tags, replacing the cluster's images.compilers: Derecho's a100 builds nvhpc only. Each must be a key of modules.compiler_map, as for the cluster's. |
+| [`gpu`](#clustersubclustersnameimagesgpu) | object |  | no other keys | The GPU the images of this node type are built for. runtime puts the base images on the factory's GPU build of the same OS, compiler and MPI (leap-nvhpc-mpich-cuda) and needs the node's GPUs to be that runtime's vendor. target and arch work as images.target and images.march do for the CPU: the target joins every app image's tag after the CPU target (leap-nvhpc-mpich-cuda-<app>-znver3-sm80), and arch is passed to the app build. Without them device code is built for every major architecture, the base's default, and the name has no GPU word. |
+| [`march`](#clustersubclustersnameimagesmarch) | object |  | no other keys | How each compiler family spells target, as for the cluster's images.march; a family must be one this node type builds. |
+| `target` | string |  | matches `/^[a-z0-9][a-z0-9_]*$/` | The microarchitecture this node type's app images are built for, as for the cluster's images.target. Stated with march, or not at all. |
+
+###### `cluster.subclusters.<name>.images.gpu`
+
+The GPU the images of this node type are built for. runtime puts the base images on the factory's GPU build of the same OS, compiler and MPI (leap-nvhpc-mpich-cuda) and needs the node's GPUs to be that runtime's vendor. target and arch work as images.target and images.march do for the CPU: the target joins every app image's tag after the CPU target (leap-nvhpc-mpich-cuda-<app>-znver3-sm80), and arch is passed to the app build. Without them device code is built for every major architecture, the base's default, and the name has no GPU word.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `arch` | string |  | matches `/^-[A-Za-z0-9=._,+-]+( -[A-Za-z0-9=._,+-]+)*$/` | How the compiler is told target: -arch=sm_80 for nvcc. Required with target, and only with it. |
+| `runtime` | `cuda` | yes |  | The GPU runtime, as the factory's tag spells it. |
+| `target` | string |  | matches `/^[a-z0-9][a-z0-9_]*$/` | The GPU architecture, named for the architecture: sm80 for the A100. Two node types naming one GPU target must spell its arch identically; hpcrun/sitegen --check refuses otherwise. |
 
 ###### `cluster.subclusters.<name>.images.march`
 
-How each compiler family spells target, as for the cluster's images.march; a family must be one the cluster's images.compilers builds.
+How each compiler family spells target, as for the cluster's images.march; a family must be one this node type builds.
 
 | key | type | required | constraints | meaning |
 | --- | --- | --- | --- | --- |
@@ -424,6 +475,7 @@ What one compute node has. FALLBACKS, not measurements: the job probes lscpu and
 | `cores` | integer | yes | at least 1 | Physical cores per node. |
 | `cores_per_l3` | integer |  | at least 1 | Cores sharing one last-level cache -- a CCD on AMD. Never inferred from a placement report: a run that does not fill a node touches only part of each CCD and would under-count, then declare the result optimal. |
 | `cores_per_numa` | integer |  | at least 1 | Cores in one NUMA domain. On a machine with NPS4 this is a quarter of a socket, not the whole one. |
+| [`gpus`](#clustersubclustersnamenodegpus) | object |  | no other keys | The GPUs on one node, stated once. hpcrun/submit asks for them in the select chunk (ngpus= on PBS Pro), which is also what steers a job onto this node type rather than onto a node without them. A node type that states none has no GPUs. |
 | `ncpus` | integer |  | at least 1 | CPUs per node the scheduler will actually hand out -- PBS's resources_available.ncpus -- which can be fewer than the hardware has: Casper's high-throughput Genoa nodes have 64 cores and offer 62, its Cascade Lake nodes 36 and offer 34. The geometry check still reasons in hardware cores; this is what a request may ask for. An exclusive job asks for exactly this many, and hpcrun/validate refuses a cell that needs more, because a request no node can satisfy does not fail -- it queues forever. Omit it where the two are equal. |
 | `select` | string |  | matches `/^[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+(:[a-z_][a-z0-9_]*=[A-Za-z0-9._-]+)*$/` | Scheduler resource clauses that ask for THIS node type, appended to the select directive -- on Casper, cpu_type=genoa. Without it a description says what the hardware is but not how to obtain it, which is worse than saying nothing because it looks authoritative: the first Casper run named no processor and landed on a node type the file did not describe. Use only resources that steer node CHOICE. A node's queue-eligibility tag is not one of them: on a system with a routing queue, selecting on it fights the router rather than directing it. |
 | `smt` | integer | yes | at least 1 | Hardware threads per physical core. |
@@ -431,3 +483,13 @@ What one compute node has. FALLBACKS, not measurements: the job probes lscpu and
 | `sockets` | integer |  | at least 1 | Populated sockets per node. Used to derive cores per socket, which is the granularity a rank should not straddle. |
 | `target_arch` | string |  | matches `/^[a-z0-9][a-z0-9._-]*$/` | The instruction set this hardware actually runs, in the spelling report_cpu_features prints. Checked against the app binary once at job start, which turns a SIGILL on every rank three hours into a queue into one line before the first cell. Deliberately a check and not an input: the image was built in CI long before this file was read, so a site can only refuse to measure an image, never change it. |
 | `topology` | `probe` \| `declared` |  | default `"probe"` | probe means lscpu on the compute node is the authority and the values above are only a last resort. declared means trust them, which is for a machine where lscpu is not available or not truthful. |
+
+###### `cluster.subclusters.<name>.node.gpus`
+
+The GPUs on one node, stated once. hpcrun/submit asks for them in the select chunk (ngpus= on PBS Pro), which is also what steers a job onto this node type rather than onto a node without them. A node type that states none has no GPUs.
+
+| key | type | required | constraints | meaning |
+| --- | --- | --- | --- | --- |
+| `count` | integer | yes | at least 1 | GPUs per node. |
+| `model` | string |  | matches `/^[a-z0-9][a-z0-9_]*$/` | The GPU, for a person and for run.meta's comparison with what the job found: a100_40gb. Not used to choose anything. |
+| `vendor` | `nvidia` \| `amd` | yes |  | Whose GPUs: what decides how a container is given them, and which GPU runtime an image needs (cuda: nvidia). |

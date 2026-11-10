@@ -33,8 +33,17 @@
 #       "cpus": 256, "cores_per_node": 128, "sockets": 2,
 #       "smt": 2, "smt_stride": 128, "smt_layout": "block",
 #       "cores_per_socket": 64, "cores_per_l3": 8,
-#       "numa_domains": 8, "cores_per_numa": 16
+#       "numa_domains": 8, "cores_per_numa": 16,
+#       "mem_per_node_mb": 245760,
+#       "gpus": 0, "gpu_model": "", "gpu_mem_mb": 0, "gpu_numa": ""
 #     }
+#
+# The memory and GPU keys are what an app sizes a problem from (HPL's matrix,
+# STREAM's arrays), so they are the job's, not the hardware's: memory is the
+# smaller of MemTotal and the job's cgroup limit, and the GPUs are the ones
+# /proc/driver/nvidia lists.  gpu_numa is each GPU's NUMA domain in PCI order,
+# from sysfs; gpu_mem_mb is the first GPU's, from nvidia-smi, once a job, and 0
+# when it cannot say.
 #
 # smt_layout names how the kernel enumerates SMT siblings, which is the one thing
 # a mask check cannot guess:
@@ -83,9 +92,73 @@ _topo_set_fallback () {
         TOPO_CORES_PER_NUMA=1
     fi
 
+    # Nothing to fall back to for memory; the GPUs the description states.
+    TOPO_MEM_PER_NODE_MB=""
+    TOPO_GPUS="${HPCRUN_GPUS_PER_NODE:-0}"
+    TOPO_GPU_MODEL="${HPCRUN_GPU_MODEL:-}"
+    TOPO_GPU_MEM_MB=""
+    TOPO_GPU_NUMA=""
+
     TOPO_CPUS=$((TOPO_CORES_PER_NODE * TOPO_SMT))
     TOPO_CORES_PER_SOCKET=$((TOPO_CORES_PER_NODE / TOPO_SOCKETS))
     TOPO_NUMA_DOMAINS=$((TOPO_CORES_PER_NODE / TOPO_CORES_PER_NUMA))
+}
+
+#-------------------------------------------------------------------------------
+# What the job may use of the node's memory and GPUs.  For the tests,
+# HPCRUN_PROBE_ROOT prefixes /proc and /sys, and HPCRUN_PROBE_NVIDIA_SMI
+# stands in for nvidia-smi.
+#-------------------------------------------------------------------------------
+
+# MiB: MemTotal, or the smallest cgroup limit on the way from the job's cgroup
+# up to the root, when that is smaller: a limit set on a parent (the job) holds
+# for a child (one step of it) whose own says `max`.  cgroup v1 names the
+# memory controller's path; v2 has one unified path, `0::`.
+_probe_mem_mb () {
+    local root="${HPCRUN_PROBE_ROOT:-}" total limit path base file
+    total="$(sed -n 's/^MemTotal:[[:space:]]*\([0-9][0-9]*\) kB.*/\1/p' "${root}/proc/meminfo" 2>/dev/null)"
+    [ -n "${total}" ] || { echo 0; return 0; }
+    total=$(( total / 1024 ))
+    path="$(sed -n 's/^[0-9]*:memory:\(.*\)$/\1/p' "${root}/proc/self/cgroup" 2>/dev/null | head -1)"
+    if [ -n "${path}" ]; then
+        base="${root}/sys/fs/cgroup/memory" file=memory.limit_in_bytes
+    else
+        path="$(sed -n 's/^0::\(.*\)$/\1/p' "${root}/proc/self/cgroup" 2>/dev/null | head -1)"
+        base="${root}/sys/fs/cgroup" file=memory.max
+    fi
+    [ -n "${path}" ] || { echo "${total}"; return 0; }
+    path="${path%/}"
+    while :; do
+        limit="$(cat "${base}${path}/${file}" 2>/dev/null)"
+        case "${limit}" in
+            ''|max|*[!0-9]*) ;;
+            *) limit=$(( limit / 1048576 ))
+               [ "${limit}" -gt 0 ] && [ "${limit}" -lt "${total}" ] && total="${limit}" ;;
+        esac
+        [ -n "${path}" ] || break
+        path="${path%/*}"
+    done
+    echo "${total}"
+}
+
+# "<count> <model> <mem_mb> <numa,numa,...>" for the NVIDIA GPUs this node has,
+# or "0 - 0 -".  The model is the driver's, with spaces made underscores.
+_probe_gpus () {
+    local root="${HPCRUN_PROBE_ROOT:-}" smi="${HPCRUN_PROBE_NVIDIA_SMI:-nvidia-smi}"
+    local d n=0 model="" numa="" one mem=0
+    for d in "${root}"/proc/driver/nvidia/gpus/*; do
+        [ -f "${d}/information" ] || continue
+        n=$(( n + 1 ))
+        [ -n "${model}" ] || model="$(sed -n 's/^Model:[[:space:]]*//p' "${d}/information" | head -1)"
+        one="$(cat "${root}/sys/bus/pci/devices/${d##*/}/numa_node" 2>/dev/null)"
+        numa="${numa:+${numa},}${one:--1}"
+    done
+    if [ "${n}" -gt 0 ] && command -v "${smi}" >/dev/null 2>&1; then
+        mem="$("${smi}" --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null \
+               | head -1 | tr -dc '0-9')"
+    fi
+    model="$(printf '%s' "${model}" | sed 's/[[:space:]]\{1,\}$//; s/[^A-Za-z0-9._-]\{1,\}/_/g')"
+    echo "${n} ${model:--} ${mem:-0} ${numa:--}"
 }
 
 #-------------------------------------------------------------------------------
@@ -111,7 +184,15 @@ probe_topology () {
         return 1
     }
 
-    printf '%s\n' "${raw}" | awk -F, -v host="$(hostname -s 2>/dev/null)" '
+    local mem gpus gmodel gmem gnuma
+    mem="$(_probe_mem_mb)"
+    read -r gpus gmodel gmem gnuma <<< "$(_probe_gpus)"
+    [ "${gmodel}" = - ] && gmodel=""
+    [ "${gnuma}" = - ] && gnuma=""
+
+    printf '%s\n' "${raw}" | awk -F, -v host="$(hostname -s 2>/dev/null)" \
+        -v mem="${mem}" -v gpus="${gpus}" -v gmodel="${gmodel}" \
+        -v gmem="${gmem}" -v gnuma="${gnuma}" '
     function ceil (a, b) { return int((a + b - 1) / b) }
     {
         cpu = $1 + 0; core = $2 + 0; sock = $3 + 0; node = $4 + 0
@@ -163,7 +244,12 @@ probe_topology () {
         printf "  \"cores_per_socket\": %d,\n", ceil(ncores, nsock)
         printf "  \"cores_per_l3\": %d,\n",     ceil(ncores, nl3)
         printf "  \"numa_domains\": %d,\n",     nnuma
-        printf "  \"cores_per_numa\": %d\n",    ceil(ncores, nnuma)
+        printf "  \"cores_per_numa\": %d,\n",   ceil(ncores, nnuma)
+        printf "  \"mem_per_node_mb\": %d,\n",  mem
+        printf "  \"gpus\": %d,\n",             gpus
+        printf "  \"gpu_model\": \"%s\",\n",    gmodel
+        printf "  \"gpu_mem_mb\": %d,\n",       gmem
+        printf "  \"gpu_numa\": \"%s\"\n",      gnuma
         printf "}\n"
     }' > "${out}" || { rm -f "${out}"; return 1; }
 
@@ -218,6 +304,14 @@ load_topology () {
     TOPO_CORES_PER_L3="$(_topo_num   "${f}" cores_per_l3)"
     TOPO_NUMA_DOMAINS="$(_topo_num   "${f}" numa_domains)"
     TOPO_CORES_PER_NUMA="$(_topo_num "${f}" cores_per_numa)"
+    # Older topology.json files have none of these; the fallbacks stand.
+    local v
+    v="$(_topo_num "${f}" mem_per_node_mb)"; [ "${v:-0}" -gt 0 ] && TOPO_MEM_PER_NODE_MB="${v}"
+    # A measured 0 is a count, not a missing key: it overrides the profile's.
+    v="$(_topo_num "${f}" gpus)";            [ -n "${v}" ]       && TOPO_GPUS="${v}"
+    v="$(_topo_str "${f}" gpu_model)";       [ -n "${v}" ]       && TOPO_GPU_MODEL="${v}"
+    v="$(_topo_num "${f}" gpu_mem_mb)";      [ "${v:-0}" -gt 0 ] && TOPO_GPU_MEM_MB="${v}"
+    v="$(_topo_str "${f}" gpu_numa)";        [ -n "${v}" ]       && TOPO_GPU_NUMA="${v}"
     return 0
 }
 
@@ -232,10 +326,15 @@ _topo_str () {
 
 # One line naming the topology in force, for run headers and summaries.
 topology_line () {
-    printf '%s cores/node, SMT %s (stride %s, %s), %s cores/L3, %s cores/NUMA, %s socket(s) [%s]' \
+    printf '%s cores/node, SMT %s (stride %s, %s), %s cores/L3, %s cores/NUMA, %s socket(s)%s%s [%s]' \
         "${TOPO_CORES_PER_NODE}" "${TOPO_SMT}" "${TOPO_SMT_STRIDE}" \
         "${TOPO_SMT_LAYOUT}" "${TOPO_CORES_PER_L3}" "${TOPO_CORES_PER_NUMA}" \
-        "${TOPO_SOCKETS}" "${TOPO_FILE:-${TOPO_SOURCE}}"
+        "${TOPO_SOCKETS}" \
+        "${TOPO_MEM_PER_NODE_MB:+, ${TOPO_MEM_PER_NODE_MB} MiB}" \
+        "$( [ "${TOPO_GPUS:-0}" -gt 0 ] 2>/dev/null && \
+            printf ', %s x %s GPU%s' "${TOPO_GPUS}" "${TOPO_GPU_MODEL:-?}" \
+                   "${TOPO_GPU_MEM_MB:+ (${TOPO_GPU_MEM_MB} MiB)}")" \
+        "${TOPO_FILE:-${TOPO_SOURCE}}"
 }
 
 _topo_set_fallback

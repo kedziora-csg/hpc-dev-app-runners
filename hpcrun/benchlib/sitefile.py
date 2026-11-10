@@ -86,6 +86,9 @@ VAR_REF = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
 # silently never matches.
 FAMILIES = ("mpich", "mpich3", "openmpi")
 
+# The GPU vendor each GPU runtime an image can be built with needs on the node.
+GPU_VENDOR = {"cuda": "nvidia"}
+
 
 class ClusterFile(object):
     """One cluster, as described by a site file and a cluster file together."""
@@ -381,6 +384,19 @@ def cross_checks(data):
                 out.append("host_libraries.%s.env.%s holds a space, which the "
                            "generated NAME=VALUE list cannot carry" % (name, key))
 
+    # Host software is bound at a mount inside the container, and its lib_dirs
+    # are relative to that, so neither may climb out of it.
+    for name, spec in sorted((data.get("host_software") or {}).items()):
+        for sub in spec.get("lib_dirs") or []:
+            if ".." in sub.split("/"):
+                out.append("host_software.%s.lib_dirs entry %s climbs out of the "
+                           "install" % (name, sub))
+        mount = spec.get("mount")
+        if mount is not None and mount.rstrip("/") in ("", "/container", "/usr",
+                                                       "/opt", "/etc"):
+            out.append("host_software.%s.mount %s would land on top of the "
+                       "container's own tree; mount it below that" % (name, mount))
+
     images = data.get("images") or {}
     if ("target" in images) != ("march" in images):
         out.append(
@@ -392,29 +408,65 @@ def cross_checks(data):
         if family != "default" and family not in (images.get("compilers") or []):
             out.append("images.march.%s spells the target for a compiler the set "
                        "does not build" % family)
-    # A sub-cluster's own target replaces the cluster's for its node type, and
-    # only the target: what is built still comes from the cluster's images:.
+    # A sub-cluster's own images: keys replace the cluster's for its node type,
+    # key by key (node_images); the OS and the MPI families stay the cluster's.
     own = sorted(name for name, entry in subclusters.items() if entry.get("images"))
     if own and not images:
         out.append(
-            "subclusters %s state an app target, but there is no images: block "
-            "saying what to build for it" % ", ".join(own))
+            "subclusters %s state images: keys, but there is no images: block "
+            "saying what to build for them" % ", ".join(own))
+    compiler_map = (data.get("modules") or {}).get("compiler_map") or {}
     for name in own:
-        for family in sorted(subclusters[name]["images"].get("march") or {}):
-            if family != "default" and family not in (images.get("compilers") or []):
-                out.append("subclusters.%s.images.march.%s spells the target for a "
-                           "compiler the set does not build" % (name, family))
-    if own and len(own) == len(subclusters) and images.get("target"):
+        mine = subclusters[name]["images"]
+        where = "subclusters.%s.images" % name
+        if ("target" in mine) != ("march" in mine):
+            out.append(
+                "%s states %s without %s. The two replace the cluster's together: "
+                "a target with the cluster's flags, or flags under the cluster's "
+                "target, is a build its name does not describe."
+                % ((where,) + (("target", "march") if "target" in mine
+                               else ("march", "target"))))
+        compilers = mine.get("compilers", images.get("compilers") or [])
+        for family in sorted(mine.get("march") or {}):
+            if family != "default" and family not in compilers:
+                out.append("%s.march.%s spells the target for a compiler this node "
+                           "type does not build" % (where, family))
+        for compiler in mine.get("compilers") or []:
+            if compiler not in compiler_map:
+                out.append(
+                    "%s.compilers names %s, which has no modules.compiler_map "
+                    "entry, so no job here could run that image" % (where, compiler))
+    targeted = [n for n in own if "target" in subclusters[n]["images"]]
+    if targeted and len(targeted) == len(subclusters) and images.get("target"):
         out.append(
             "images.target %s is replaced by every sub-cluster's own, so nothing "
             "would be built for it; drop it, with its march" % images["target"])
-    compiler_map = (data.get("modules") or {}).get("compiler_map") or {}
     for compiler in images.get("compilers") or []:
         if compiler not in compiler_map:
             out.append(
                 "images.compilers names %s, which has no modules.compiler_map "
                 "entry. The host MPI is loaded to match the container's compiler, "
                 "so no job here could run that image." % compiler)
+    # GPU images need a node that has the GPU.  The other way round is legal:
+    # a GPU node type may run CPU images.
+    for name, entry in sorted(subclusters.items()):
+        gpu = (entry.get("images") or {}).get("gpu") or {}
+        where = "subclusters.%s" % name
+        if ("target" in gpu) != ("arch" in gpu):
+            out.append(
+                "%s.images.gpu states %s without %s. A GPU target names how the "
+                "device code is built, so it needs the flags that build it."
+                % ((where,) + (("target", "arch") if "target" in gpu
+                               else ("arch", "target"))))
+        vendor = ((entry.get("node") or {}).get("gpus") or {}).get("vendor")
+        want = GPU_VENDOR.get(gpu.get("runtime"))
+        if want and vendor != want:
+            out.append(
+                "%s.images.gpu.runtime is %s, but %s.node.gpus %s. A %s image "
+                "needs %s GPUs to run on."
+                % (where, gpu["runtime"], where,
+                   "names vendor %s" % vendor if vendor else "states none",
+                   gpu["runtime"], want))
     for family in images.get("mpi") or []:
         if family not in mpi:
             out.append(
@@ -425,6 +477,20 @@ def cross_checks(data):
 
     binds = (data.get("container") or {}).get("binds") or []
     bind_map = (data.get("container") or {}).get("bind_map") or {}
+
+    # A preloaded file the container cannot see is a warning from the loader,
+    # not an error, and the run goes on without it.  A ${NAME} entry is checked
+    # by the launcher, which is where NAME has a value.
+    present = binds + ((data.get("container") or {}).get("binds_if_present") or [])
+    for family, spec in sorted(mpi.items()):
+        for path in spec.get("preload") or []:
+            if path.startswith("${"):
+                continue
+            if not any(path.startswith(b.rstrip("/") + "/") for b in present):
+                out.append(
+                    "mpi.%s.preload names %s, which no container.binds or "
+                    "binds_if_present entry puts inside the container"
+                    % (family, path))
     for host_path in sorted(bind_map):
         if host_path in binds:
             out.append(
@@ -592,6 +658,16 @@ def _node_lines(node, where, assign, comments=True):
             out.append("# into a queue, with no output and exit 132.")
         out.append(assign("HPCRUN_TARGET_ARCH", node["target_arch"],
                           where + ".target_arch"))
+    gpus = node.get("gpus")
+    if gpus:
+        if comments:
+            out.append("")
+            out.append("# The GPUs on one node.  hpcrun/submit asks for them in the select")
+            out.append("# chunk, which is also what puts the job on a node that has them.")
+        out.append(assign("HPCRUN_GPUS_PER_NODE", gpus["count"], where + ".gpus.count"))
+        out.append(assign("HPCRUN_GPU_VENDOR", gpus["vendor"], where + ".gpus.vendor"))
+        if gpus.get("model"):
+            out.append(assign("HPCRUN_GPU_MODEL", gpus["model"], where + ".gpus.model"))
     return out
 
 
@@ -688,7 +764,8 @@ def render(sf, source_rel=None):
                    % _assert("HPCRUN_SUBCLUSTER", sf.default_subcluster,
                              "default_subcluster"))
         every = [var for _, var in NODE_VARS] + ["HPCRUN_NCPUS",
-                 "HPCRUN_TOPOLOGY_MODE", "HPCRUN_NODE_SELECT", "HPCRUN_TARGET_ARCH"]
+                 "HPCRUN_TOPOLOGY_MODE", "HPCRUN_NODE_SELECT", "HPCRUN_TARGET_ARCH",
+                 "HPCRUN_GPUS_PER_NODE", "HPCRUN_GPU_VENDOR", "HPCRUN_GPU_MODEL"]
         out.append("case \"${HPCRUN_SUBCLUSTER}\" in")
         for name in names:
             entry = subs[name]
@@ -777,6 +854,13 @@ def render(sf, source_rel=None):
                  comment="NAME=VALUE, space separated, set inside the container for this\n"
                          "family.  Where a workaround specific to this machine goes.")
     out.append("")
+    out += _case("bench_site_mpi_preload",
+                 dict((f, list(s["preload"])) for f, s in mpi.items() if s.get("preload")),
+                 FAMILIES,
+                 comment="Host libraries the host MPI needs and an image's app is not linked\n"
+                         "with, preloaded inside the container for every image of this\n"
+                         "family.  Literal text: a ${NAME} is expanded by the launcher.")
+    out.append("")
 
     hostlibs = d.get("host_libraries") or {}
     if hostlibs:
@@ -793,6 +877,28 @@ def render(sf, source_rel=None):
                      dict((n, ["%s=%s" % (k, v) for k, v in
                                sorted((hostlibs[n].get("env") or {}).items())])
                           for n in names), names)
+        out.append("")
+
+    software = d.get("host_software") or {}
+    if software:
+        names = sorted(software)
+        out.append("#-- host software an app may require " + "-" * 37)
+        out.append("# By name, from an app's requires.host_software.  The launcher binds the")
+        out.append("# path at the mount (or at itself) and puts lib_dirs, under the mount, on")
+        out.append("# LD_LIBRARY_PATH.  Literal text: ${mpi} is the image's MPI family and")
+        out.append("# any other ${NAME} is expanded by the launcher, after the host modules.")
+        out.append(_assert("HPCRUN_HOST_SOFTWARE", " ".join(names), "host_software"))
+        out += _case("bench_site_host_software_path",
+                     dict((n, software[n]["path"]) for n in names), names)
+        out += _case("bench_site_host_software_mount",
+                     dict((n, software[n]["mount"]) for n in names
+                          if software[n].get("mount")), names)
+        out += _case("bench_site_host_software_lib_dirs",
+                     dict((n, list(software[n]["lib_dirs"])) for n in names
+                          if software[n].get("lib_dirs")), names)
+        out += _case("bench_site_host_software_version",
+                     dict((n, software[n]["version"]) for n in names
+                          if software[n].get("version")), names)
         out.append("")
 
     out.append("#-- the module environment every job starts from " + "-" * 26)
@@ -817,6 +923,8 @@ def render(sf, source_rel=None):
         out.append("export HPCRUN_SUBCLUSTERS HPCRUN_SUBCLUSTER HPCRUN_SUBCLUSTER_VERIFIED")
     if d.get("host_libraries"):
         out.append("export HPCRUN_HOST_LIBRARIES")
+    if d.get("host_software"):
+        out.append("export HPCRUN_HOST_SOFTWARE")
     # With sub-clusters, a key any entry states is exported; `export` of a
     # name an arm has unset marks it without giving it a value.
     nodes = [e["node"] for e in sf.subclusters.values()] or [node]
@@ -830,6 +938,9 @@ def render(sf, source_rel=None):
                 ("HPCRUN_NCPUS", stated("ncpus")),
                 ("HPCRUN_TARGET_ARCH", stated("target_arch")),
                 ("HPCRUN_NODE_SELECT", stated("select")),
+                ("HPCRUN_GPUS_PER_NODE HPCRUN_GPU_VENDOR", stated("gpus")),
+                ("HPCRUN_GPU_MODEL",
+                 any((n.get("gpus") or {}).get("model") for n in nodes) or None),
                 ("HPCRUN_PLACE", sched.get("place"))]
     present = [name for name, value in optional if value is not None]
     if present:
@@ -931,40 +1042,93 @@ HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-}"
 # Image sets, and the images.mk that hands them to sif/Makefile
 #-------------------------------------------------------------------------------
 
+# What a sub-cluster's images: may replace, each key on its own.  The OS and the
+# MPI families stay cluster-wide: they follow the host's modules, which are the
+# same on every node type.
+NODE_IMAGE_KEYS = ("target", "march", "gpu", "compilers", "apps")
+
+
+def node_images(sf, subcluster=None):
+    """The images: block one node type builds and runs: the cluster's, with
+    each key a sub-cluster states replacing the cluster's, key by key.
+
+    Derecho's a100 states gpu, compilers and apps and takes the cluster's
+    target, since its CPU is the CPU nodes' Milan; Casper's node types state
+    only their own target.  {} is a cluster with no images: at all.
+    """
+    images = dict(sf.data.get("images") or {})
+    if not images:
+        return {}
+    own = (sf.subclusters.get(subcluster) or {}).get("images") if subcluster else None
+    for key in NODE_IMAGE_KEYS:
+        if own and key in own:
+            images[key] = own[key]
+    return images
+
+
 def image_target(sf, subcluster=None):
     """(target, march) the app images for one node type are built for.
 
-    A sub-cluster's own images: replaces the cluster's target and march; one
-    that states none, or no sub-cluster at all, takes the cluster's.  ("", {})
-    is a cluster whose app images are built at the base image's own flags.
+    ("", {}) is a node type whose app images are built at the base image's own
+    flags.
     """
-    own = ((sf.subclusters.get(subcluster) or {}).get("images")
-           if subcluster else None)
-    images = own or sf.data.get("images") or {}
+    images = node_images(sf, subcluster)
     return images.get("target", ""), images.get("march") or {}
 
 
-def built_targets(sf):
-    """[(target, march)] the cluster's app images are built for, each once.
+def gpu_target(sf, subcluster=None):
+    """(runtime, target, arch) of one node type's GPU images: ("", "", "") for
+    CPU images, and a target of "" for device code built for every major
+    architecture, the base image's default."""
+    gpu = node_images(sf, subcluster).get("gpu") or {}
+    return gpu.get("runtime", ""), gpu.get("target", ""), gpu.get("arch", "")
 
-    Only the targets some node type uses: Casper's sub-clusters both state
-    their own, so nothing is built for a cluster-wide one.  The default
-    sub-cluster's first, then the others by name.
-    """
+
+def node_types(sf):
+    """[sub-cluster name], the default first and the rest by name; [None] for
+    a cluster without sub-clusters."""
     subs = sf.subclusters
     if not subs:
-        return [image_target(sf)]
-    names = sorted(subs, key=lambda n: (n != sf.default_subcluster, n))
-    out = []
-    for name in names:
-        built = image_target(sf, name)
-        if built[0] not in [t for t, _ in out]:
-            out.append(built)
-    return out
+        return [None]
+    return sorted(subs, key=lambda n: (n != sf.default_subcluster, n))
 
 
 def _suffix(target):
     return ("-" + target) if target else ""
+
+
+def _builds(sf, subcluster):
+    """One dict per app image one node type runs, plus its base images.
+
+    The tag carries everything that makes a build different: the base's GPU
+    runtime (leap-nvhpc-mpich-cuda), the app, the CPU target and the GPU
+    target -- leap-nvhpc-mpich-cuda-<app>-znver3-sm80.
+    """
+    images = node_images(sf, subcluster)
+    target, march = image_target(sf, subcluster)
+    runtime, gtarget, garch = gpu_target(sf, subcluster)
+    bases = ["%s-%s-%s%s" % (images["os"], compiler, family, _suffix(runtime))
+             for family in images["mpi"] for compiler in images["compilers"]]
+    apps = []
+    for app in images.get("apps") or []:
+        for family in images["mpi"]:
+            for compiler in images["compilers"]:
+                base = "%s-%s-%s%s" % (images["os"], compiler, family, _suffix(runtime))
+                apps.append({"os": images["os"], "compiler": compiler,
+                             "mpi": family, "app": app, "base_tag": base,
+                             "tag": base + "-" + app + _suffix(target) + _suffix(gtarget),
+                             "target": target,
+                             "march": march.get(compiler, march.get("default", "")),
+                             "gpu": runtime, "gpu_target": gtarget,
+                             "gpu_arch": garch})
+    return bases, apps
+
+
+def _union(lists):
+    out = []
+    for items in lists:
+        out.extend(i for i in items if i not in out)
+    return out
 
 
 def image_sets(sf, subcluster=None):
@@ -977,23 +1141,22 @@ def image_sets(sf, subcluster=None):
     images are adjacent -- which is how the Makefile listed Derecho's six before
     this was generated.
 
-    An app set keeps the cluster's name on every node type, and resolves to the
-    images built for the one `subcluster` names: casper-hpcg is the znver4
-    builds on htc-genoa and the cascadelake ones on htc-cascadelake.  With no
-    sub-cluster named it is every target's, which is what `make` builds.
+    A set keeps the cluster's name on every node type, and resolves to the
+    images of the one `subcluster` names: casper-hpcg is the znver4 builds on
+    htc-genoa and the cascadelake ones on htc-cascadelake, and `derecho` is the
+    six CPU images on cpu and the -cuda ones on a100.  A node type that does
+    not run an app has no set for it.  With no sub-cluster named, a set is
+    every node type's images, which is what `make` builds.
     """
-    images = sf.data.get("images")
-    if not images:
+    if not sf.data.get("images"):
         return {}
-    base = ["%s-%s-%s.sif" % (images["os"], compiler, family)
-            for family in images["mpi"] for compiler in images["compilers"]]
-    sets = {sf.name: base}
-    targets = ([image_target(sf, subcluster)] if subcluster
-               else built_targets(sf))
-    for app in images.get("apps") or []:
+    names = [subcluster] if subcluster else node_types(sf)
+    builds = [_builds(sf, n) for n in names]
+    sets = {sf.name: [b + ".sif" for b in _union(bases for bases, _ in builds)]}
+    for app in _union([e["app"] for e in apps] for _, apps in builds):
         sets["%s-%s" % (sf.name, app)] = [
-            i[:-4] + "-" + app + _suffix(target) + ".sif"
-            for target, _ in targets for i in base]
+            t + ".sif" for t in
+            _union([e["tag"] for e in apps if e["app"] == app] for _, apps in builds)]
     return sets
 
 
@@ -1002,42 +1165,41 @@ def app_builds(sf):
 
     The same crossing as image_sets, plus what the build needs and the set
     names do not carry -- the base image's tag, and the flags for this
-    compiler.  Every target a node type uses, each once, so one dispatch builds
-    both of Casper's.  Read by apps/matrix.py, which is the workflow's only
-    view of the cluster descriptions.
+    compiler and GPU.  Every node type's, each image once, so one dispatch
+    builds both of Casper's targets, or Derecho's CPU and GPU images.  Read by
+    apps/matrix.py, which is the workflow's only view of the cluster
+    descriptions.
     """
-    images = sf.data.get("images") or {}
+    if not sf.data.get("images"):
+        return []
+    entries = [e for n in node_types(sf) for e in _builds(sf, n)[1]]
     out = []
-    for app in images.get("apps") or []:
-        for target, march in built_targets(sf):
-            for family in images["mpi"]:
-                for compiler in images["compilers"]:
-                    base = "%s-%s-%s" % (images["os"], compiler, family)
-                    out.append({"os": images["os"], "compiler": compiler,
-                                "mpi": family, "app": app, "base_tag": base,
-                                "tag": base + "-" + app + _suffix(target),
-                                "target": target,
-                                "march": march.get(compiler,
-                                                   march.get("default", ""))})
+    for app in _union([[e["app"] for e in entries]]):
+        for e in entries:
+            if e["app"] == app and all(o["tag"] != e["tag"] for o in out):
+                out.append(e)
     return out
 
 
 def target_conflicts(sfs):
     """Targets two clusters, or two node types, spell differently -- one tag
-    that would mean two builds, which is the rule the target exists to keep."""
+    that would mean two builds, which is the rule the target exists to keep.
+    A GPU target is held to the same rule."""
     seen, out = {}, []
     for sf in sfs:
-        where = ([(sf.name, image_target(sf))] if not sf.subclusters else
-                 [("%s/%s" % (sf.name, n), image_target(sf, n))
-                  for n in sorted(sf.subclusters)])
-        for name, (target, spelled) in where:
-            if not target:
-                continue
-            if target in seen and seen[target][1] != spelled:
-                out.append("target %s is spelled %r by %s and %r by %s"
-                           % (target, seen[target][1], seen[target][0], spelled,
-                              name))
-            seen.setdefault(target, (name, spelled))
+        for n in node_types(sf):
+            name = "%s/%s" % (sf.name, n) if n else sf.name
+            target, march = image_target(sf, n)
+            _, gtarget, garch = gpu_target(sf, n)
+            for kind, t, spelled in (("target", target, march),
+                                     ("GPU target", gtarget, garch)):
+                if not t:
+                    continue
+                key = (kind, t)
+                if key in seen and seen[key][1] != spelled:
+                    out.append("%s %s is spelled %r by %s and %r by %s"
+                               % (kind, t, seen[key][1], seen[key][0], spelled, name))
+                seen.setdefault(key, (name, spelled))
     return out
 
 

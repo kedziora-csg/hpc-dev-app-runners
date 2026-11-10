@@ -44,6 +44,11 @@ ARG MAKE_J_PROCS=2
 #-------------------------------------------------------------------------------
 ARG APP_MARCH_FLAGS=""
 
+# The same for device code, on a GPU base: the node type's images.gpu.arch
+# (-arch=sm_80 for an A100).  Empty means the base's own, every major
+# architecture.  An app that builds device code applies it.
+ARG APP_GPU_ARCH_FLAGS=""
+
 COPY apps/${APP}/ /container/apps-src/${APP}/
 
 # HPCG_RUN=0 skips the recipe's own post-build run: the workflow smoke-tests the
@@ -55,6 +60,7 @@ RUN test -x "/container/apps-src/${APP}/build.sh" \
     && MAKE_J_PROCS="${MAKE_J_PROCS}" \
        HPCG_RUN=0 \
        APP_MARCH_FLAGS="${APP_MARCH_FLAGS}" \
+       APP_GPU_ARCH_FLAGS="${APP_GPU_ARCH_FLAGS}" \
        "/container/apps-src/${APP}/build.sh" \
     && test -f "/container/app.d/${APP}/app.yaml" \
         || { echo "apps/${APP}/build.sh installed no contract at /container/app.d/${APP}"; exit 1; } \

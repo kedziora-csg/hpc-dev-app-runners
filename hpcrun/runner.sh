@@ -60,6 +60,8 @@
 #     ldd_*_host.txt           linkage through the launcher, after the host
 #                              libraries displace the container's
 #     placement_<cell>.out     report_placement output, provenance header first
+#     gpu_bind_<cell>.txt      on a GPU node type: each rank's GPU and NUMA domain
+#     gpus_<cell>.out          and report_gpus from inside the container
 #     run_<cell>[_r<n>]/       the app's own cwd: inputs, app.out, metrics.kv
 #
 # Stdout carries only the narrative: each cell's geometry and placement verdict,
@@ -175,8 +177,9 @@ mkdir -p "${RESULTS_DIR}" \
 #                               for emit_provenance, capture_run_context, the
 #                               sub-second clock and the HPCRUN_VERBOSE helpers
 #   app_contract.sh             app.yaml + the prepare/launch/extract hooks
+#   gpu_bind.sh                 gpu_bind_summary: what GPU each rank got
 #-------------------------------------------------------------------------------
-for lib in make_apptainer_launcher.sh check_placement.sh check_arch.sh results.sh app_contract.sh; do
+for lib in make_apptainer_launcher.sh check_placement.sh check_arch.sh results.sh app_contract.sh gpu_bind.sh; do
     . "${HPCRUN_ROOT}/lib/${lib}" \
         || { echo "cannot source ${HPCRUN_ROOT}/lib/${lib}" >&2; exit 1; }
 done
@@ -198,6 +201,18 @@ load_host_modules "${comp_family}" "${mpi_family}" || exit 1
 
 launcher="${RESULTS_DIR}/apptainer-launch-${HPCRUN_CLUSTER}-${mpi_family}.sh"
 make_apptainer_launcher "${launcher}" "${container_img}" "${mpi_family}" || exit 1
+
+# Host software the app requires, which the launcher bound: name, version and
+# the directory it came from, for run.meta.  With it, the image digest no longer
+# says everything that ran, so the binary's sha256 is recorded below too.
+host_software=""
+for _hs in ${LAUNCHER_HOST_SOFTWARE:-}; do
+    _ver="$(bench_site_host_software_version "${_hs%%=*}" 2>/dev/null)"
+    host_software="${host_software:+${host_software}; }${_hs%%=*} ${_ver:-unversioned} ${_hs#*=}"
+    echo "host sw   ${_hs%%=*} ${_ver:-unversioned}: ${_hs#*=}"
+done
+[ "${HPCRUN_REQUIRES_GPU_AWARE_MPI:-false}" = true ] && \
+    echo "gpu mpi   the app passes device buffers to MPI (requires.gpu_aware_mpi)"
 
 REPORT_EXE="${REPORT_EXE:-/container/bin/report_placement}"
 
@@ -228,9 +243,14 @@ capture_run_context "${RESULTS_DIR}" "${launcher}"
 # seen THROUGH the launcher, after the host libraries displace the container's.
 # If libmpi still resolves inside /container, every rank singleton-initialises
 # and the job is N serial programs that look like a running job.
+#
+# The MPI library itself, `libmpi.so.N => path`: not any line naming libmpi.
+# On a GPU node a preloaded libmpi_gtl_cuda.so.0 is listed first, from the
+# host, and would pass this check whichever libmpi.so.12 had loaded.
 ${launcher} ldd "${REPORT_EXE}" > ldd_report_placement_host.txt 2>&1
-if grep -i 'libmpi' ldd_report_placement_host.txt | grep -qv '/container/'; then
-    echo "host MPI  $(grep -i 'libmpi' ldd_report_placement_host.txt | head -1 | sed 's/^[[:space:]]*//')"
+host_mpi="$(grep -E 'libmpi\.so[.0-9]* =>' ldd_report_placement_host.txt | head -1 | sed 's/^[[:space:]]*//')"
+if [ -n "${host_mpi}" ] && [ "${host_mpi#*=> /container/}" = "${host_mpi}" ]; then
+    echo "host MPI  ${host_mpi}"
 else
     echo "*** still linking the container's MPI -- see ldd_report_placement_host.txt ***"
     sed 's/^/    /' ldd_report_placement_host.txt
@@ -243,6 +263,19 @@ vshow ldd_report_placement_host.txt "ldd ${REPORT_EXE}"
 # guessed at.
 img_digest="$(sif_digest "${container_img}")"
 [ -n "${img_digest}" ] && echo "digest    ${img_digest}"
+
+# A node type with GPUs.  The launcher gives each rank one (lib/gpu_bind.sh);
+# report_gpus, which a -cuda image carries by the factory's contract, says from
+# inside the container whether a kernel then runs there.  An image without it
+# -- a CPU image on a GPU node -- is still bound, and only the host side of the
+# binding is checked.
+gpu_report="" gpu_driver="" img_cuda=""
+if [ "${HPCRUN_GPUS_PER_NODE:-0}" -gt 0 ] 2>/dev/null; then
+    gpu_driver="$(sed -n 's/^NVRM version:.*  \([0-9][0-9.]*\)  .*/\1/p' /proc/driver/nvidia/version 2>/dev/null)"
+    img_cuda="$(${launcher} printenv CUDA_VERSION 2>/dev/null | tail -1)"
+    ${launcher} test -x /container/bin/report_gpus 2>/dev/null && gpu_report=/container/bin/report_gpus
+    echo "gpus      ${HPCRUN_GPUS_PER_NODE} x ${HPCRUN_GPU_MODEL:-${HPCRUN_GPU_VENDOR}} a node  (driver ${gpu_driver:-unknown}, image CUDA ${img_cuda:-none}${gpu_report:+, report_gpus})"
+fi
 
 #-------------------------------------------------------------------------------
 # 5. The cells.
@@ -332,9 +365,16 @@ if [ -n "${APP}" ]; then
     if ! ${launcher} test -x "${APP_BINARY}" 2>/dev/null; then
         echo "app       ${app_name}: ${APP_BINARY} is not executable in this image"
         echo "          build or pull an image that carries it (cd sif && make ${HPCRUN_CLUSTER}-${app_name}),"
-        echo "          or point HPCRUN_APP_DIR at a contract on a bound filesystem"
+        echo "          or point HPCRUN_APP_DIR at a contract on a bound filesystem."
+        echo "          An app that runs host software (requires.host_software) gets it"
+        echo "          bound only through hpcrun/submit, which reads that from the image."
         exit 1
     fi
+    # What actually ran, when the image digest alone cannot say: a binary from
+    # host software is not in the image at all.  This is the contract's
+    # `binary`; each cell hashes the one its argv starts, which a launch hook
+    # may have changed, into its record.
+    app_sha256="$(${launcher} sha256sum "${APP_BINARY}" 2>/dev/null | awk 'NR == 1 { print $1 }')"
 
     # The contract's declared binary.  What actually runs may differ -- a launch
     # hook can pick a different executable and add flags -- so this is labelled
@@ -376,6 +416,13 @@ emit_provenance run.meta \
     app_args     "${APP_ARGS:-none}" \
     app_scale    "${HPCRUN_SCALE}" \
     target_arch  "${HPCRUN_TARGET_ARCH:-unset}" \
+    gpus         "${HPCRUN_GPUS_PER_NODE:+${HPCRUN_GPUS_PER_NODE} x ${HPCRUN_GPU_MODEL:-${HPCRUN_GPU_VENDOR}}}" \
+    gpu_driver   "${gpu_driver}" \
+    image_cuda   "${img_cuda}" \
+    host_software "${host_software}" \
+    binary       "${APP_BINARY:-}" \
+    binary_sha256 "${app_sha256:-}" \
+    gpu_aware_mpi "${HPCRUN_REQUIRES_GPU_AWARE_MPI:-false}" \
     arch_verdict "${ARCH_VERDICT:-unchecked}" \
     repeats      "${HPCRUN_REPEATS}" \
     launcher     "${launcher}" \
@@ -449,6 +496,19 @@ record_common () {
             result_str "variant.env.${kv%%=*}" "${kv#*=}"
         done
     fi
+}
+
+# record_geometry -- what app_export_geometry told the app's hooks, into the
+# record.  Only after that call: before it, these name the previous cell.
+record_geometry () {
+    result_set  geometry.ranks           "${HPCRUN_RANKS:-}"
+    result_set  geometry.cores_per_node  "${HPCRUN_CORES_PER_NODE:-}"
+    result_set  geometry.cores_per_l3    "${HPCRUN_CORES_PER_L3:-}"
+    result_set  geometry.cores_per_numa  "${HPCRUN_CORES_PER_NUMA:-}"
+    result_set  geometry.mem_per_node_mb "${HPCRUN_MEM_PER_NODE_MB:-}"
+    result_set  geometry.gpus_per_node   "${HPCRUN_GPUS_PER_NODE:-0}"
+    result_set  geometry.gpus_per_rank   "${HPCRUN_GPUS_PER_RANK:-0}"
+    result_set  geometry.gpu_mem_mb      "${HPCRUN_GPU_MEM_MB:-}"
 }
 
 # variant_apply <cell index> -- unset the previous cell's variant settings,
@@ -562,11 +622,37 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
         launcher       "${launcher}" \
         mpiexec        "mpiexec -n ${nranks} ${bound_flags} ${launcher} ${REPORT_EXE}"
 
-    mpiexec -n ${nranks} ${bound_flags} \
+    # On a GPU node type each rank also logs the GPU the launcher gave it.
+    gpu_log=""
+    # -gt 0, not -n: app_export_geometry states 0 on a node without GPUs.
+    if [ "${HPCRUN_GPUS_PER_NODE:-0}" -gt 0 ] 2>/dev/null; then
+        gpu_log="${RESULTS_DIR}/gpu_bind_${name}.txt"
+        : > "${gpu_log}"
+    fi
+    HPCRUN_GPU_BIND_LOG="${gpu_log}" mpiexec -n ${nranks} ${bound_flags} \
         ${launcher} ${REPORT_EXE} >> "${out}" 2>&1
 
     placement_summary "${out}"
     place="$(placement_verdict "${out}")"
+
+    GPU_FAR=0 GPU_NO_KERNEL=0
+    if [ -n "${gpu_log}" ]; then
+        [ -n "${gpu_report}" ] && mpiexec -n ${nranks} ${bound_flags} \
+            ${launcher} ${gpu_report} > "gpus_${name}.out" 2>&1
+        gpu_bind_summary "${gpu_log}" "${gpu_report:+gpus_${name}.out}"
+        echo "    gpus: ${GPU_SUMMARY}"
+        # A rank whose GPU runs no kernel would measure nothing, under the
+        # name of a GPU run.  Refused like a geometry the app declines.
+        if [ "${GPU_NO_KERNEL}" -gt 0 ] && [ -n "${APP}" ]; then
+            echo "    skipped: no kernel ran on ${GPU_NO_KERNEL} rank(s) -- see gpus_${name}.out"
+            record_common "${name}" "${ppn}" "${nthreads}" "${omp_name}"
+            result_set  placement.verdict "${place}"
+            result_set  skipped true
+            result_str  skip_reason "report_gpus: no kernel ran on ${GPU_NO_KERNEL} of ${GPU_RANKS} rank(s)"
+            result_emit results.jsonl
+            continue
+        fi
+    fi
 
     [ -n "${APP}" ] || { warm=true; continue; }
 
@@ -594,6 +680,7 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
             skip="$(tail -3 "${rundir}/prepare.log" 2>/dev/null | tr '\n' ' ')"
             echo "    skipped: ${app_name} declined this geometry${skip:+ -- ${skip}}"
             record_common "${name}" "${ppn}" "${nthreads}" "${omp_name}"
+            record_geometry
             result_set  placement.verdict "${place}"
             result_set  repeat "${repeat}"
             result_set  skipped true
@@ -604,9 +691,25 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
 
         argv="$(app_argv)"
         # Append the resolved command to this cell's placement report, so the
-        # .out says what ran rather than what the contract defaults to.
-        [ "${repeat}" -eq 1 ] && \
+        # .out says what ran rather than what the contract defaults to.  And
+        # the executable it starts, with its hash: a launch hook may pick
+        # another than the contract's `binary` (OSU runs osu_bw or osu_latency
+        # where the contract names osu_alltoall), and run.meta hashes only
+        # that one.  An argv that does not start with an absolute path -- a
+        # command found on PATH -- is recorded without a hash.
+        if [ "${repeat}" -eq 1 ]; then
             printf '# %-16s %s\n' app_argv "${argv} ${APP_ARGS}" >> "${out}"
+            cell_binary="${argv%% *}" cell_sha256=""
+            if [ "${cell_binary}" = "${APP_BINARY}" ]; then
+                cell_sha256="${app_sha256:-}"
+            else
+                case "${cell_binary}" in
+                    /*) cell_sha256="$(${launcher} sha256sum "${cell_binary}" 2>/dev/null \
+                                       | awk 'NR == 1 { print $1 }')" ;;
+                esac
+            fi
+            printf '# %-16s %s\n' app_sha256 "${cell_sha256:-unknown}" >> "${out}"
+        fi
 
         cd "${rundir}" || exit 1
 
@@ -640,11 +743,15 @@ while [ "${idx}" -lt "${#cell_name[@]}" ]; do
         # every completed run and loses only the one that was going.
         #-----------------------------------------------------------------------
         record_common "${name}" "${ppn}" "${nthreads}" "${omp_name}"
+        record_geometry
+        result_str  app.binary               "${cell_binary}"
+        result_set  app.binary_sha256        "${cell_sha256}"
         result_str  placement.mpiexec_flags  "${bound_flags}"
         result_set  placement.verdict        "${place}"
         result_set  placement.omp.OMP_PROC_BIND "${OMP_PROC_BIND:-}"
         result_set  placement.omp.OMP_PLACES    "${OMP_PLACES:-}"
         for fired in $(placement_rules_fired "${out}"); do result_rule "${fired}"; done
+        [ "${GPU_FAR}" -gt 0 ] && result_rule gpu_far
         result_set  repeat "${repeat}"
         result_set  repeats "${HPCRUN_REPEATS}"
         result_set  wall_s "${wall}"

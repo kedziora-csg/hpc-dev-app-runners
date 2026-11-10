@@ -40,8 +40,9 @@ EXPORTED = ("HPCRUN_SITE", "HPCRUN_CLUSTER", "HPCRUN_ROOT", "HPCRUN_IMAGE_DIR",
             "HPCRUN_WALLTIME_MAX", "HPCRUN_CORES_PER_NODE", "HPCRUN_SMT",
             "HPCRUN_TARGET_ARCH", "HPCRUN_TOPOLOGY_MODE", "HPCRUN_NODE_SELECT",
             "HPCRUN_PLACE", "HPCRUN_NCPUS",
+            "HPCRUN_GPUS_PER_NODE", "HPCRUN_GPU_VENDOR", "HPCRUN_GPU_MODEL",
             "HPCRUN_SUBCLUSTER", "HPCRUN_SUBCLUSTERS", "HPCRUN_SUBCLUSTER_VERIFIED",
-            "HPCRUN_HOST_LIBRARIES")
+            "HPCRUN_HOST_LIBRARIES", "HPCRUN_HOST_SOFTWARE")
 
 
 class Cluster(object):
@@ -71,6 +72,10 @@ class Cluster(object):
         self.topology_mode = values.get("HPCRUN_TOPOLOGY_MODE") or "probe"
         self.node_select = values.get("HPCRUN_NODE_SELECT") or ""
         self.place = values.get("HPCRUN_PLACE") or ""
+        # 0 for a node type without GPUs.
+        self.gpus_per_node = _int(values.get("HPCRUN_GPUS_PER_NODE")) or 0
+        self.gpu_vendor = values.get("HPCRUN_GPU_VENDOR") or ""
+        self.gpu_model = values.get("HPCRUN_GPU_MODEL") or ""
 
         # The node type within the cluster, when it has more than one.  Empty
         # for a cluster of one node type, whose profile states no sub-clusters.
@@ -80,6 +85,8 @@ class Cluster(object):
         self.subcluster_verified = values.get("HPCRUN_SUBCLUSTER_VERIFIED") != "0"
         # Host libraries a variant may preload, by name (host_libraries:).
         self.host_libraries = (values.get("HPCRUN_HOST_LIBRARIES") or "").split()
+        # Host software an app may require, by name (host_software:).
+        self.host_software = (values.get("HPCRUN_HOST_SOFTWARE") or "").split()
 
         self.cores_per_node = _int(values.get("HPCRUN_CORES_PER_NODE"))
         self.smt = _int(values.get("HPCRUN_SMT"))
@@ -138,6 +145,16 @@ class Cluster(object):
         if not sf.data.get("images"):
             return None
         return sitefile.image_target(sf, self.subcluster or None)[0]
+
+    def gpu_target(self):
+        """(runtime, target) of this node type's GPU images: ("", "") for a
+        node type of CPU images, or a description with no images: block."""
+        from . import sitefile
+        sf = self._description()
+        if not sf.data.get("images"):
+            return "", ""
+        runtime, target, _ = sitefile.gpu_target(sf, self.subcluster or None)
+        return runtime, target
 
     def _description(self):
         """The cluster's YAML, from the clone this profile points at."""

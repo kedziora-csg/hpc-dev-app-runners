@@ -96,7 +96,10 @@ def describe(exp, jobs, pre):
     print("node        %d cores, SMT %d%s%s   [%s]"
           % (exp.cluster.cores_per_node, exp.cluster.smt,
              (", %d schedulable" % exp.cluster.ncpus
-              if exp.cluster.ncpus != exp.cluster.cores_per_node else ""),
+              if exp.cluster.ncpus != exp.cluster.cores_per_node else "")
+             + (", %d x %s GPUs" % (exp.cluster.gpus_per_node,
+                                    exp.cluster.gpu_model or exp.cluster.gpu_vendor)
+                if exp.cluster.gpus_per_node else ""),
              (", select %s" % exp.cluster.node_select if exp.cluster.node_select
               else ", NO PROCESSOR SELECTOR")
              + (", place %s" % exp.cluster.place if exp.cluster.place else ""),
@@ -131,7 +134,8 @@ def describe(exp, jobs, pre):
     print()
 
     for title, results in (("images", pre.images),
-                           ("app contracts", pre.contracts)):
+                           ("app contracts", pre.contracts),
+                           ("app requirements", pre.requirements)):
         if not results:
             continue
         print("%s:" % title)
@@ -153,7 +157,8 @@ def as_json(exp, jobs, pre):
         "cluster": exp.cluster.name,
         "subcluster": exp.cluster.subcluster or None,
         "node": {"cores_per_node": exp.cluster.cores_per_node, "smt": exp.cluster.smt,
-                 "ncpus": exp.cluster.ncpus, "source": exp.cluster.node_source},
+                 "ncpus": exp.cluster.ncpus, "gpus": exp.cluster.gpus_per_node,
+                 "source": exp.cluster.node_source},
         "jobs": [{"key": j.key, "image": j.image,
                   "app": j.app.get("label") or j.app["name"],
                   "nodes": j.nodes, "walltime": j.walltime, "repeats": j.repeats,
@@ -166,6 +171,8 @@ def as_json(exp, jobs, pre):
                    for r in pre.images],
         "contracts": [{"subject": r.subject, "state": r.state, "detail": r.detail}
                       for r in pre.contracts],
+        "requirements": [{"subject": r.subject, "state": r.state, "detail": r.detail}
+                         for r in pre.requirements],
         "problems": pre.problems,
         "exit": {"code": pre.code, "name": EXIT_NAMES.get(pre.code, "error")},
     }
@@ -179,7 +186,7 @@ def validate_apps_only(paths, want_json):
         except (yamlish.YamlError, OSError) as exc:
             problems.append("%s: %s" % (path, exc))
             continue
-        for problem in schema_mod.validate(data, "app"):
+        for problem in checks.contract_problems(data):
             problems.append("%s: %s" % (path, problem))
     if want_json:
         json.dump({"apps": paths, "problems": problems,

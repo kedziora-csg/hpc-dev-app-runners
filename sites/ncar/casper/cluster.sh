@@ -130,6 +130,7 @@ case "${HPCRUN_SUBCLUSTER}" in
         HPCRUN_NODE_SELECT='cpu_type=cascadelake'
         HPCRUN_TARGET_ARCH='x86-64-v4'
         HPCRUN_SUBCLUSTER_VERIFIED='1'
+        unset HPCRUN_GPUS_PER_NODE HPCRUN_GPU_VENDOR HPCRUN_GPU_MODEL
         ;;
     htc-genoa)
         # High-throughput AMD EPYC 9554 (Genoa): 64 cores, one socket, SMT on
@@ -144,9 +145,10 @@ case "${HPCRUN_SUBCLUSTER}" in
         HPCRUN_NODE_SELECT='cpu_type=genoa'
         HPCRUN_TARGET_ARCH='x86-64-v4'
         HPCRUN_SUBCLUSTER_VERIFIED='1'
+        unset HPCRUN_GPUS_PER_NODE HPCRUN_GPU_VENDOR HPCRUN_GPU_MODEL
         ;;
     *)
-        unset HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_NCPUS HPCRUN_TOPOLOGY_MODE HPCRUN_NODE_SELECT HPCRUN_TARGET_ARCH HPCRUN_SUBCLUSTER_VERIFIED
+        unset HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_NCPUS HPCRUN_TOPOLOGY_MODE HPCRUN_NODE_SELECT HPCRUN_TARGET_ARCH HPCRUN_GPUS_PER_NODE HPCRUN_GPU_VENDOR HPCRUN_GPU_MODEL HPCRUN_SUBCLUSTER_VERIFIED
         ;;
 esac
 
@@ -231,6 +233,15 @@ bench_site_mpi_root () {
 bench_site_mpi_env () {
     case "$1" in
         openmpi ) echo 'UCX_POSIX_USE_PROC_LINK=n' ;;
+        *       ) echo '' ;;
+    esac
+}
+
+# Host libraries the host MPI needs and an image's app is not linked
+# with, preloaded inside the container for every image of this
+# family.  Literal text: a ${NAME} is expanded by the launcher.
+bench_site_mpi_preload () {
+    case "$1" in
         *       ) echo '' ;;
     esac
 }

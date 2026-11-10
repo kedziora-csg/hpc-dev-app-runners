@@ -38,7 +38,7 @@ contract lacks, the change belongs in the factory, with its contract and its
 
 - **A fact about a machine is stated once, in its description.** The image set,
   CPU target and each compiler's spelling of it live in the cluster's `images:`
-  block, and a sub-cluster's own target in `subclusters.<name>.images`; `apps/matrix.py`, `sif/Makefile` (through `images.mk`) and `hpcrun/` all
+  block, and a sub-cluster's own keys (target, GPU, compilers, apps) in `subclusters.<name>.images`; `apps/matrix.py`, `sif/Makefile` (through `images.mk`) and `hpcrun/` all
   read it. Edit the YAML, then `hpcrun/sitegen <cluster> --write`; never edit
   `cluster.sh`'s generated block or `images.mk` by hand (a test fails while they are stale).
 - **One tag means one build.** Base images are portable and carry no target. App

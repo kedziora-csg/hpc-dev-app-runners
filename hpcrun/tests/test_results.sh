@@ -122,6 +122,21 @@ emit && {
                 'set(r["metrics"]) == {"gflops", "iterations"}'
 }
 
+#-- geometry: what the app was told -------------------------------------------
+result_reset
+result_set geometry.ranks 2
+result_set geometry.gpus_per_rank 1
+result_set geometry.gpu_mem_mb ""
+result_set placement.ranks_per_node 2
+emit && {
+    assert_json "geometry.* lands in its own block" \
+        'r["geometry"] == {"ranks": 2, "gpus_per_rank": 1, "gpu_mem_mb": None}'
+    assert_json "geometry does not leak into placement" \
+        'set(r["placement"]) == {"ranks_per_node", "rules"}'
+}
+result_reset
+emit && assert_json "no geometry block when nothing set one" '"geometry" not in r'
+
 #-- quoting hostile input ------------------------------------------------------
 result_reset
 result_str placement.mpiexec_flags '--opt "quoted" and \back\slash'
@@ -188,6 +203,27 @@ if [ -x "${COLLECT}" ]; then
         echo "  ok    csv output renders"; pass=$((pass + 1))
     else
         echo "  FAIL  csv output failed"; fail=$((fail + 1))
+    fi
+
+    # Two cells with the same median, minimum and run count on some metric --
+    # every OSU cell reports one msg_bytes -- must not reach a comparison of
+    # the rows themselves.
+    mkdir -p "${TMP}/tie/a"
+    for p in one two; do
+        result_reset
+        result_str image.sif a.sif
+        result_set app.name osu
+        result_str placement.name "${p}"
+        result_set placement.verdict ok
+        result_set wall_s 1
+        result_set exit 0
+        result_metric msg_bytes 4194304
+        result_emit "${TMP}/tie/a/results.jsonl" >/dev/null
+    done
+    if python3 "${COLLECT}" "${TMP}/tie" --best >/dev/null 2>"${TMP}/err"; then
+        echo "  ok    --best survives two cells that tie"; pass=$((pass + 1))
+    else
+        echo "  FAIL  --best broke on a tie"; sed 's/^/        /' "${TMP}/err"; fail=$((fail + 1))
     fi
 
     # A job killed at walltime leaves a partial final line.  That is one lost

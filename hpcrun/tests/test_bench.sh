@@ -64,7 +64,11 @@ conf_for () { # conf_for <experiment.yaml> -- the profile that file's cluster: n
 # has something to find.  An empty file is enough: nothing here opens one.
 export HPCRUN_IMAGE_DIR="${TMP}/img"
 mkdir -p "${HPCRUN_IMAGE_DIR}"
-for img in $(cd ../sif && make --no-print-directory echo-derecho-hpcg echo-casper echo-casper-hpcg); do
+# Of Derecho's base set only the a100's -cuda pair: with a CPU base image
+# present, the runner's exec test below would get far enough to write its
+# records into the working directory.
+for img in $(cd ../sif && make --no-print-directory echo-derecho-hpcg echo-casper echo-casper-hpcg) \
+           $(cd ../sif && make --no-print-directory echo-derecho | tr ' ' '\n' | grep -- '-cuda\.sif$'); do
     : > "${HPCRUN_IMAGE_DIR}/${img}"
 done
 
@@ -102,6 +106,22 @@ done
 ./validate --app tests/fixtures/app.d/*/app.yaml ../apps/*/app.d/app.yaml >/dev/null 2>&1 \
     && ok "every app.yaml satisfies hpcrun/schema/app.json" \
     || bad "an app.yaml fails hpcrun/schema/app.json" "$(./validate --app tests/fixtures/app.d/*/app.yaml ../apps/*/app.d/app.yaml 2>&1)"
+
+# A GPU app's requirements, and the one rule between them a schema cannot state.
+printf 'app: g\nbinary: /x\nrequires: {gpu: cuda, gpu_aware_mpi: true, host_software: [bench]}\n' \
+    > "${TMP}/gpu_app.yaml"
+./validate --app "${TMP}/gpu_app.yaml" >/dev/null 2>&1
+want "an app may require a GPU, GPU-aware MPI and host software" 0 "$?"
+printf 'app: g\nbinary: /x\nrequires: {gpu_aware_mpi: true}\n' > "${TMP}/gpu_app.yaml"
+./validate --app "${TMP}/gpu_app.yaml" >/dev/null 2>&1
+want "GPU-aware MPI without a GPU is config-invalid (3)" 3 "$?"
+printf 'app: g\nbinary: /x\nrequires: {gpu: rocm}\n' > "${TMP}/gpu_app.yaml"
+./validate --app "${TMP}/gpu_app.yaml" >/dev/null 2>&1
+want "a GPU runtime nothing supports is config-invalid (3)" 3 "$?"
+printf 'app: g\nbinary: /x\nrequires: cuda\n' > "${TMP}/gpu_app.yaml"
+out="$(./validate --app "${TMP}/gpu_app.yaml" 2>&1)"
+want "a requires: that is not a mapping is config-invalid (3), not a traceback" \
+    "3 no-traceback" "$? $(case "${out}" in *Traceback*) echo traceback ;; *) echo no-traceback ;; esac)"
 
 #-- the reference is generated, so it cannot be stale or incomplete quietly -----
 echo
@@ -239,10 +259,33 @@ want "a hand-edited images.mk fails --check" 1 "$?"
 cp "${TMP}/images.mk.keep" ../sites/ncar/casper/images.mk
 
 # The six, in the order the Makefile listed them by hand before 4.7c, so the
-# jobs of an existing sweep keep their order.
-want "derecho's base set is the six, mpich first" \
-    "leap-oneapi-mpich.sif leap-gcc14-mpich.sif leap-nvhpc-mpich.sif leap-oneapi-openmpi.sif leap-gcc14-openmpi.sif leap-nvhpc-openmpi.sif" \
+# jobs of an existing sweep keep their order; then the a100's two -cuda bases.
+want "derecho's base set is the six, mpich first, then the a100's -cuda pair" \
+    "leap-oneapi-mpich.sif leap-gcc14-mpich.sif leap-nvhpc-mpich.sif leap-oneapi-openmpi.sif leap-gcc14-openmpi.sif leap-nvhpc-openmpi.sif leap-nvhpc-mpich-cuda.sif leap-nvhpc-openmpi-cuda.sif" \
     "$(cd ../sif && make --no-print-directory echo-derecho)"
+# A sub-cluster's images: replaces the cluster's key by key: the cpu nodes run
+# the six, the a100 nodes only nvhpc on -cuda bases, and no CPU app.
+want "derecho's base set on each node type is its own" \
+    "cpu 6 derecho-blas,derecho-heffte,derecho-hpcg | a100 leap-nvhpc-mpich-cuda.sif leap-nvhpc-openmpi-cuda.sif -" \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+sf = sitefile.load("derecho")
+c, g = sitefile.image_sets(sf, "cpu"), sitefile.image_sets(sf, "a100")
+print("cpu", len(c["derecho"]), ",".join(sorted(k for k in c if k != "derecho")), "|",
+      "a100", " ".join(g["derecho"]), ",".join(sorted(k for k in g if k != "derecho")) or "-")')"
+# An app on a GPU node type: the -cuda base, then the app, the CPU target and
+# the GPU target, so one tag is still one build; and the build gets both flags.
+want "a GPU node type's app image names its base, its CPU target and its GPU target" \
+    "leap-nvhpc-mpich-cuda-nvstream-znver3-sm80 from leap-nvhpc-mpich-cuda -tp=zen3 -arch=sm_80 | cpu has none" \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+sf = sitefile.load("derecho")
+sf.data["subclusters"]["a100"]["images"]["apps"] = ["nvstream"]
+e = [e for e in sitefile.app_builds(sf) if e["app"] == "nvstream"]
+print(e[0]["tag"], "from", e[0]["base_tag"], e[0]["march"], e[0]["gpu_arch"], "|",
+      "cpu has none" if "derecho-nvstream" not in sitefile.image_sets(sf, "cpu") else "cpu has it")')"
 # Casper's node types each state their own target, so `make casper-hpcg` builds
 # the openmpi half once for each -- and nothing for a cluster-wide target.
 want "casper's hpcg set is the openmpi half, for each node type's target" \
@@ -284,6 +327,13 @@ b = sitefile.load("casper")
 b.data["subclusters"]["htc-cascadelake"]["images"] = {"target": "znver4",
                                                       "march": {"default": "-march=znver2"}}
 print(len(sitefile.target_conflicts([b])))')"
+want "two node types spelling one GPU target differently is refused" 1 "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+a, b = sitefile.load("derecho"), sitefile.load("casper")
+b.data["subclusters"]["htc-genoa"]["images"]["gpu"] = {
+    "runtime": "cuda", "target": "sm80", "arch": "-gencode=arch=compute_80,code=sm_80"}
+print(len(sitefile.target_conflicts([a, b])))')"
 
 want "the host reads the same set the Makefile builds" \
     "$(cd ../sif && make --no-print-directory echo-derecho-hpcg)" \
@@ -454,6 +504,23 @@ cluster_case "a node type's target without its march is refused" reject \
     "$(sub_images ', images: {target: znver4}' "${own_cl}" "${cluster_images}")"
 cluster_case "a node type's target with no images: block to build is refused" reject \
     "$(sub_images "${own4}" "${own_cl}" "")"
+# A GPU node type: its node states the GPUs, its images: the runtime they need.
+# gpu_sub <a's node keys> <a's images keys>: node type a beside a plain b.
+gpu_sub () {
+    printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/;s/^node: .*$/default_subcluster: b\nsubclusters:\n  a: {node: {cores: 64, smt: 1'"$1"'}, images: {'"$2"'}}\n  b: {node: {cores: 36, smt: 1}}/'
+    echo "${cluster_images}"
+}
+nv=', gpus: {count: 4, vendor: nvidia, model: a100_40gb}'
+cluster_case "a GPU node type with cuda images on nvidia GPUs is accepted" ok \
+    "$(gpu_sub "${nv}" 'gpu: {runtime: cuda, target: sm80, arch: -arch=sm_80}, compilers: [gcc14], apps: []')"
+cluster_case "cuda images on a node type that states no GPUs are refused" reject \
+    "$(gpu_sub "" 'gpu: {runtime: cuda}')"
+cluster_case "cuda images on another vendor's GPUs are refused" reject \
+    "$(gpu_sub ', gpus: {count: 4, vendor: amd}' 'gpu: {runtime: cuda}')"
+cluster_case "a GPU target without its arch is refused" reject \
+    "$(gpu_sub "${nv}" 'gpu: {runtime: cuda, target: sm80}')"
+cluster_case "a node type's compiler with no host module is refused" reject \
+    "$(gpu_sub "${nv}" 'gpu: {runtime: cuda}, compilers: [nvhpc]')"
 cluster_case "an image set naming an MPI family mpi: omits is refused" reject \
     "$(printf '%s\n' "${cluster_base}" | sed 's/^  mpi_map:/  compiler_map: {gcc14: gcc\/14.3.0}\n  mpi_map:/')
 ${cluster_images/openmpi/mpich}"
@@ -519,9 +586,48 @@ host_libraries:
 cluster_case "a host library with a relative preload is refused" reject "${cluster_base}
 host_libraries:
   mkl: {preload: [lib/libmkl_rt.so.2]}"
+# A preloaded file the container cannot see would be skipped with a warning.
+with_preload () { printf '%s\n' "${cluster_base}" | sed "/^  openmpi:/s|}\$|, preload: [$1]}|"; }
+cluster_case "an MPI preload under a bind is accepted" ok \
+    "$(with_preload '/glade/lib/libxpmem.so.0, "${XPMEM}/libxpmem.so.0"')"
+cluster_case "an MPI preload under no bind is refused" reject \
+    "$(with_preload /opt/xpmem/lib64/libxpmem.so.0)"
+cluster_case "an MPI preload under a bind-if-present is accepted" ok \
+    "$(with_preload /opt/xpmem/lib64/libxpmem.so.0 \
+       | sed 's|binds: \[/glade\]|binds: [/glade], binds_if_present: [/opt/xpmem]|')"
 cluster_case "a value carrying a quote is refused, not quoted" reject \
     "${cluster_base%$'\n'*}
   openmpi: {launcher: openmpi, overlay: host-openmpi, env: {X: \"a'\\\"b\"}}"
+
+# Host software: a directory, bound at a mount, with library directories under it.
+cluster_case "host software with \${mpi}, a mount and lib_dirs is accepted" ok "${cluster_base}
+host_software:
+  bench: {version: \"1.0\", path: \"/glade/nv/bench_\${mpi}/cuda12\", mount: /opt/bench, lib_dirs: [lib]}
+  comm: {path: \"\${NVROOT}/comm_libs\", lib_dirs: [nccl/lib, nvshmem/lib]}"
+cluster_case "host software with a relative path is refused" reject "${cluster_base}
+host_software:
+  bench: {path: nv/bench}"
+cluster_case "host software lib_dirs that climb out of it are refused" reject "${cluster_base}
+host_software:
+  bench: {path: /glade/nv, lib_dirs: [../lib]}"
+cluster_case "host software mounted on the container's own tree is refused" reject "${cluster_base}
+host_software:
+  bench: {path: /glade/nv, mount: /usr}"
+out="$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import sitefile
+sf = sitefile.load("derecho")
+sf.data["host_software"] = {
+    "bench": {"version": "1.0", "path": "/glade/nv/bench_${mpi}", "mount": "/opt/bench",
+              "lib_dirs": ["lib"]},
+    "comm": {"path": "${NVROOT}/comm", "lib_dirs": ["nccl/lib", "nvshmem/lib"]}}
+text = sitefile.render(sf)
+for word in ("HPCRUN_HOST_SOFTWARE=", "bench   ) echo \x27/glade/nv/bench_${mpi}\x27",
+             "comm    ) echo \x27${NVROOT}/comm\x27", "bench   ) echo \x27/opt/bench\x27",
+             "comm    ) echo \x27nccl/lib nvshmem/lib\x27", "bench   ) echo \x271.0\x27",
+             "export HPCRUN_HOST_SOFTWARE"):
+    print("ok" if word in text else "missing: " + word)' 2>&1 | sort -u | tr '\n' ' ')"
+want "sitegen writes host software into the profile, \${NAME} left literal" "ok " "${out}"
 
 #-- exit codes are the interface -----------------------------------------------
 echo
@@ -555,8 +661,24 @@ case_exit "a missing .sif is image-missing (5)"   5 "$(printf '%s\n' "${base}" |
 want "an unknown experiment name is config-invalid (3)" 3 "$?"
 case_exit "a version-1 experiment is refused with the fix (3)" 3 \
     "$(printf '%s\n' "${base}" | sed 's/^schema: 2/schema: 1/')"
-case_exit "subcluster: on a cluster of one node type is refused" 1 "${base}
-subcluster: cpu"
+# Derecho as it was before its GPU nodes were described: one node type, the
+# cpu one, so the one-node-type paths are still exercised.
+mkdir -p "${TMP}/one/derecho"
+sed "s|^HPCRUN_ROOT=.*|HPCRUN_ROOT='${HERE}'|" \
+    ../sites/ncar/derecho/cluster.sh > "${TMP}/one/derecho/site.sh"
+python3 -c "
+import sys; sys.path.insert(0, '${HERE}')
+from benchlib import sitefile
+sf = sitefile.load('derecho')
+sf.data['node'] = sf.data['subclusters']['cpu']['node']
+del sf.data['subclusters'], sf.data['default_subcluster']
+text = open('${TMP}/one/derecho/site.sh').read()
+open('${TMP}/one/derecho/site.sh', 'w').write(sitefile.splice(text, sitefile.render(sf)))"
+one_conf="${TMP}/one/derecho/site.sh"
+printf '%s\n' "${base}
+subcluster: cpu" > "${TMP}/case.yaml"
+HPCRUN_SITE_CONF="${one_conf}" ./validate "${TMP}/case.yaml" >/dev/null 2>&1
+want "subcluster: on a cluster of one node type is refused" 1 "$?"
 
 #-- sub-clusters ----------------------------------------------------------------
 # A cluster of several node types describes the one HPCRUN_SUBCLUSTER names, and
@@ -637,11 +759,13 @@ want "the target check: label over name, portable node types, no images: block" 
 sys.path.insert(0, ".")
 from benchlib import checks
 d, labels = tempfile.mkdtemp(dir=sys.argv[1]), {}
-checks._label = lambda path, key: labels.get(os.path.basename(path))
+checks._label = lambda path, key: (labels.get(os.path.basename(path))
+                                   if key == "hpcdev.target" else None)
 class Node(object):
-    name, subcluster = "testville", "b"
+    name, subcluster, gpu_vendor = "testville", "b", ""
     def __init__(self, want): self.want = want
     def image_target(self): return self.want
+    def gpu_target(self): return "", ""
     def image_path(self, sif): return os.path.join(d, sif)
 def state(want, sif, label=None):
     open(os.path.join(d, sif), "w").close()
@@ -655,6 +779,109 @@ print(state("znver3", "leap-gcc14-openmpi-heffte-pbase.sif", ""),
       state("", "leap-gcc14-openmpi-hpcg.sif", ""),
       state(None, "leap-gcc14-openmpi-hpcg-znver4.sif", "znver4"),
       state("znver4", "leap-gcc14-openmpi-hpcg-znver3.sif", "znver4"))' "${TMP}" 2>&1)"
+# A GPU image needs the node type's GPUs, and its device code the node type's
+# GPU target: the hpcdev.gpu label, else the cuda word of the name, and the
+# hpcdev.gpu_target label.  A GPU node type may run a CPU image.
+want "the GPU check: a cuda image on a CPU node type, a target of another GPU" \
+    "wrong ok wrong ok ok" \
+    "$(python3 -c 'import os, sys, tempfile
+sys.path.insert(0, ".")
+from benchlib import checks
+d, labels = tempfile.mkdtemp(dir=sys.argv[1]), {}
+checks._label = lambda path, key: labels.get(key)
+class Node(object):
+    name, subcluster = "testville", "g"
+    def __init__(self, vendor, gpu): self.gpu_vendor, self.gpu = vendor, gpu
+    def image_target(self): return "znver3"
+    def gpu_target(self): return ("cuda", self.gpu) if self.gpu else ("", "")
+    def image_path(self, sif): return os.path.join(d, sif)
+def state(vendor, node_gpu, sif, **label):
+    open(os.path.join(d, sif), "w").close()
+    labels.clear()
+    labels.update(("hpcdev." + k, v) for k, v in label.items())
+    return checks.images(Node(vendor, node_gpu), [sif])[0].state
+print(state("", "", "leap-nvhpc-mpich-cuda.sif"),
+      state("nvidia", "sm80", "leap-nvhpc-mpich-cuda.sif"),
+      state("nvidia", "sm80", "leap-nvhpc-mpich-cuda-nvstream-znver3-sm90.sif",
+            gpu="cuda", gpu_target="sm90", target="znver3"),
+      state("nvidia", "sm80", "leap-nvhpc-mpich-cuda-nvstream-znver3-sm80.sif",
+            gpu="cuda", gpu_target="sm80", target="znver3"),
+      state("nvidia", "sm80", "leap-gcc14-mpich-hpcg-znver3.sif", target="znver3"))' "${TMP}" 2>&1)"
+want "the target in a name skips the GPU runtime word" "znver3 '' cuda ''" \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import checks
+print(checks._target_in_name("leap-nvhpc-mpich-cuda-nvstream-znver3-sm80.sif"),
+      repr(checks._target_in_name("leap-nvhpc-mpich-cuda.sif")),
+      checks._gpu_in_name("leap-nvhpc-mpich-cuda.sif"),
+      repr(checks._gpu_in_name("leap-gcc14-mpich-hpcg-znver3.sif")))' 2>&1)"
+# What an app's contract requires of the node type: a GPU, and the cluster's
+# install of host software, at the path the image's MPI family selects.  A path
+# a module's variable names is the launcher's to check.
+want "requirements: a GPU app's node type; host software declared, present, per MPI" \
+    "wrong ok | missing ok unchecked missing unchecked | cuda" \
+    "$(python3 -c 'import os, sys, tempfile
+sys.path.insert(0, ".")
+from benchlib import checks
+d = tempfile.mkdtemp(dir=sys.argv[1])
+os.makedirs(os.path.join(d, "bench_mpich"))
+reqs = {"gpuapp": {"gpu": "cuda"}, "swapp": {"host_software": ["bench", "comm"]},
+        "nosw": {"host_software": ["absent"]}}
+checks.app_requires = lambda cluster, sif, app: reqs[app]
+checks._label = lambda path, key: None
+class Desc(object):
+    data = {"host_software": {"bench": {"path": d + "/bench_${mpi}"},
+                              "comm": {"path": "${NVROOT}/comm"}}}
+class Node(object):
+    name, subcluster, gpus_per_node, gpu_model = "testville", "g", 4, "a100"
+    host_software = ["bench", "comm"]
+    def __init__(self, vendor): self.gpu_vendor = vendor
+    def image_path(self, sif): return os.path.join(d, sif)
+    def _description(self): return Desc()
+def states(vendor, pairs):
+    return " ".join(r.state for r in checks.requirements(Node(vendor), pairs)[0])
+print(states("", [("leap-nvhpc-mpich-cuda.sif", "gpuapp")]),
+      states("nvidia", [("leap-nvhpc-mpich-cuda.sif", "gpuapp")]), "|",
+      states("nvidia", [("leap-nvhpc-openmpi-cuda.sif", "swapp"),
+                        ("leap-nvhpc-mpich-cuda.sif", "nosw"),
+                        ("leap-nvhpc-mpich-cuda.sif", "swapp")]), "|",
+      checks.requirements(Node("nvidia"), [("x.sif", "gpuapp")])[1][("x.sif", "gpuapp")]["gpu"])' "${TMP}" 2>&1)"
+# An image's contract that does not parse, or fails its schema, is refused:
+# reading it as "requires nothing" would drop a GPU app's requirements.
+want "an image contract that does not parse or fails its schema is wrong" \
+    "wrong wrong ok" \
+    "$(python3 -c 'import os, sys
+sys.path.insert(0, ".")
+from benchlib import checks
+d = sys.argv[1]
+texts = {"broken": "app: [unclosed\n", "badkey": "app: x\nbinary: /x\nrequires: cuda\n",
+         "good": "app: x\nbinary: /x\nrequires: {gpu: cuda}\n"}
+checks.have_apptainer = lambda: True
+checks._image_contract = lambda path, app: texts[app]
+class Node(object):
+    name, subcluster, gpu_vendor, gpus_per_node, gpu_model = "t", "g", "nvidia", 4, "a100"
+    host_software = []
+    def image_path(self, sif):
+        p = os.path.join(d, sif); open(p, "a").close(); return p
+print(" ".join(r.state for r in checks.requirements(Node(),
+      [("a.sif", "broken"), ("a.sif", "badkey"), ("a.sif", "good")])[0]))' "${TMP}" 2>&1)"
+# An app's requires: reach the job, which reads no YAML, through job.env.
+want "job.env carries the requires: block" \
+    "HPCRUN_REQUIRES_GPU='cuda' HPCRUN_REQUIRES_GPU_AWARE_MPI='true' HPCRUN_REQUIRES_HOST_SOFTWARE='bench comm'" \
+    "$(python3 -c 'import sys
+sys.path.insert(0, ".")
+from benchlib import jobfile
+class C(object):
+    bench_root, name = "/r", "t"
+    def image_path(self, sif): return "/i/" + sif
+class E(object):
+    name, path, cluster, defaults = "e", "/e.yaml", C(), {"allow_undersubscribed": False}
+class J(object):
+    key, image, app, scale, target_seconds = "k", "x.sif", {"name": "a"}, "node", 60
+    nodes, repeats, cells = 1, 1, []
+    requires = {"gpu": "cuda", "gpu_aware_mpi": True, "host_software": ["bench", "comm"]}
+print(" ".join(l for l in jobfile.job_env(E(), J(), "/res").splitlines()
+               if l.startswith("HPCRUN_REQUIRES_")))' 2>&1)"
 want "a node type without its own target is portable; no images: block is None" \
     "'' None" \
     "$(HPCRUN_SITE_CONF="${casper_conf}" python3 -c 'import sys
@@ -688,7 +915,22 @@ want "job.pbs asks for the sub-cluster's processor" 1 \
     "$(grep -c '^#PBS -l select=1:ncpus=8:mpiprocs=8:ompthreads=1:cpu_type=cascadelake$' "${pbs}")"
 want "job.pbs exports HPCRUN_SUBCLUSTER before sourcing the profile" "export source" \
     "$(grep -E "^export HPCRUN_SUBCLUSTER='htc-cascadelake'|^\. " "${pbs}" | awk '{print ($1 == "export") ? "export" : "source"}' | tr '\n' ' ' | sed 's/ $//')"
-./submit derecho-hpcg --dry-run --results-dir "${TMP}/dejob" >/dev/null 2>&1
+HPCRUN_SITE_CONF="${one_conf}" ./submit derecho-hpcg --dry-run \
+    --results-dir "${TMP}/dejob" >/dev/null 2>&1
+# A GPU node type's job asks for its GPUs in the chunk, which is also what puts
+# it on a node that has them; the base set there is the -cuda pair.
+printf '%s\n' 'schema: 2
+cluster: derecho
+subcluster: a100
+defaults: {nodes: 1}
+images: {set: derecho}
+apps: [{name: osu}]
+placements: [{name: gpu, ranks_per_node: 4, threads: 16}]
+sweep: {matrix: [images, apps, placements], per_job: [placements]}' > "${TMP}/gpu.yaml"
+./submit "${TMP}/gpu.yaml" --dry-run --results-dir "${TMP}/gpujob" >/dev/null 2>&1
+want "an a100 job asks for its GPUs, on each -cuda base" \
+    "leap-nvhpc-mpich-cuda leap-nvhpc-openmpi-cuda | 2 x #PBS -l select=1:ncpus=64:mpiprocs=64:ompthreads=1:mem=480GB:ngpus=4" \
+    "$(ls "${TMP}/gpujob" | tr '\n' ' ' | sed 's/ $//') | $(cat "${TMP}"/gpujob/*/job.pbs | grep '^#PBS -l select' | sort | uniq -c | sed 's/^ *\([0-9]*\) /\1 x /')"
 want "a one-node-type cluster's job.pbs unsets it" 6 \
     "$(cat "${TMP}"/dejob/*/job.pbs | grep -c '^unset HPCRUN_SUBCLUSTER$')"
 
@@ -827,7 +1069,7 @@ want "exclusive: false asks only for the cores the cells use" \
 # the first Casper run did.  So the selector has to reach the directive.
 # A site with node.select REMOVED must get no suffix at all -- built here
 # rather than assumed of derecho.yaml, which now has one.
-sed '/^  select: /d' ../sites/ncar/derecho.yaml > "${TMP}/nosel.yaml"
+sed '/^      select: /d' ../sites/ncar/derecho.yaml > "${TMP}/nosel.yaml"
 mkdir -p "${TMP}/nosel/derecho"
 cp "${TMP}/nosel.yaml" "${TMP}/nosel/derecho.yaml"
 sed "s|^HPCRUN_ROOT=.*|HPCRUN_ROOT='${HERE}'|" \

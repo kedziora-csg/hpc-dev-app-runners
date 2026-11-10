@@ -22,6 +22,10 @@
       "type": "string",
       "description": "Absolute path inside the image. Required unless there is a launch hook, which may pick a different executable and add flags."
     },
+    "built_with_march": {
+      "type": "string",
+      "description": "Not written by hand: an app's build.sh appends the -march= (or -tp=) flags it compiled with to the installed copy, so the image's contract says what tuning its binary has."
+    },
     "primary_fom": {
       "type": "string",
       "description": "Which figure of merit decides a comparison. Must name a key in figures_of_merit. Read host-side by hpcrun/collect, from the app.yaml copied into the results directory."
@@ -36,7 +40,20 @@
           "type": "boolean",
           "description": "false means a thread sweep measures nothing for this app -- rank count is the axis that matters."
         },
-        "min_ranks": {"type": "integer", "minimum": 1}
+        "min_ranks": {"type": "integer", "minimum": 1},
+        "gpu": {
+          "enum": ["cuda"],
+          "description": "The GPU runtime the app needs. hpcrun/validate and hpcrun/submit refuse it on a node type without such GPUs, and apps/smoke.sh resolves the contract and runs prepare and launch, then skips the run, on a host with none."
+        },
+        "gpu_aware_mpi": {
+          "type": "boolean",
+          "description": "The app passes device buffers to MPI. On a node type with NVIDIA GPUs and Cray MPICH the launcher then sets MPICH_GPU_SUPPORT_ENABLED=1, unless a variant sets it first. Off by default because it costs host-buffer messages about 6.5 us each (GpuNodesPlan.md, step 0). Requires gpu."
+        },
+        "host_software": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "description": "Host software, by name from the cluster description's host_software:, that the app runs from -- a binary whose license keeps it out of any image, or a library the site maintains. The launcher binds each into the container for this app's jobs; hpcrun/validate and hpcrun/submit refuse a cluster that lacks one, or whose path does not exist for the image's MPI family."
+        }
       }
     },
 

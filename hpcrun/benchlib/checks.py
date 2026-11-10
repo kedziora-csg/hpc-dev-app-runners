@@ -33,6 +33,7 @@ import subprocess
 from . import EXIT_CONFIG, EXIT_CONTRACT, EXIT_IMAGE, EXIT_OK
 from . import schema as schema_mod
 from . import yamlish
+from .sitefile import GPU_VENDOR
 
 APP_D = "/container/app.d"
 
@@ -73,6 +74,7 @@ def images(cluster, names):
     states nothing to hold an image to, so a new cluster can try any image.
     """
     want = cluster.image_target()
+    want_runtime, want_gpu = cluster.gpu_target()
     out = []
     for sif in names:
         path = cluster.image_path(sif)
@@ -86,42 +88,82 @@ def images(cluster, names):
         built = _label(path, "hpcdev.target")
         if built is None:
             built = _target_in_name(sif)
+        where = cluster.name + ("/" + cluster.subcluster if cluster.subcluster else "")
         if want is not None and built and built != want:
-            out.append(Result(sif, "wrong", "built for %s, but %s%s's app images "
-                              "are %s" % (built, cluster.name,
-                                          "/" + cluster.subcluster
-                                          if cluster.subcluster else "",
-                                          want or "portable")))
-        else:
-            out.append(Result(sif, "ok", path))
+            out.append(Result(sif, "wrong", "built for %s, but %s's app images "
+                              "are %s" % (built, where, want or "portable")))
+            continue
+        # A GPU image needs the node type's GPUs; a GPU target, the node type's.
+        # The other way round is legal: a GPU node type may run a CPU image.
+        runtime = _label(path, "hpcdev.gpu")
+        if runtime is None:
+            runtime = _gpu_in_name(sif)
+        if runtime and cluster.gpu_vendor != GPU_VENDOR.get(runtime):
+            out.append(Result(sif, "wrong", "a %s image, but %s has %s"
+                              % (runtime, where,
+                                 "%s GPUs" % cluster.gpu_vendor
+                                 if cluster.gpu_vendor else "no GPUs")))
+            continue
+        gpu_built = _label(path, "hpcdev.gpu_target") or ""
+        if gpu_built and want_gpu and gpu_built != want_gpu:
+            out.append(Result(sif, "wrong", "device code built for %s, but %s's "
+                              "GPUs are %s" % (gpu_built, where, want_gpu)))
+            continue
+        out.append(Result(sif, "ok", path))
     return out
+
+
+_LABELS = {}
 
 
 def _label(path, key):
     """One label of a .sif, possibly "", or None when it cannot be read: no
-    apptainer to ask, or an image older than the label."""
+    apptainer to ask, or an image older than the label.  Each image is
+    inspected once a run."""
     if not have_apptainer():
         return None
-    try:
-        text = subprocess.check_output(["apptainer", "inspect", "--labels", path],
-                                       stderr=open(os.devnull, "w"))
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    for line in text.decode("utf-8", "replace").splitlines():
-        name, _, value = line.partition(":")
-        if name.strip() == key:
-            return value.strip()
-    return None
+    if path not in _LABELS:
+        labels = {}
+        try:
+            text = subprocess.check_output(["apptainer", "inspect", "--labels", path],
+                                           stderr=open(os.devnull, "w"))
+            for line in text.decode("utf-8", "replace").splitlines():
+                name, _, value = line.partition(":")
+                labels[name.strip()] = value.strip()
+        except (OSError, subprocess.CalledProcessError):
+            labels = None
+        _LABELS[path] = labels
+    labels = _LABELS[path]
+    return None if labels is None else labels.get(key)
 
 
 def _target_in_name(sif):
     """The target of <os>-<compiler>-<mpi>-<app>-<target>[-<suffix>].sif.
 
     No word of the name before it holds a dash, so it is always the fifth; a
-    base image's name has three words and no target.
+    base image's name has three words and no target.  A GPU base's runtime word
+    (leap-nvhpc-mpich-cuda-<app>-<target>) is not counted.
     """
     words = os.path.basename(sif)[:-len(".sif")].split("-")
+    if len(words) > 3 and words[3] in GPU_VENDOR:
+        del words[3]
     return words[4] if len(words) > 4 else ""
+
+
+def _gpu_in_name(sif):
+    """The GPU runtime of <os>-<compiler>-<mpi>-cuda[...].sif, or ""."""
+    words = os.path.basename(sif)[:-len(".sif")].split("-")
+    return words[3] if len(words) > 3 and words[3] in GPU_VENDOR else ""
+
+
+def image_mpi(cluster, sif):
+    """The MPI family an image was built with: its hpcdev.mpi label, else the
+    third word of its name."""
+    family = _label(cluster.image_path(sif), "hpcdev.mpi")
+    if family:
+        return family
+    words = os.path.basename(sif)[:-len(".sif")].split("-")
+    return words[2] if len(words) > 2 else ""
 
 
 def contracts(cluster, pairs):
@@ -137,11 +179,13 @@ def contracts(cluster, pairs):
         if not os.path.isfile(path):
             continue                    # already reported by images()
         target = app if app.startswith("/") else "%s/%s/app.yaml" % (APP_D, app)
-        test = "-x" if app.startswith("/") else "-f"
         try:
-            rc = subprocess.call(["apptainer", "exec", path, "test", test, target],
-                                 stdout=open(os.devnull, "w"),
-                                 stderr=subprocess.STDOUT)
+            if app.startswith("/"):
+                rc = subprocess.call(["apptainer", "exec", path, "test", "-x", target],
+                                     stdout=open(os.devnull, "w"),
+                                     stderr=subprocess.STDOUT)
+            else:
+                rc = 0 if _image_contract(path, app) is not None else 1
         except OSError as exc:
             out.append(Result("%s in %s" % (app, sif), "unchecked", str(exc)))
             continue
@@ -153,6 +197,118 @@ def contracts(cluster, pairs):
                               "layer, or point HPCRUN_APP_DIR at a contract on a "
                               "bound filesystem" % target))
     return out
+
+
+_CONTRACTS = {}
+
+
+def _image_contract(path, app):
+    """The text of an image's /container/app.d/<app>/app.yaml, or None.  Read
+    once a run: contracts() and app_requires() both want it."""
+    key = (path, app)
+    if key not in _CONTRACTS:
+        try:
+            text = subprocess.check_output(
+                ["apptainer", "exec", path, "cat", "%s/%s/app.yaml" % (APP_D, app)],
+                stderr=open(os.devnull, "w"))
+            _CONTRACTS[key] = text.decode("utf-8", "replace") or None
+        except subprocess.CalledProcessError:
+            _CONTRACTS[key] = None
+    return _CONTRACTS[key]
+
+
+class ContractError(Exception):
+    """A contract that is there but cannot be read for its requires: block."""
+
+
+def app_requires(cluster, sif, app):
+    """An app's requires: block, from the image's contract, or from this
+    checkout's copy when there is no apptainer to ask.  {} when it states none,
+    None when there is no contract to read.
+
+    Raises ContractError when there is one and it does not parse or fails its
+    schema: its requirements would otherwise be dropped from job.env without a
+    word, and the job would run a GPU app as if it needed nothing."""
+    if app.startswith("/"):
+        return {}
+    text = None
+    path = cluster.image_path(sif)
+    if have_apptainer() and os.path.isfile(path):
+        try:
+            text = _image_contract(path, app)
+        except OSError:
+            text = None
+    if text is not None:
+        where = "%s:%s/%s/app.yaml" % (sif, APP_D, app)
+        try:
+            data = yamlish.loads(text, where)
+        except yamlish.YamlError as exc:
+            raise ContractError(str(exc))
+    else:
+        where = host_contract(app)
+        if where is None:
+            return None
+        try:
+            data = yamlish.load(where)
+        except yamlish.YamlError as exc:
+            raise ContractError(str(exc))
+    problems = contract_problems(data)
+    if problems:
+        raise ContractError("%s: %s" % (where, "; ".join(problems)))
+    return dict(data.get("requires") or {})
+
+
+def requirements(cluster, pairs):
+    """What an app's contract requires of the node type: (results, requires),
+    where requires maps (sif, app) to its requires: block.
+
+    pairs: (sif, app_name).  A GPU app needs the node type's GPUs, and a
+    host_software name needs the cluster's install of it, at the path the
+    image's MPI family selects.  A path a module's variable names is checked by
+    the launcher, where the variable has a value.
+    """
+    from .sitefile import VAR_REF
+    out, found = [], {}
+    software = None
+    for sif, app in sorted(set(pairs)):
+        try:
+            req = app_requires(cluster, sif, app)
+        except ContractError as exc:
+            out.append(Result("%s contract (%s)" % (app, sif), "wrong", str(exc)))
+            continue
+        if req is None:
+            continue                    # contracts() says why
+        found[(sif, app)] = req
+        where = cluster.name + ("/" + cluster.subcluster if cluster.subcluster else "")
+        gpu = req.get("gpu")
+        if gpu:
+            subject = "%s needs a %s GPU" % (app, gpu)
+            if cluster.gpu_vendor != GPU_VENDOR.get(gpu):
+                out.append(Result(subject, "wrong", "%s has %s" % (
+                    where, "%s GPUs" % cluster.gpu_vendor if cluster.gpu_vendor
+                    else "none -- choose a GPU node type with --subcluster")))
+            else:
+                out.append(Result(subject, "ok", "%s x %s"
+                                  % (cluster.gpus_per_node, cluster.gpu_model or gpu)))
+        for name in req.get("host_software") or []:
+            subject = "%s needs host software %s (%s)" % (app, name, sif)
+            if name not in cluster.host_software:
+                out.append(Result(subject, "missing",
+                                  "%s declares no host_software.%s" % (cluster.name, name)))
+                continue
+            if software is None:
+                software = cluster._description().data.get("host_software") or {}
+            spec = (software.get(name) or {}).get("path", "")
+            host = spec.replace("${mpi}", image_mpi(cluster, sif))
+            if VAR_REF.search(host):
+                out.append(Result(subject, "unchecked",
+                                  "%s is expanded in the job, once its module is loaded"
+                                  % host))
+            elif os.path.isdir(host):
+                out.append(Result(subject, "ok", host))
+            else:
+                out.append(Result(subject, "missing", "no such directory: %s" % host))
+    return out, found
 
 
 def host_contract(app):
@@ -168,7 +324,7 @@ def host_contract(app):
     root = os.path.abspath(__file__)
     for _ in range(3):
         root = os.path.dirname(root)
-    path = os.path.join(root, "scripts", "app.d", app, "app.yaml")
+    path = os.path.join(root, "apps", app, "app.d", "app.yaml")
     return path if os.path.isfile(path) else None
 
 
@@ -189,16 +345,30 @@ def app_contracts(names):
         except yamlish.YamlError as exc:
             problems.append("%s: %s" % (path, exc))
             continue
-        for problem in schema_mod.validate(data, "app"):
-            problems.append("%s: %s" % (path, problem))
-        # Cross-field: a primary_fom nothing declares cannot rank anything, and
-        # hpcrun/collect would silently fall back to wall_s.
-        foms = data.get("figures_of_merit") or {}
-        primary = data.get("primary_fom")
-        if primary and primary not in foms:
-            problems.append("%s: primary_fom %r is not in figures_of_merit (%s)"
-                            % (path, primary, ", ".join(sorted(foms)) or "none"))
+        problems.extend("%s: %s" % (path, p) for p in contract_problems(data))
     return seen, problems
+
+
+def contract_problems(data):
+    """What is wrong with one parsed app.yaml: its schema, and the rules
+    between keys that a schema cannot state."""
+    problems = list(schema_mod.validate(data, "app"))
+    # The rules below read keys as mappings, which a schema error may mean
+    # they are not (`requires: cuda`).
+    if problems or not isinstance(data, dict):
+        return problems or ["the contract is not a mapping"]
+    # A primary_fom nothing declares cannot rank anything, and hpcrun/collect
+    # would silently fall back to wall_s.
+    foms = data.get("figures_of_merit") or {}
+    primary = data.get("primary_fom")
+    if primary and primary not in foms:
+        problems.append("primary_fom %r is not in figures_of_merit (%s)"
+                        % (primary, ", ".join(sorted(foms)) or "none"))
+    requires = data.get("requires") or {}
+    if requires.get("gpu_aware_mpi") and not requires.get("gpu"):
+        problems.append("requires.gpu_aware_mpi without requires.gpu: device "
+                        "buffers need a GPU to live on")
+    return problems
 
 
 def missing(results):
@@ -214,9 +384,11 @@ class Preflight(object):
     """
 
     def __init__(self, images, contracts, app_contracts, app_problems,
-                 problems, code):
+                 problems, code, requirements=(), requires=None):
         self.images = images
         self.contracts = contracts
+        self.requirements = list(requirements)
+        self.requires = requires or {}          # (sif, app) -> requires: block
         self.app_contracts = app_contracts      # (app, path) pairs looked at
         self.app_problems = app_problems        # findings from those files
         self.problems = problems
@@ -229,6 +401,8 @@ def preflight(exp, jobs):
     contract_results = contracts(exp.cluster,
                                  [(j.image, j.app["name"]) for j in jobs])
     seen, app_problems = app_contracts(j.app["name"] for j in jobs)
+    req_results, requires = requirements(exp.cluster,
+                                         [(j.image, j.app["name"]) for j in jobs])
 
     # Lowest code wins, so the code names the earliest thing that is wrong --
     # see EXIT CODES in benchlib/__init__.py.
@@ -245,6 +419,13 @@ def preflight(exp, jobs):
         code = EXIT_CONTRACT
     problems += ["app contract missing: %s (%s)" % (r.subject, r.detail)
                  for r in gone]
+    # What the app needs of the node type is a property of where it runs, like
+    # an image built for another target, and fails with the same code.
+    gone = missing(req_results)
+    if gone and code in (EXIT_OK, EXIT_CONTRACT):
+        code = EXIT_IMAGE
+    problems += ["requirement %s: %s (%s)" % (r.state, r.subject, r.detail)
+                 for r in gone]
 
     return Preflight(image_results, contract_results, seen, app_problems,
-                     problems, code)
+                     problems, code, req_results, requires)

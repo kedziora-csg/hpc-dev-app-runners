@@ -90,7 +90,7 @@ HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-}"
 # offered, because they are what this file says it describes rather
 # than something to propose.
 #
-# NCAR Derecho: 2 x AMD EPYC 7763 (Milan) per CPU node, SMT on, HPE Cray EX with Slingshot 11
+# NCAR Derecho: HPE Cray EX with Slingshot 11; AMD EPYC 7763 (Milan) CPU nodes and NVIDIA A100 GPU nodes
 
 #-- identity -------------------------------------------------------------
 HPCRUN_SITE='ncar'
@@ -106,25 +106,53 @@ HPCRUN_CLUSTER='derecho'
 # The job probes lscpu and topology.json carries THAT answer.  These
 # are what can be known before there is a node to ask, which is when
 # an illegal ranks x threads is still cheap to reject.
-[ -n "${HPCRUN_CORES_PER_NODE+set}" ] || HPCRUN_CORES_PER_NODE='128'
-[ -n "${HPCRUN_SMT+set}" ] || HPCRUN_SMT='2'
-[ -n "${HPCRUN_SOCKETS+set}" ] || HPCRUN_SOCKETS='2'
-[ -n "${HPCRUN_SMT_STRIDE+set}" ] || HPCRUN_SMT_STRIDE='128'
-[ -n "${HPCRUN_CORES_PER_L3+set}" ] || HPCRUN_CORES_PER_L3='8'
-[ -n "${HPCRUN_CORES_PER_NUMA+set}" ] || HPCRUN_CORES_PER_NUMA='16'
-[ -n "${HPCRUN_TOPOLOGY_MODE+set}" ] || HPCRUN_TOPOLOGY_MODE='probe'
-
-# How to ask the scheduler for THIS node type.  Appended to the select
-# directive by hpcrun/submit.  Without it a job takes whatever the pool
-# offers, which is how the first Casper run measured hardware this file
-# did not describe.
-[ -n "${HPCRUN_NODE_SELECT+set}" ] || HPCRUN_NODE_SELECT='mem=230GB'
-
-# What this hardware runs, in report_cpu_features' spelling.  Checked
-# against the app binary once at job start: a mismatch costs one line
-# before the first cell instead of a SIGILL on every rank, three hours
-# into a queue, with no output and exit 132.
-[ -n "${HPCRUN_TARGET_ARCH+set}" ] || HPCRUN_TARGET_ARCH='x86-64-v3'
+#
+# One arm per sub-cluster, chosen by HPCRUN_SUBCLUSTER when this file is
+# sourced.  The chosen arm ASSIGNS its geometry rather than offering it:
+# the sub-cluster is the override, and a value inherited from a shell
+# that sourced this file for a different node type would describe the
+# wrong hardware.  Keys an arm does not state are unset, for the same
+# reason.  An unknown name leaves no geometry at all, which every
+# consumer refuses by name.
+HPCRUN_SUBCLUSTERS='a100 cpu'
+[ -n "${HPCRUN_SUBCLUSTER:-}" ] || HPCRUN_SUBCLUSTER='cpu'
+case "${HPCRUN_SUBCLUSTER}" in
+    a100)
+        # 1 x AMD EPYC 7763 (Milan), 64 cores, 4 x NVIDIA A100-SXM4-40GB
+        # UNVERIFIED: no job has run on this node type yet.
+        HPCRUN_CORES_PER_NODE='64'
+        HPCRUN_SMT='2'
+        HPCRUN_SOCKETS='1'
+        HPCRUN_SMT_STRIDE='64'
+        HPCRUN_CORES_PER_L3='8'
+        HPCRUN_CORES_PER_NUMA='16'
+        HPCRUN_TOPOLOGY_MODE='probe'
+        HPCRUN_NODE_SELECT='mem=480GB'
+        HPCRUN_TARGET_ARCH='x86-64-v3'
+        HPCRUN_GPUS_PER_NODE='4'
+        HPCRUN_GPU_VENDOR='nvidia'
+        HPCRUN_GPU_MODEL='a100_40gb'
+        HPCRUN_SUBCLUSTER_VERIFIED='0'
+        unset HPCRUN_NCPUS
+        ;;
+    cpu)
+        # 2 x AMD EPYC 7763 (Milan), 128 cores, SMT on
+        HPCRUN_CORES_PER_NODE='128'
+        HPCRUN_SMT='2'
+        HPCRUN_SOCKETS='2'
+        HPCRUN_SMT_STRIDE='128'
+        HPCRUN_CORES_PER_L3='8'
+        HPCRUN_CORES_PER_NUMA='16'
+        HPCRUN_TOPOLOGY_MODE='probe'
+        HPCRUN_NODE_SELECT='mem=230GB'
+        HPCRUN_TARGET_ARCH='x86-64-v3'
+        HPCRUN_SUBCLUSTER_VERIFIED='1'
+        unset HPCRUN_NCPUS HPCRUN_GPUS_PER_NODE HPCRUN_GPU_VENDOR HPCRUN_GPU_MODEL
+        ;;
+    *)
+        unset HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_NCPUS HPCRUN_TOPOLOGY_MODE HPCRUN_NODE_SELECT HPCRUN_TARGET_ARCH HPCRUN_GPUS_PER_NODE HPCRUN_GPU_VENDOR HPCRUN_GPU_MODEL HPCRUN_SUBCLUSTER_VERIFIED
+        ;;
+esac
 
 #-- the container --------------------------------------------------------
 [ -n "${HPCRUN_CONTAINER_RUNTIME+set}" ] || HPCRUN_CONTAINER_RUNTIME='apptainer'
@@ -132,7 +160,7 @@ HPCRUN_CLUSTER='derecho'
 # Bound only where the directory exists: apptainer treats a missing bind
 # SOURCE as fatal, so an unconditional bind of a filesystem this machine
 # may lack turns 'that mount is absent' into 'the job will not start'.
-[ -n "${HPCRUN_BINDS_IF_PRESENT+set}" ] || HPCRUN_BINDS_IF_PRESENT='/usr/lpp/mmfs'
+[ -n "${HPCRUN_BINDS_IF_PRESENT+set}" ] || HPCRUN_BINDS_IF_PRESENT='/usr/lpp/mmfs /opt/xpmem'
 # host:container pairs, for a directory that must NOT land on top of the
 # container's own tree.
 [ -n "${HPCRUN_BIND_MAP+set}" ] || HPCRUN_BIND_MAP='/usr/lib64:/host_lib64'
@@ -214,9 +242,20 @@ bench_site_mpi_root () {
 # family.  Where a workaround specific to this machine goes.
 bench_site_mpi_env () {
     case "$1" in
-        mpich   ) echo 'MPICH_SMP_SINGLE_COPY_MODE=NONE MPICH_VERSION_DISPLAY=1' ;;
-        mpich3  ) echo 'MPICH_SMP_SINGLE_COPY_MODE=NONE MPICH_VERSION_DISPLAY=1' ;;
+        mpich   ) echo 'MPICH_VERSION_DISPLAY=1' ;;
+        mpich3  ) echo 'MPICH_VERSION_DISPLAY=1' ;;
         openmpi ) echo 'OMPI_MCA_btl_vader_single_copy_mechanism=none UCX_POSIX_USE_PROC_LINK=n' ;;
+        *       ) echo '' ;;
+    esac
+}
+
+# Host libraries the host MPI needs and an image's app is not linked
+# with, preloaded inside the container for every image of this
+# family.  Literal text: a ${NAME} is expanded by the launcher.
+bench_site_mpi_preload () {
+    case "$1" in
+        mpich   ) echo '/opt/xpmem/lib64/libxpmem.so.0' ;;
+        mpich3  ) echo '/opt/xpmem/lib64/libxpmem.so.0' ;;
         *       ) echo '' ;;
     esac
 }
@@ -257,8 +296,9 @@ export HPCRUN_SITE HPCRUN_CLUSTER HPCRUN_SCHEDULER HPCRUN_SUBMIT HPCRUN_QUEUE
 export HPCRUN_CORES_PER_NODE HPCRUN_SMT HPCRUN_TOPOLOGY_MODE
 export HPCRUN_CONTAINER_RUNTIME HPCRUN_BINDS HPCRUN_BINDS_IF_PRESENT
 export HPCRUN_BIND_MAP HPCRUN_LIB_DIRS
+export HPCRUN_SUBCLUSTERS HPCRUN_SUBCLUSTER HPCRUN_SUBCLUSTER_VERIFIED
 export HPCRUN_HOST_LIBRARIES
-export HPCRUN_WALLTIME_MAX HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_TARGET_ARCH HPCRUN_NODE_SELECT
+export HPCRUN_WALLTIME_MAX HPCRUN_SOCKETS HPCRUN_SMT_STRIDE HPCRUN_CORES_PER_L3 HPCRUN_CORES_PER_NUMA HPCRUN_TARGET_ARCH HPCRUN_NODE_SELECT HPCRUN_GPUS_PER_NODE HPCRUN_GPU_VENDOR HPCRUN_GPU_MODEL
 
 #-- paths the top of this file left blank ---------------------------------
 # sites/<site>/<cluster>/ is three levels below the repository root, where

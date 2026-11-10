@@ -144,6 +144,32 @@ app_export_geometry () {
     export HPCRUN_CORES_PER_NUMA="${TOPO_CORES_PER_NUMA}"
     export HPCRUN_SCRATCH="${HPCRUN_SCRATCH:-}"
 
+    # Memory and GPUs, for an app that sizes its problem from them.  Probed;
+    # empty when the probe could not say, and an app that needs one declines.
+    export HPCRUN_MEM_PER_NODE_MB="${TOPO_MEM_PER_NODE_MB:-}"
+    local gpus="${TOPO_GPUS:-${HPCRUN_GPUS_PER_NODE:-0}}"
+    export HPCRUN_GPUS_PER_NODE="${gpus:-0}"
+    # What one rank sees.  lib/gpu_bind.sh gives it one GPU from a list of
+    # UUIDs, which is what PBS sets; it leaves a list of indices, an empty list
+    # (no GPUs) and everything under HPCRUN_GPU_BIND=none as they are, and then
+    # a rank sees the whole list -- every GPU of the node when there is none.
+    local visible="${HPCRUN_GPUS_PER_NODE}" entry uuids=true
+    if [ -n "${CUDA_VISIBLE_DEVICES+set}" ]; then
+        visible=0
+        for entry in ${CUDA_VISIBLE_DEVICES//,/ }; do
+            visible=$(( visible + 1 ))
+            case "${entry}" in GPU-*) ;; *) uuids=false ;; esac
+        done
+    fi
+    if ! [ "${HPCRUN_GPUS_PER_NODE}" -gt 0 ] 2>/dev/null || [ "${visible}" -eq 0 ]; then
+        export HPCRUN_GPUS_PER_RANK=0
+    elif [ "${HPCRUN_GPU_BIND:-numa}" != none ] && [ "${uuids}" = true ]; then
+        export HPCRUN_GPUS_PER_RANK=1
+    else
+        export HPCRUN_GPUS_PER_RANK="${visible}"
+    fi
+    export HPCRUN_GPU_MEM_MB="${TOPO_GPU_MEM_MB:-}"
+
     # Images built before the HPCRUN_ rename carry hooks that read BENCH_*.
     # Delete this once every image in use was built from the renamed hooks.
     local v

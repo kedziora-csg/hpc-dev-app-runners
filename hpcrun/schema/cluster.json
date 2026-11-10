@@ -187,6 +187,34 @@
           ],
           "default": "probe",
           "description": "probe means lscpu on the compute node is the authority and the values above are only a last resort. declared means trust them, which is for a machine where lscpu is not available or not truthful."
+        },
+        "gpus": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "vendor"
+          ],
+          "description": "The GPUs on one node, stated once. hpcrun/submit asks for them in the select chunk (ngpus= on PBS Pro), which is also what steers a job onto this node type rather than onto a node without them. A node type that states none has no GPUs.",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "GPUs per node."
+            },
+            "vendor": {
+              "enum": [
+                "nvidia",
+                "amd"
+              ],
+              "description": "Whose GPUs: what decides how a container is given them, and which GPU runtime an image needs (cuda: nvidia)."
+            },
+            "model": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_]*$",
+              "description": "The GPU, for a person and for run.meta's comparison with what the job found: a100_40gb. Not used to choose anything."
+            }
+          }
         }
       }
     },
@@ -360,6 +388,15 @@
                 }
               }
             },
+            "preload": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^(/|\\$\\{)[A-Za-z0-9_./${}+-]*$"
+              },
+              "description": "Host shared objects the host MPI needs and an app built in an image is not linked with, preloaded inside the container (LD_PRELOAD) for every image of this family, ahead of anything the recipe or a variant preloads. Derecho's libxpmem: Cray's compiler wrappers link it into a native app, and without it Cray MPICH cannot use XPMEM. Absolute paths under a directory container.binds or binds_if_present binds; ${NAME} is allowed for a variable the environment sets. The launcher refuses a family whose file is not there."
+            },
             "notes": {
               "type": "string",
               "description": "Free text. What was checked, and what would make it stop being true."
@@ -417,6 +454,53 @@
         }
       }
     },
+    "host_software": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Software this cluster installs on the host for a container to use, by name: an app's requires.host_software names it, and the launcher binds it into the container for that app's jobs. For software that may not travel in an image -- NVIDIA's HPC-Benchmarks, whose license forbids redistribution -- and for libraries the site maintains, such as the NCCL of its nvhpc module. Declared here, once, because the paths are this machine's; the app names only what it needs. A job's run.meta records each one's name, version and path, and the sha256 of the app's binary, because the image digest no longer says what ran.",
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "description": "One install.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "What it is, which version, and where it came from."
+            },
+            "version": {
+              "type": "string",
+              "description": "Recorded in run.meta with the path."
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(/|\\$\\{)[A-Za-z0-9_./${}+-]*$",
+              "description": "The directory on the host. ${mpi} is the image's MPI family (mpich, mpich3, openmpi), for software built once per MPI ABI; any other ${NAME} is a variable the environment sets, expanded once the host modules are loaded, as mpi.<family>.root is. hpcrun/validate and the launcher refuse a job whose directory is not there."
+            },
+            "mount": {
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9_./+-]*$",
+              "description": "Where it appears inside the container. Omitted, at its own path -- which a container.binds entry may already cover."
+            },
+            "lib_dirs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.+-][A-Za-z0-9_./+-]*$"
+              },
+              "description": "Directories under it, relative, put on LD_LIBRARY_PATH inside the container after the MPI overlay's own and before container.lib_dirs."
+            },
+            "notes": {
+              "type": "string",
+              "description": "Free text: what was checked, and what would make it stop being true."
+            }
+          }
+        }
+      }
+    },
     "cluster": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_-]*$",
@@ -431,7 +515,7 @@
         "^[a-z][a-z0-9_-]*$": {
           "type": "object",
           "additionalProperties": false,
-          "description": "One node type: a description of it, its own node: block, and optionally its own app target.",
+          "description": "One node type: a description of it, its own node: block, and optionally its own images: keys.",
           "properties": {
             "description": {
               "type": "string",
@@ -445,16 +529,12 @@
             "images": {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "target",
-                "march"
-              ],
-              "description": "This node type's app target, replacing the cluster's images.target and images.march: Casper's Genoa nodes get znver4 builds and its Cascade Lake nodes cascadelake ones, from the same portable base. Only the target varies by node type; the OS, compilers, MPI families and apps follow the host's modules and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg) and resolves to the images of the sub-cluster an experiment runs on; hpcrun/validate refuses an image built for another target.",
+              "description": "This node type's images: keys, each replacing the cluster's for this node type alone, key by key; a key it does not state is the cluster's. Casper's Genoa nodes state only their target, znver4, and its Cascade Lake nodes cascadelake, from the same portable base. Derecho's a100 states its GPU, one compiler and its own apps, and takes the cluster's Milan target. The OS and the MPI families follow the host's modules, which are the same on every node type, and stay in the cluster's images: block. An image set keeps the cluster's name (casper-hpcg, derecho) and resolves to the images of the sub-cluster an experiment runs on; a node type that does not run an app has no set for it, and hpcrun/validate refuses an image built for another target.",
               "properties": {
                 "target": {
                   "type": "string",
                   "pattern": "^[a-z0-9][a-z0-9_]*$",
-                  "description": "The microarchitecture this node type's app images are built for, as for the cluster's images.target."
+                  "description": "The microarchitecture this node type's app images are built for, as for the cluster's images.target. Stated with march, or not at all."
                 },
                 "march": {
                   "type": "object",
@@ -462,7 +542,7 @@
                   "required": [
                     "default"
                   ],
-                  "description": "How each compiler family spells target, as for the cluster's images.march; a family must be one the cluster's images.compilers builds.",
+                  "description": "How each compiler family spells target, as for the cluster's images.march; a family must be one this node type builds.",
                   "patternProperties": {
                     "^(default|[a-z][a-z0-9]*)$": {
                       "type": "string",
@@ -470,6 +550,51 @@
                       "description": "The flags, as the compiler takes them."
                     }
                   }
+                },
+                "gpu": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "runtime"
+                  ],
+                  "description": "The GPU the images of this node type are built for. runtime puts the base images on the factory's GPU build of the same OS, compiler and MPI (leap-nvhpc-mpich-cuda) and needs the node's GPUs to be that runtime's vendor. target and arch work as images.target and images.march do for the CPU: the target joins every app image's tag after the CPU target (leap-nvhpc-mpich-cuda-<app>-znver3-sm80), and arch is passed to the app build. Without them device code is built for every major architecture, the base's default, and the name has no GPU word.",
+                  "properties": {
+                    "runtime": {
+                      "enum": [
+                        "cuda"
+                      ],
+                      "description": "The GPU runtime, as the factory's tag spells it."
+                    },
+                    "target": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9_]*$",
+                      "description": "The GPU architecture, named for the architecture: sm80 for the A100. Two node types naming one GPU target must spell its arch identically; hpcrun/sitegen --check refuses otherwise."
+                    },
+                    "arch": {
+                      "type": "string",
+                      "pattern": "^-[A-Za-z0-9=._,+-]+( -[A-Za-z0-9=._,+-]+)*$",
+                      "description": "How the compiler is told target: -arch=sm_80 for nvcc. Required with target, and only with it."
+                    }
+                  }
+                },
+                "compilers": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]*$"
+                  },
+                  "description": "This node type's container compiler tags, replacing the cluster's images.compilers: Derecho's a100 builds nvhpc only. Each must be a key of modules.compiler_map, as for the cluster's."
+                },
+                "apps": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "description": "This node type's apps, replacing the cluster's images.apps: an app that needs a GPU has no business on a CPU node, and HPCG on a GPU node measures the wrong thing. [] is a node type that runs the base set only."
                 }
               }
             },
@@ -534,6 +659,34 @@
                   ],
                   "default": "probe",
                   "description": "probe means lscpu on the compute node is the authority and the values above are only a last resort. declared means trust them, which is for a machine where lscpu is not available or not truthful."
+                },
+                "gpus": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "count",
+                    "vendor"
+                  ],
+                  "description": "The GPUs on one node, stated once. hpcrun/submit asks for them in the select chunk (ngpus= on PBS Pro), which is also what steers a job onto this node type rather than onto a node without them. A node type that states none has no GPUs.",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "GPUs per node."
+                    },
+                    "vendor": {
+                      "enum": [
+                        "nvidia",
+                        "amd"
+                      ],
+                      "description": "Whose GPUs: what decides how a container is given them, and which GPU runtime an image needs (cuda: nvidia)."
+                    },
+                    "model": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9_]*$",
+                      "description": "The GPU, for a person and for run.meta's comparison with what the job found: a100_40gb. Not used to choose anything."
+                    }
+                  }
                 }
               }
             }

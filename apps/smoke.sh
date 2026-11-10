@@ -14,10 +14,13 @@
 # for a problem that small.
 #
 # Passes when the run exits 0, extract prints the app's primary_fom, and the app
-# does not judge its own result invalid.  Nothing here names an app.  An app
-# binary needing AVX-512 on a host without it is not run, and says
-# "run skipped: host lacks the target's ISA"; it exits 0, since that is the
-# host's limit and not the image's fault.
+# does not judge its own result invalid.  Nothing here names an app.  Three
+# things a host may lack are its limit and not the image's fault, so the run is
+# skipped, said so, and exits 0, after the contract is resolved and its prepare
+# and launch hooks have run:
+#     run skipped: host has no GPU                 requires.gpu, and no GPU here
+#     run skipped: host software ... not here      requires.host_software
+#     run skipped: host lacks the target's ISA     an AVX-512 build, say
 #-------------------------------------------------------------------------------
 set -u
 app="${1:?usage: smoke.sh <app> [ranks] [threads]}"
@@ -46,10 +49,78 @@ load_topology "${out}/topology.json"
 export HPCRUN_SCALE=smoke HPCRUN_TARGET_SECONDS=5 OMP_NUM_THREADS="${threads}"
 app_export_geometry "${run}" smoke 1 "${ranks}" "${ranks}" "${threads}"
 
-app_prepare "${run}" || { cat "${run}/prepare.log" 2>/dev/null; fail "prepare declined a ${ranks}x${threads} smoke cell"; }
+# What the contract requires of the host.  The requires: block is nested, which
+# the job never reads (app_contract.sh); this is a test tool, and the two keys
+# it needs are a scalar and a list of names, in block style or flow style
+# (`requires: {gpu: cuda, host_software: [bench]}`).
+requires () {
+    awk -v key="$1" '
+        function emit(v) { gsub(/[][,"\047]/, " ", v); printf "%s ", v }
+        # Flow style: split the braces at top-level commas, and take key: value.
+        /^requires:[[:space:]]*\{/ {
+            body = $0; sub(/^requires:[[:space:]]*\{/, "", body)
+            sub(/[[:space:]]+#.*/, "", body); sub(/\}[[:space:]]*$/, "", body)
+            depth = 0; item = ""
+            for (i = 1; i <= length(body) + 1; i++) {
+                c = (i <= length(body)) ? substr(body, i, 1) : ","
+                if (c == "[") depth++
+                if (c == "]") depth--
+                if (c == "," && depth == 0) {
+                    k = item; sub(/:.*/, "", k); gsub(/[[:space:]]/, "", k)
+                    if (k == key) { v = item; sub(/^[^:]*:/, "", v); emit(v) }
+                    item = ""
+                } else item = item c
+            }
+            exit
+        }
+        /^requires:/ { inside = 1; next }
+        inside && /^[^[:space:]#]/ { inside = 0 }
+        !inside { next }
+        list && /^[[:space:]]+-[[:space:]]/ { sub(/^[[:space:]]+-[[:space:]]*/, ""); sub(/[[:space:]]+#.*/, ""); printf "%s ", $0; next }
+        { list = 0 }
+        $1 == key ":" {
+            sub(/^[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]+#.*/, "")
+            if ($0 == "") { list = 1; next }
+            emit($0)
+        }' "${out}/app.yaml" | tr -s ' ' | sed 's/^ //; s/ $//'
+}
+
+# Whether this host has what the contract needs, found out BEFORE the hooks
+# run: a prepare hook may decline without a GPU's memory to size from, or a
+# launch hook find no binary, and either would otherwise fail the image where
+# the honest answer is that this host cannot run it.  The hooks still run; it
+# is their failure that becomes a skip.
+need_gpu="$(requires gpu)"
+need_sw="$(requires host_software)"
+missing=""
+if [ -n "${need_gpu}" ]; then
+    if [ -x /container/bin/report_gpus ] && /container/bin/report_gpus > "${out}/gpus.txt" 2>&1; then
+        grep -m1 -i 'device\|gpu' "${out}/gpus.txt" | sed 's/^/gpu       /'
+    else
+        missing="host has no GPU (requires.gpu: ${need_gpu})"
+    fi
+fi
+if [ -z "${missing}" ] && [ -n "${need_sw}" ] && [ -n "${APP_BINARY:-}" ] && [ ! -x "${APP_BINARY}" ]; then
+    missing="host software ${need_sw} is not here (${APP_BINARY} comes from the site's install, never the image)"
+fi
+skip () {
+    echo "smoke: ${app}: run skipped: ${missing}${1:+ -- $1}"
+    rm -rf "${out}"
+    exit 0
+}
+
+if ! app_prepare "${run}"; then
+    cat "${run}/prepare.log" 2>/dev/null
+    [ -z "${missing}" ] || skip "prepare declined, as it may without it"
+    fail "prepare declined a ${ranks}x${threads} smoke cell"
+fi
 
 argv="$(app_argv)"
-[ -n "${argv}" ] || fail "neither launch nor binary gave an argv"
+if [ -z "${argv}" ]; then
+    [ -z "${missing}" ] || skip "launch gave no argv, as it may without it"
+    fail "neither launch nor binary gave an argv"
+fi
+[ -z "${missing}" ] || skip
 
 # An image built for a node type's target (znver4, cascadelake) can need AVX-512
 # that the host running this -- a CI runner, often a Zen 3 -- lacks.  The run

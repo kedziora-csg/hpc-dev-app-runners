@@ -130,6 +130,18 @@ def job_env(exp, job, results_dir, profile=None):
         % _sh("true" if exp.defaults["allow_undersubscribed"] else "false"),
     ]
 
+    # What the app's contract requires of the node type, which submit read out
+    # of the image.  The launcher binds the host software and, for an app that
+    # passes device buffers to MPI, turns the MPI's GPU support on.
+    requires = getattr(job, "requires", None) or {}
+    lines += ["",
+              "# The app's requires: block, from its contract in the image.",
+              "HPCRUN_REQUIRES_GPU=%s" % _sh(requires.get("gpu") or ""),
+              "HPCRUN_REQUIRES_GPU_AWARE_MPI=%s"
+              % _sh("true" if requires.get("gpu_aware_mpi") else "false"),
+              "HPCRUN_REQUIRES_HOST_SOFTWARE=%s"
+              % _sh(" ".join(requires.get("host_software") or []))]
+
     app_env = job.app.get("env") or {}
     if app_env:
         lines += ["",
@@ -184,7 +196,8 @@ def job_record(exp, job, results_dir, profile=None):
                 "label": job.app.get("label") or job.app["name"],
                 "args": job.app.get("args", ""),
                 "scale": job.scale, "target_seconds": job.target_seconds,
-                "env": job.app.get("env") or {}},
+                "env": job.app.get("env") or {},
+                "requires": getattr(job, "requires", None) or {}},
         "cells": [{"name": c.name,
                    "ranks_per_node": c.placement["ranks_per_node"],
                    "threads": c.placement["threads"],
@@ -224,7 +237,12 @@ def write(exp, job, results_dir, template_path, account, profile=None):
         # rather than passed as a separate -l, because a resource that chooses
         # a node belongs to the chunk being described: `-l cpu_type=...` on its
         # own is a job-wide resource and does not mean the same thing.
-        "NODE_SELECT": (":" + exp.cluster.node_select) if exp.cluster.node_select else "",
+        # A GPU node type's GPUs go in the same chunk: every node of the job
+        # gets them, and asking for them is what puts the job on such a node.
+        "NODE_SELECT": "".join(":" + clause for clause in (
+            exp.cluster.node_select,
+            "ngpus=%d" % exp.cluster.gpus_per_node if exp.cluster.gpus_per_node else "")
+            if clause),
         # A whole directive line, or nothing at all.  Its own -l because place is
         # job-wide: PBS reads it as how to spread the chunks and who else may
         # share them, which is not something a chunk can say about itself.

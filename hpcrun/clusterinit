@@ -110,7 +110,10 @@ def spider(name):
 
 
 def _version_key(mod):
-    return [int(x) if x.isdigit() else x for x in re.split(r"[./-]", mod.split("/", 1)[-1])]
+    # A name such as openmpi/main sorts before every numbered version, so it is
+    # never taken for the newest, and never compared with an int.
+    return [(1, int(x)) if x.isdigit() else (0, x)
+            for x in re.split(r"[./-]", mod.split("/", 1)[-1])]
 
 
 #-------------------------------------------------------------------------------

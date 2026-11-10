@@ -393,7 +393,11 @@ def rank_cells(pool, metric, better):
         low, median = cell_stat(runs, metric)
         if median is not None:
             scored.append((median, low, len(runs), runs[0]))
-    return sorted(scored, reverse=better.get(metric, "higher") == "higher")
+    # Keyed on the numbers only: two cells that tie on all three -- msg_bytes is
+    # the same in every OSU cell -- would otherwise fall through to comparing
+    # the rows themselves, and dicts do not order.  A tie keeps file order.
+    return sorted(scored, key=lambda s: s[:3],
+                  reverse=better.get(metric, "higher") == "higher")
 
 
 def print_best(rows, metrics, include_failed=False):

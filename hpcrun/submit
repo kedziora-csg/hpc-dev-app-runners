@@ -154,6 +154,21 @@ def main():
             print("    %s -- %s" % (result.subject, result.detail), file=sys.stderr)
         return EXIT_CONTRACT
 
+    # What each app needs of the node type -- its GPUs, the site's install of a
+    # host program -- and what the job must be told of it, since the job reads
+    # no YAML: job.env carries the requires: block, and the launcher acts on it.
+    req_results, requires = checks.requirements(
+        exp.cluster, [(j.image, j.app["name"]) for j in jobs])
+    unmet = checks.missing(req_results)
+    if unmet:
+        print("error: the node type cannot give these apps what they require:",
+              file=sys.stderr)
+        for result in unmet:
+            print("    %s -- %s" % (result.subject, result.detail), file=sys.stderr)
+        return EXIT_IMAGE
+    for job in jobs:
+        job.requires = requires.get((job.image, job.app["name"])) or {}
+
     # Absolute from here on.  This path is written into `#PBS -o` and into
     # job.env's RESULTS_DIR, and the job resolves neither from where you were
     # standing: PBS reads a relative -o against the submission directory, and

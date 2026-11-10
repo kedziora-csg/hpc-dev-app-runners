@@ -90,11 +90,19 @@ Each of these has to come from a person:
   Name it after the CPU (`icelake`, `sapphirerapids`), not the cluster. Spell
   it per compiler: nvhpc takes `-tp=`, the others `-march=`. Read nvhpc's
   spelling from `nvc -help -tp` inside a base image rather than guessing it.
-  With sub-clusters, each node type may state its own
-  (`subclusters.<name>.images: {target, march}`), replacing the cluster's:
-  Casper's Genoa and Cascade Lake nodes get `znver4` and `cascadelake` builds.
-  A cluster target that every node type replaces is refused, because nothing
+  With sub-clusters, each node type may state its own `images:` keys
+  (`target` with `march`, `gpu`, `compilers`, `apps`), each replacing the
+  cluster's for that node type alone: Casper's Genoa and Cascade Lake nodes
+  get `znver4` and `cascadelake` builds, and Derecho's `a100` nodes take the
+  cluster's `znver3` but state their GPU, nvhpc only and their own apps. A
+  cluster target that every node type replaces is refused, because nothing
   would be built for it.
+- **`node.gpus`** -- `{count, vendor, model}` on a node type with GPUs. The
+  job asks for them in its select chunk (`ngpus=` on PBS Pro), which is what
+  puts it on such a node. `images.gpu: {runtime: cuda}` puts that node type on
+  the factory's `-cuda` base images, and is refused on a node without NVIDIA
+  GPUs; `target` and `arch` (`sm80`, `-arch=sm_80`) name and build the device
+  code as `target` and `march` do for the CPU.
 
 A value that every cluster of the site states identically belongs in
 `sites/<site>.yaml` instead. Lists and maps merge with the cluster's, and

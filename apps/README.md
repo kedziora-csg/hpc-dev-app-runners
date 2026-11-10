@@ -48,12 +48,17 @@ builds exactly that list, and `make derecho-hpcg` in `sif/` pulls exactly that
 list. The target is in every app image's tag and `.sif` name --
 `leap-oneapi-mpich-hpcg-znver3` -- because one tag must mean one build.
 
-A cluster of several node types can give each its own target: an entry of
-`subclusters:` may carry `images: {target, march}`, which replaces the
-cluster's for that node type. Casper's do, so `apps/matrix.py casper` lists
-every app image twice, `-znver4` for its Genoa nodes and `-cascadelake` for its
-Cascade Lake ones, and one dispatch builds both. Only targets some node type
-uses are built.
+A cluster of several node types can give each its own images: an entry of
+`subclusters:` may carry `images:` with any of `target` and `march`, `gpu`,
+`compilers` and `apps`, each replacing the cluster's for that node type.
+Casper's state a target, so `apps/matrix.py casper` lists every app image
+twice, `-znver4` for its Genoa nodes and `-cascadelake` for its Cascade Lake
+ones, and one dispatch builds both. Derecho's `a100` states a GPU, so its app
+images are built on the `-cuda` bases and named for both targets --
+`leap-nvhpc-mpich-cuda-<app>-znver3-sm80` -- with the GPU's flags passed beside
+the CPU's: `APP_GPU_ARCH_FLAGS` (`-arch=sm_80`) next to `APP_MARCH_FLAGS`, for
+a `build.sh` that compiles device code to apply. Only what some node type uses
+is built.
 
 **The smoke test on a runner without the target's ISA.** A GitHub-hosted
 runner is often a Zen 3, with no AVX-512. When the app binary needs AVX-512 and
@@ -61,11 +66,15 @@ the runner lacks it, `smoke.sh` resolves the contract and runs its prepare and
 launch hooks, then prints `run skipped: host lacks the target's ISA` and exits
 0 rather than dying with SIGILL; the workflow turns that line into a warning.
 The image's first real run is then its first cluster job, whose architecture
-check is the same test on the right CPU.
+check is the same test on the right CPU. A GPU app (`requires.gpu`) on a runner
+with no GPU is skipped the same way, `run skipped: host has no GPU`, and so is
+one whose binary is the site's install (`requires.host_software`), `run
+skipped: host software ... is not here`.
 
 **What an app image says about itself.** The workflow labels each image
 `hpcdev.app`, `hpcdev.app.version`, `hpcdev.app.yaml.sha256`, `hpcdev.os`,
-`hpcdev.compiler`, `hpcdev.mpi`, `hpcdev.target` and `hpcdev.march`. `apptainer
+`hpcdev.compiler`, `hpcdev.mpi`, `hpcdev.target` and `hpcdev.march`, and
+on a GPU base `hpcdev.gpu`, `hpcdev.gpu_target` and `hpcdev.gpu_arch`. `apptainer
 build` carries them into the `.sif`, and hpcrun's launcher reads the compiler
 and MPI family from them before it falls back to the file name.
 
