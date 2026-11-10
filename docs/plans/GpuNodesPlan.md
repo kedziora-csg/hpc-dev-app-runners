@@ -959,6 +959,22 @@ device, as before) and two `derecho-osu` cells of the gcc14 MPICH image on cpu
   - `collect --best` failed on two cells that tie (every OSU cell has one
     `msg_bytes`) by comparing the rows themselves. Confirmed in jobs
     8128909-11.
+- **From the review of PR #11** (2026-11-10):
+  - `smoke.sh` reads a flow-style `requires: {...}` too, and finds out
+    whether the host has the GPU or host software before the hooks run, so a
+    `prepare` that declines without them is a skip, not a failure;
+  - an image contract that does not parse or fails its schema is refused
+    (exit 5) instead of read as requiring nothing. That needed
+    `built_with_march`, which every app's `build.sh` appends, in the schema;
+  - `contract_problems` stops at schema errors, so `requires: cuda` is exit
+    3, not a traceback;
+  - `gpu_bind` keeps an empty `CUDA_VISIBLE_DEVICES` (no GPUs), and
+    `HPCRUN_GPUS_PER_RANK` counts the list a rank actually sees when the
+    binding leaves it alone (indices, `HPCRUN_GPU_BIND=none`, empty);
+  - the memory probe takes the smallest limit from the job's cgroup up to
+    the root, and a probed `gpus: 0` overrides the profile's count;
+  - every `${NAME}` in an `mpi.<family>.preload` entry is expanded, and a
+    file no site bind exposes is bound by itself.
 - **For the factory:** OSU's `extract` calls the second column of the last
   line `latency_us` whatever the benchmark, so an `osu_bw` cell records MB/s
   as a latency and `collect` ranks it lower-is-better. The metric should be

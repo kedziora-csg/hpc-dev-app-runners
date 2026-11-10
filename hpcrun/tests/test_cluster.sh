@@ -206,6 +206,16 @@ want "memory is the cgroup's limit, and the GPUs with their NUMA domains" \
      "491520 4 NVIDIA_A100-SXM4-40GB 40960 3,2,1,0" "$(probe "${P}")"
 echo 9223372036854771712 > "${P}/sys/fs/cgroup/memory/pbs_jobs.service/jobid/1.desched1/memory.limit_in_bytes"
 want "an unlimited cgroup leaves MemTotal" "515242 4" "$(probe "${P}" | cut -d' ' -f1,2)"
+# cgroup v2, a job step whose own memory.max is `max` under a job that sets
+# one: the job's limit holds, and is what the step may use.
+C2="${TMP}/probe-v2"
+mkdir -p "${C2}/proc/self" "${C2}/sys/fs/cgroup/pbs/job/step"
+cp "${P}/proc/meminfo" "${C2}/proc/"
+printf '0::/pbs/job/step\n' > "${C2}/proc/self/cgroup"
+echo max > "${C2}/sys/fs/cgroup/pbs/job/step/memory.max"
+echo 8589934592 > "${C2}/sys/fs/cgroup/pbs/job/memory.max"
+want "a limit on a parent cgroup holds for its child" "8192" \
+     "$(probe "${C2}" | cut -d' ' -f1)"
 mkdir -p "${TMP}/cpuonly/proc"; cp "${P}/proc/meminfo" "${TMP}/cpuonly/proc/"
 want "a node without GPUs says none" "515242 0 - 0 -" "$(probe "${TMP}/cpuonly")"
 # The geometry the hooks are handed.  One GPU a rank while the runner binds;
@@ -220,6 +230,25 @@ want "the hooks get memory, GPUs a node, GPUs a rank and GPU memory" "491520 4 1
 want "with the binding off a rank sees every GPU" "4 4" \
      "$(geom 'TOPO_GPUS=4 HPCRUN_GPU_BIND=none' | cut -d' ' -f2,3)"
 want "a CPU node: no GPUs, and unknowns are empty" " 0 0 " "$(geom 'TOPO_GPUS=0')"
+# What a rank sees follows CUDA_VISIBLE_DEVICES where gpu_bind leaves it alone.
+want "PBS's UUIDs: the binding gives a rank one" "1" \
+     "$(geom 'TOPO_GPUS=4 CUDA_VISIBLE_DEVICES=GPU-a,GPU-b,GPU-c,GPU-d' | cut -d' ' -f3)"
+want "a list of indices, left as it is: a rank sees all of it" "2" \
+     "$(geom 'TOPO_GPUS=4 CUDA_VISIBLE_DEVICES=2,3' | cut -d' ' -f3)"
+want "with the binding off, the job's list and not the node's count" "2" \
+     "$(geom 'TOPO_GPUS=4 HPCRUN_GPU_BIND=none CUDA_VISIBLE_DEVICES=GPU-a,GPU-b' | cut -d' ' -f3)"
+want "an empty list hides every GPU" "0" \
+     "$(geom 'TOPO_GPUS=4 CUDA_VISIBLE_DEVICES=' | cut -d' ' -f3)"
+# A probe that found no GPUs is believed over a profile that says four.
+mkdir -p "${TMP}/zero" "${TMP}/old"
+printf '{\n  "cores_per_node": 64,\n  "gpus": 0\n}\n' > "${TMP}/zero/topology.json"
+want "a probed 0 GPUs overrides the profile's count" "0" \
+     "$(bash -c ". '${HERE}/../lib/probe_topology.sh'; HPCRUN_GPUS_PER_NODE=4
+                 load_topology '${TMP}/zero/topology.json'; echo \${TOPO_GPUS}")"
+printf '{\n  "cores_per_node": 64\n}\n' > "${TMP}/old/topology.json"
+want "a topology.json without the key keeps the profile's" "4" \
+     "$(bash -c ". '${HERE}/../lib/probe_topology.sh'; HPCRUN_GPUS_PER_NODE=4
+                 load_topology '${TMP}/old/topology.json'; echo \${TOPO_GPUS}")"
 
 #-- a node type with NVIDIA GPUs -----------------------------------------------
 echo
@@ -329,6 +358,24 @@ out="$(run "${mpi_preload}
             make_apptainer_launcher '${TMP}/xm.sh' '${TMP}/fs/image.sif' mpich")"
 want "a family whose preload is missing is refused" 1 "$?"
 
+# Every ${NAME} of an entry, wherever it is; and a file no site bind exposes is
+# bound by itself, or the loader would not find it in the container.
+mkdir -p "${TMP}/elsewhere/v2/lib64"
+: > "${TMP}/elsewhere/v2/lib64/libxpmem.so.0"
+out="$(run "bench_site_mpi_preload () { echo '\${XP_ROOT}/\${XP_VER}/lib64/libxpmem.so.0'; }
+            export XP_ROOT='${TMP}/elsewhere' XP_VER=v2
+            make_apptainer_launcher '${TMP}/xv.sh' '${TMP}/fs/image.sif' mpich && cat '${TMP}/xv.sh'")"
+echo "${out}" | grep -q "^export APPTAINERENV_LD_PRELOAD='${TMP}/elsewhere/v2/lib64/libxpmem.so.0'\"" \
+    && ok "a preload with two \${VAR}s, both expanded" || bad "a \${VAR} was left in the preload" "${out}"
+echo "${out}" | grep -q -- "--bind ${TMP}/elsewhere/v2/lib64/libxpmem.so.0 " \
+    && ok "a preload outside every site bind is bound by itself" \
+    || bad "the uncovered preload was not bound" "${out}"
+out="$(cat '${TMP}/x.sh' 2>/dev/null)"
+case "${out}" in
+    *"--bind ${TMP}/fs/optional/xpmem/libxpmem.so.0"*) bad "a preload under a site bind was bound again" "${out}" ;;
+    *) ok "a preload under a site bind is not bound again" ;;
+esac
+
 #-- host software an app requires, and GPU-aware MPI ----------------------------
 echo
 echo "host software"
@@ -421,6 +468,8 @@ want "another node's UUIDs fall back to this node's GPUs" "CVD=GPU-3" \
      "$(bind 0-15 CUDA_VISIBLE_DEVICES=GPU-elsewhere | tail -1)"
 want "a list of indices is left as it is" "CVD=2,3" \
      "$(bind 0-15 CUDA_VISIBLE_DEVICES=2,3 | tail -1)"
+want "an empty list stays empty, not one GPU" "CVD= hidden" \
+     "$(bind 0-15 CUDA_VISIBLE_DEVICES= | awk '/^host=/ { split($NF, h, "="); w = h[2] } /^CVD=/ { c = $0 } END { print c, w }')"
 want "HPCRUN_GPU_BIND=none leaves the job's list alone" "CVD=GPU-1,GPU-0" \
      "$(bind 0-15 CUDA_VISIBLE_DEVICES=GPU-1,GPU-0 HPCRUN_GPU_BIND=none | tail -1)"
 want "with no GPU on its domain, local rank modulo the job's GPUs" "CVD=GPU-1" \

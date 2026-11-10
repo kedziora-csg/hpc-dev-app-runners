@@ -148,6 +148,7 @@ What an application must declare so the runner can drive it without knowing whic
 | --- | --- | --- | --- | --- |
 | `app` | string | yes | matches `/^[a-z0-9][a-z0-9_-]*$/` | The name the runner is asked for. Must match the app.d directory. |
 | `binary` | string |  |  | Absolute path inside the image. Required unless there is a launch hook, which may pick a different executable and add flags. |
+| `built_with_march` | string |  |  | Not written by hand: an app's build.sh appends the -march= (or -tp=) flags it compiled with to the installed copy, so the image's contract says what tuning its binary has. |
 | [`figures_of_merit`](#appfigures_of_merit) | object |  | no other keys | Ramble's noun, on purpose. Every key that extract may print, plus wall_s which the runner always provides. |
 | `notes` | string |  |  | Free text for whoever reads a results directory a year from now: what the numbers mean, and what would make them not mean it. |
 | `primary_fom` | string |  |  | Which figure of merit decides a comparison. Must name a key in figures_of_merit. Read host-side by hpcrun/collect, from the app.yaml copied into the results directory. |

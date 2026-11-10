@@ -217,10 +217,18 @@ def _image_contract(path, app):
     return _CONTRACTS[key]
 
 
+class ContractError(Exception):
+    """A contract that is there but cannot be read for its requires: block."""
+
+
 def app_requires(cluster, sif, app):
     """An app's requires: block, from the image's contract, or from this
     checkout's copy when there is no apptainer to ask.  {} when it states none,
-    None when there is no contract to read."""
+    None when there is no contract to read.
+
+    Raises ContractError when there is one and it does not parse or fails its
+    schema: its requirements would otherwise be dropped from job.env without a
+    word, and the job would run a GPU app as if it needed nothing."""
     if app.startswith("/"):
         return {}
     text = None
@@ -231,18 +239,22 @@ def app_requires(cluster, sif, app):
         except OSError:
             text = None
     if text is not None:
+        where = "%s:%s/%s/app.yaml" % (sif, APP_D, app)
         try:
-            data = yamlish.loads(text, "%s:%s/%s/app.yaml" % (sif, APP_D, app))
-        except yamlish.YamlError:
-            return None
+            data = yamlish.loads(text, where)
+        except yamlish.YamlError as exc:
+            raise ContractError(str(exc))
     else:
-        local = host_contract(app)
-        if local is None:
+        where = host_contract(app)
+        if where is None:
             return None
         try:
-            data = yamlish.load(local)
-        except yamlish.YamlError:
-            return None
+            data = yamlish.load(where)
+        except yamlish.YamlError as exc:
+            raise ContractError(str(exc))
+    problems = contract_problems(data)
+    if problems:
+        raise ContractError("%s: %s" % (where, "; ".join(problems)))
     return dict(data.get("requires") or {})
 
 
@@ -259,7 +271,11 @@ def requirements(cluster, pairs):
     out, found = [], {}
     software = None
     for sif, app in sorted(set(pairs)):
-        req = app_requires(cluster, sif, app)
+        try:
+            req = app_requires(cluster, sif, app)
+        except ContractError as exc:
+            out.append(Result("%s contract (%s)" % (app, sif), "wrong", str(exc)))
+            continue
         if req is None:
             continue                    # contracts() says why
         found[(sif, app)] = req
@@ -337,6 +353,10 @@ def contract_problems(data):
     """What is wrong with one parsed app.yaml: its schema, and the rules
     between keys that a schema cannot state."""
     problems = list(schema_mod.validate(data, "app"))
+    # The rules below read keys as mappings, which a schema error may mean
+    # they are not (`requires: cuda`).
+    if problems or not isinstance(data, dict):
+        return problems or ["the contract is not a mapping"]
     # A primary_fom nothing declares cannot rank anything, and hpcrun/collect
     # would silently fall back to wall_s.
     foms = data.get("figures_of_merit") or {}

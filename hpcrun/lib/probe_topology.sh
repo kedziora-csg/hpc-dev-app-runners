@@ -110,25 +110,34 @@ _topo_set_fallback () {
 # stands in for nvidia-smi.
 #-------------------------------------------------------------------------------
 
-# MiB: MemTotal, or the job's cgroup limit when that is smaller.  cgroup v1
-# names the memory controller's path; v2 has one unified path, `0::`.
+# MiB: MemTotal, or the smallest cgroup limit on the way from the job's cgroup
+# up to the root, when that is smaller: a limit set on a parent (the job) holds
+# for a child (one step of it) whose own says `max`.  cgroup v1 names the
+# memory controller's path; v2 has one unified path, `0::`.
 _probe_mem_mb () {
-    local root="${HPCRUN_PROBE_ROOT:-}" total limit="" path
+    local root="${HPCRUN_PROBE_ROOT:-}" total limit path base file
     total="$(sed -n 's/^MemTotal:[[:space:]]*\([0-9][0-9]*\) kB.*/\1/p' "${root}/proc/meminfo" 2>/dev/null)"
     [ -n "${total}" ] || { echo 0; return 0; }
     total=$(( total / 1024 ))
     path="$(sed -n 's/^[0-9]*:memory:\(.*\)$/\1/p' "${root}/proc/self/cgroup" 2>/dev/null | head -1)"
     if [ -n "${path}" ]; then
-        limit="$(cat "${root}/sys/fs/cgroup/memory${path%/}/memory.limit_in_bytes" 2>/dev/null)"
+        base="${root}/sys/fs/cgroup/memory" file=memory.limit_in_bytes
     else
         path="$(sed -n 's/^0::\(.*\)$/\1/p' "${root}/proc/self/cgroup" 2>/dev/null | head -1)"
-        [ -n "${path}" ] && limit="$(cat "${root}/sys/fs/cgroup${path%/}/memory.max" 2>/dev/null)"
+        base="${root}/sys/fs/cgroup" file=memory.max
     fi
-    case "${limit}" in
-        ''|max|*[!0-9]*) ;;
-        *) limit=$(( limit / 1048576 ))
-           [ "${limit}" -gt 0 ] && [ "${limit}" -lt "${total}" ] && total="${limit}" ;;
-    esac
+    [ -n "${path}" ] || { echo "${total}"; return 0; }
+    path="${path%/}"
+    while :; do
+        limit="$(cat "${base}${path}/${file}" 2>/dev/null)"
+        case "${limit}" in
+            ''|max|*[!0-9]*) ;;
+            *) limit=$(( limit / 1048576 ))
+               [ "${limit}" -gt 0 ] && [ "${limit}" -lt "${total}" ] && total="${limit}" ;;
+        esac
+        [ -n "${path}" ] || break
+        path="${path%/*}"
+    done
     echo "${total}"
 }
 
@@ -298,7 +307,8 @@ load_topology () {
     # Older topology.json files have none of these; the fallbacks stand.
     local v
     v="$(_topo_num "${f}" mem_per_node_mb)"; [ "${v:-0}" -gt 0 ] && TOPO_MEM_PER_NODE_MB="${v}"
-    v="$(_topo_num "${f}" gpus)";            [ "${v:-0}" -gt 0 ] && TOPO_GPUS="${v}"
+    # A measured 0 is a count, not a missing key: it overrides the profile's.
+    v="$(_topo_num "${f}" gpus)";            [ -n "${v}" ]       && TOPO_GPUS="${v}"
     v="$(_topo_str "${f}" gpu_model)";       [ -n "${v}" ]       && TOPO_GPU_MODEL="${v}"
     v="$(_topo_num "${f}" gpu_mem_mb)";      [ "${v:-0}" -gt 0 ] && TOPO_GPU_MEM_MB="${v}"
     v="$(_topo_str "${f}" gpu_numa)";        [ -n "${v}" ]       && TOPO_GPU_NUMA="${v}"

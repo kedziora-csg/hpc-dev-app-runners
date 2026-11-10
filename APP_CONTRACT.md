@@ -58,9 +58,9 @@ argument-parsing exercise.
 | `HPCRUN_SCALE` | app-defined size class (`smoke`, `node`, `weak`, `strong`) |
 | `HPCRUN_TARGET_SECONDS` | how long the run should aim to take |
 | `HPCRUN_CORES_PER_NODE`, `HPCRUN_CORES_PER_L3`, `HPCRUN_CORES_PER_NUMA` | probed topology, for apps that size inputs from cache or memory |
-| `HPCRUN_MEM_PER_NODE_MB` | memory the job may use on a node: MemTotal, or its cgroup limit when smaller. Empty if unknown |
+| `HPCRUN_MEM_PER_NODE_MB` | memory the job may use on a node: MemTotal, or the smallest cgroup limit on the job's cgroup or any above it. Empty if unknown |
 | `HPCRUN_GPUS_PER_NODE` | GPUs on a node, probed; `0` on a node type without them |
-| `HPCRUN_GPUS_PER_RANK` | GPUs one rank sees: `1` (the runner gives each rank the GPU on its NUMA domain), every GPU of the node with `HPCRUN_GPU_BIND=none`, `0` without GPUs |
+| `HPCRUN_GPUS_PER_RANK` | GPUs one rank sees: `1` (the runner gives each rank the GPU on its NUMA domain); with `HPCRUN_GPU_BIND=none`, or a `CUDA_VISIBLE_DEVICES` of indices rather than UUIDs, the length of that list (every GPU of the node when it is unset); `0` without GPUs or with an empty `CUDA_VISIBLE_DEVICES` |
 | `HPCRUN_GPU_MEM_MB` | one GPU's memory, probed. Empty if unknown |
 | `HPCRUN_SCRATCH` | site scratch, for apps needing large input trees |
 

@@ -167,6 +167,34 @@ _launcher_site_binds () {
     echo "${out}"
 }
 
+# _launcher_expand_vars <text> -- every ${NAME} in it replaced by the
+# environment's value, empty when unset.  Prints the result.  Bounded, so a
+# value that names itself cannot loop.
+_launcher_expand_vars () {
+    local text="$1" var n=0
+    while [ "${n}" -lt 16 ]; do
+        n=$(( n + 1 ))
+        case "${text}" in
+            *'${'*'}'*)
+                var="${text#*\$\{}"; var="${var%%\}*}"
+                text="${text//\$\{${var}\}/${!var:-}}" ;;
+            *) break ;;
+        esac
+    done
+    printf '%s' "${text}"
+}
+
+# _launcher_site_covers <host path> -- 0 when a site bind at its own name puts
+# the path inside the container at the same place.  A host:dest pair does not.
+_launcher_site_covers () {
+    local d
+    for d in ${HPCRUN_BINDS} ${HPCRUN_BINDS_IF_PRESENT}; do
+        case "${d}" in *:*) continue ;; esac
+        case "$1/" in "${d%/}/"*) return 0 ;; esac
+    done
+    return 1
+}
+
 # host_software_resolve <name> <mpi family> -- the install's directory on the
 # host: ${mpi} is the family, and any other ${NAME} is what the environment says
 # now that the host modules are loaded.  Prints why and returns 1 when the
@@ -179,14 +207,7 @@ host_software_resolve () {
         echo "host software '${name}': cluster ${HPCRUN_CLUSTER} declares no host_software.${name}" >&2
         return 1; }
     spec="${spec//\$\{mpi\}/${family}}"
-    while :; do
-        case "${spec}" in
-            *'${'*'}'*)
-                var="${spec#*\$\{}"; var="${var%%\}*}"
-                spec="${spec//\$\{${var}\}/${!var:-}}" ;;
-            *) break ;;
-        esac
-    done
+    spec="$(_launcher_expand_vars "${spec}")"
     [ -d "${spec}" ] || {
         echo "host software '${name}': ${spec} does not exist" >&2
         echo "  (host_software.${name}.path in the cluster's YAML, for MPI family ${family})" >&2
@@ -475,21 +496,20 @@ make_apptainer_launcher () {
     # is one -- Cray's wrappers link it into a native app, and Cray MPICH's
     # XPMEM symbols are weak, so without it single copy falls back to CMA,
     # which the container refuses.  Checked here, because LD_PRELOAD of a
-    # missing file is a warning and the run goes on without it.
-    local entry var mpi_preload=""
+    # missing file is a warning and the run goes on without it -- and for the
+    # same reason a file no site bind exposes is bound by itself, at its own
+    # path.  sitegen checks that only for an entry without ${NAME}.
+    local entry mpi_preload=""
     if command -v bench_site_mpi_preload >/dev/null 2>&1; then
         for entry in $(bench_site_mpi_preload "${family}"); do
-            case "${entry}" in
-                '${'*'}'*)
-                    var="${entry#\$\{}"; var="${var%%\}*}"
-                    entry="${!var:-}${entry#*\}}" ;;
-            esac
+            entry="$(_launcher_expand_vars "${entry}")"
             [ -f "${entry}" ] || {
                 echo "make_apptainer_launcher: mpi.${family}.preload names ${entry},"
                 echo "  which does not exist.  Update the cluster's YAML and run"
                 echo "  hpcrun/sitegen --write."
                 return 1
             }
+            _launcher_site_covers "${entry}" || binds="${binds} --bind ${entry}"
             mpi_preload="${mpi_preload:+${mpi_preload}:}${entry}"
         done
     fi
@@ -500,7 +520,7 @@ make_apptainer_launcher () {
     # when a site bind does not already cover it, with its lib_dirs, under the
     # mount, on the library path.  LAUNCHER_HOST_SOFTWARE says what was bound,
     # for run.meta.
-    local name hs_host hs_mount hs_covered hs_libs="" sub d
+    local name hs_host hs_mount hs_libs="" sub d
     LAUNCHER_HOST_SOFTWARE=""
     for name in ${HPCRUN_REQUIRES_HOST_SOFTWARE:-}; do
         hs_host="$(host_software_resolve "${name}" "${family}")" || return 1
@@ -508,12 +528,8 @@ make_apptainer_launcher () {
         if [ -n "${hs_mount}" ]; then
             binds="${binds} --bind ${hs_host}:${hs_mount}"
         else
-            hs_mount="${hs_host}" hs_covered=false
-            for d in ${HPCRUN_BINDS} ${HPCRUN_BINDS_IF_PRESENT}; do
-                case "${d}" in *:*) continue ;; esac
-                case "${hs_host}/" in "${d%/}/"*) hs_covered=true; break ;; esac
-            done
-            [ "${hs_covered}" = true ] || binds="${binds} --bind ${hs_host}"
+            hs_mount="${hs_host}"
+            _launcher_site_covers "${hs_host}" || binds="${binds} --bind ${hs_host}"
         fi
         for sub in $(bench_site_host_software_lib_dirs "${name}" 2>/dev/null); do
             [ -d "${hs_host}/${sub}" ] && hs_libs="${hs_libs:+${hs_libs}:}${hs_mount}/${sub}"

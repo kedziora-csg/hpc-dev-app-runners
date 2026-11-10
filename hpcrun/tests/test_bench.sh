@@ -118,6 +118,10 @@ want "GPU-aware MPI without a GPU is config-invalid (3)" 3 "$?"
 printf 'app: g\nbinary: /x\nrequires: {gpu: rocm}\n' > "${TMP}/gpu_app.yaml"
 ./validate --app "${TMP}/gpu_app.yaml" >/dev/null 2>&1
 want "a GPU runtime nothing supports is config-invalid (3)" 3 "$?"
+printf 'app: g\nbinary: /x\nrequires: cuda\n' > "${TMP}/gpu_app.yaml"
+out="$(./validate --app "${TMP}/gpu_app.yaml" 2>&1)"
+want "a requires: that is not a mapping is config-invalid (3), not a traceback" \
+    "3 no-traceback" "$? $(case "${out}" in *Traceback*) echo traceback ;; *) echo no-traceback ;; esac)"
 
 #-- the reference is generated, so it cannot be stale or incomplete quietly -----
 echo
@@ -842,6 +846,25 @@ print(states("", [("leap-nvhpc-mpich-cuda.sif", "gpuapp")]),
                         ("leap-nvhpc-mpich-cuda.sif", "nosw"),
                         ("leap-nvhpc-mpich-cuda.sif", "swapp")]), "|",
       checks.requirements(Node("nvidia"), [("x.sif", "gpuapp")])[1][("x.sif", "gpuapp")]["gpu"])' "${TMP}" 2>&1)"
+# An image's contract that does not parse, or fails its schema, is refused:
+# reading it as "requires nothing" would drop a GPU app's requirements.
+want "an image contract that does not parse or fails its schema is wrong" \
+    "wrong wrong ok" \
+    "$(python3 -c 'import os, sys
+sys.path.insert(0, ".")
+from benchlib import checks
+d = sys.argv[1]
+texts = {"broken": "app: [unclosed\n", "badkey": "app: x\nbinary: /x\nrequires: cuda\n",
+         "good": "app: x\nbinary: /x\nrequires: {gpu: cuda}\n"}
+checks.have_apptainer = lambda: True
+checks._image_contract = lambda path, app: texts[app]
+class Node(object):
+    name, subcluster, gpu_vendor, gpus_per_node, gpu_model = "t", "g", "nvidia", 4, "a100"
+    host_software = []
+    def image_path(self, sif):
+        p = os.path.join(d, sif); open(p, "a").close(); return p
+print(" ".join(r.state for r in checks.requirements(Node(),
+      [("a.sif", "broken"), ("a.sif", "badkey"), ("a.sif", "good")])[0]))' "${TMP}" 2>&1)"
 # An app's requires: reach the job, which reads no YAML, through job.env.
 want "job.env carries the requires: block" \
     "HPCRUN_REQUIRES_GPU='cuda' HPCRUN_REQUIRES_GPU_AWARE_MPI='true' HPCRUN_REQUIRES_HOST_SOFTWARE='bench comm'" \

@@ -26,7 +26,8 @@
 # list -- is dropped, and a node left with none falls back to all of its own.
 # Each GPU is identified by UUID and bus ID, never by CUDA index, because CUDA's
 # order is neither PCI's nor NUMA's.  A list of bare indices cannot be mapped
-# without asking CUDA, so it is left exactly as it is.
+# without asking CUDA, so it is left exactly as it is, and so is an empty one,
+# which is CUDA's way of hiding every GPU.
 #
 # Read from /proc/driver/nvidia and /sys, not nvidia-smi: a few small files per
 # rank, where nvidia-smi costs a second each and 128 ranks would queue on it.
@@ -66,6 +67,13 @@ gpu_bind () {
         uuids+=("${uuid}") buses+=("${bus}") numas+=("${numa:--1}")
     done
     [ "${#uuids[@]}" -gt 0 ] || { _gpu_bind_log "" "" "" "" no-gpus; return 0; }
+
+    # Set and empty is CUDA's "no GPUs", and someone asked for it: kept, not
+    # read as unset, which would hand the rank one.
+    if [ -n "${CUDA_VISIBLE_DEVICES+set}" ] && [ -z "${CUDA_VISIBLE_DEVICES}" ]; then
+        _gpu_bind_log "" "" "" "" hidden
+        return 0
+    fi
 
     # The job's GPUs, as indices into the lists above.
     if [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then
